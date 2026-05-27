@@ -1,0 +1,30 @@
+# Database
+ai_friend.db
+ai_friend.db-shm
+ai_friend.db-wal
+*.db
+
+# Config with keys
+config.json
+get_github_cred.ps1
+
+# Runtime
+__pycache__/
+*.pyc
+*.pyo
+.env
+image_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Test files
+test_*.py

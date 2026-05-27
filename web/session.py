@@ -1,0 +1,110 @@
+import uuid
+import logging
+from threading import Lock
+from typing import Optional
+
+from config import Config, load_config
+from core.personality import Personality
+from core.provider import KimiProvider
+from core.agent import Agent
+from memory.short_term import ConversationBuffer
+from memory.long_term import LongTermMemory
+from memory.retrieval import MemoryRetriever
+from memory.consolidation import MemoryConsolidator
+from tools.traits import ToolRegistry
+from tools.memory_tools import RecallTool, RememberTool
+from tools.file_tools import ReadFileTool
+from tools.notify_tool import NotifyTool
+from storage.database import Database
+from storage.repository import Repository
+
+logger = logging.getLogger(__name__)
+
+
+class WebAgent:
+    def __init__(self, config: Config, db: Database, repo: Repository):
+        self.config = config
+        self.db = db
+        self.repo = repo
+        self.personality = Personality.load(config.personality_file)
+        self.ltm = LongTermMemory(repo)
+        self.short_term = ConversationBuffer(maxlen=config.short_term_capacity)
+        self._on_token_callback = None
+
+        self.provider = KimiProvider(
+            endpoint=config.api_endpoint, api_key=config.api_key,
+            model=config.api_model, temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            thinking=config.thinking, reasoning_effort=config.reasoning_effort,
+        )
+
+        def llm_gen(prompt, temperature=0.2):
+            return self.provider.generate([{"role": "user", "content": prompt}], stream=False)
+
+        self.retriever = MemoryRetriever(self.ltm)
+        self.consolidator = MemoryConsolidator(self.ltm, llm_gen)
+
+        registry = ToolRegistry()
+        registry.register(RecallTool(self.retriever, self.ltm))
+        registry.register(RememberTool(self.ltm))
+        registry.register(ReadFileTool())
+        registry.register(NotifyTool())
+        self.tool_registry = registry
+
+        self.agent = Agent(
+            personality=self.personality, provider=self.provider,
+            ltm=self.ltm, retriever=self.retriever,
+            consolidator=self.consolidator, short_term=self.short_term,
+            config=config,
+        )
+        self.agent._tool_registry = registry
+
+    def set_on_token(self, callback):
+        self._on_token_callback = callback
+
+    def process_message(self, user_input: str) -> str:
+        return self.agent.process_message(
+            user_input, on_token=self._on_token_callback,
+        )
+
+    def process_proactive(self) -> str:
+        return self.agent.process_proactive(
+            on_token=self._on_token_callback,
+        )
+
+    @property
+    def emotion(self):
+        return self.personality.emotion.dominant_emotion
+
+    @property
+    def turn_count(self):
+        return self.agent.turn_count
+
+
+class SessionManager:
+    def __init__(self, config: Config):
+        self.config = config
+        self.db = Database(config.db_path)
+        self.repo = Repository(self.db)
+        self._sessions: dict[str, WebAgent] = {}
+        self._lock = Lock()
+
+    def get_or_create(self, session_id: Optional[str] = None) -> tuple[str, WebAgent]:
+        with self._lock:
+            sid = session_id or uuid.uuid4().hex[:12]
+            if sid not in self._sessions:
+                logger.info(f"Creating new session: {sid}")
+                self._sessions[sid] = WebAgent(self.config, self.db, self.repo)
+            return sid, self._sessions[sid]
+
+    def remove(self, session_id: str) -> None:
+        with self._lock:
+            self._sessions.pop(session_id, None)
+            logger.info(f"Session removed: {session_id}")
+
+    def cleanup_old(self, max_sessions: int = 50) -> None:
+        with self._lock:
+            while len(self._sessions) > max_sessions:
+                oldest = next(iter(self._sessions))
+                self._sessions.pop(oldest)
+                logger.info(f"Session evicted: {oldest}")
