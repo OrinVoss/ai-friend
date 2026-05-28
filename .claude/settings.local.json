@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/Users/17040/bin/dreamina.exe --help)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(/c/Users/17040/bin/dreamina.exe --version)",
+      "Bash(/c/Users/17040/bin/dreamina.exe login *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe session *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe query_result -h)",
+      "Bash(/c/Users/17040/bin/dreamina.exe list_task -h)",
+      "Bash(/c/Users/17040/bin/dreamina.exe text2image *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe text2video *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe image2video *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe image2image *)",
+      "Bash(/c/Users/17040/bin/dreamina.exe image_upscale -h)",
+      "Bash(/c/Users/17040/bin/dreamina.exe frames2video *)",
+      "Read(//c/Users/17040/.claude/**)",
+      "Read(//d/.claude/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if 'skill' in k.lower\\(\\)}, indent=2\\)\\)\")",
+      "Bash(dreamina *)"
+    ]
+  }
+}

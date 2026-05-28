@@ -240,6 +240,14 @@ sadness  anticipation  anger  disgust
      → arousal += da × (1 - inertia)
      → joy += delta_joy × (1 - inertia)
 
+3.5. cross_modulate()（交叉调制）
+     → 情绪维度互相制约，防止矛盾状态：
+       anger ×0.6→ joy↓    anger ×0.4→ trust↓
+       sadness ×0.5→ joy↓  sadness ×0.4→ anticipation↓
+       joy ×0.4→ anger↓    joy ×0.3→ sadness↓
+       trust ×0.5→ fear↓   fear ×0.3→ trust↓
+       disgust ×0.4→ joy↓  disgust ×0.3→ trust↓
+
   4. decay()
      → valence → baseline（turn 级快衰减）
      → baseline → mood（小时级慢衰减）

@@ -25,35 +25,35 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9341130034474604,
-    "arousal": 0.32211155917975753,
-    "baseline_valence": 0.9469440487562473,
-    "baseline_arousal": 0.7431129012492481,
+    "valence": -0.5696880897288912,
+    "arousal": 0.8184325077123421,
+    "baseline_valence": -0.3596708477217114,
+    "baseline_arousal": 0.6269415633516098,
     "decay_rate": 0.05,
-    "mood_valence": 1.0,
-    "mood_arousal": 0.6101000000000053,
+    "mood_valence": -0.7439,
+    "mood_arousal": 0.7560000000000003,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "joy": 0.975,
     "trust": 0.975,
-    "fear": 0.1,
-    "surprise": 0.10163774378479272,
-    "sadness": 0.1,
-    "anticipation": 0.5009098576582183,
-    "anger": 0.1,
-    "disgust": 0.1,
+    "fear": 0.3205679383468549,
+    "surprise": 0.48107720779015,
+    "sadness": 0.732843273347166,
+    "anticipation": 0.6462069568688635,
+    "anger": 0.6976007628349317,
+    "disgust": 0.19706006349211283,
     "history": [
+      "anxious",
+      "trusting",
+      "trusting",
       "joyful",
       "joyful",
       "joyful",
       "joyful",
       "joyful",
       "joyful",
-      "joyful",
-      "joyful",
-      "joyful",
-      "joyful"
+      "sad"
     ],
-    "dominant_emotion": "joyful"
+    "dominant_emotion": "sad"
   }
 }
