@@ -81,7 +81,24 @@ class EmotionalState:
         if not scores:
             return "neutral"
 
-        return max(scores, key=scores.get)
+        # Valence-based bias: negative mood amplifies negative emotions
+        negative_emotions = {"angry", "sad", "frustrated", "afraid", "anxious", "disgusted", "melancholy"}
+        positive_emotions = {"joyful", "excited", "content", "trusting", "engaged", "anticipating", "surprised"}
+
+        biased = {}
+        for k, v in scores.items():
+            if self.valence < -0.2 and k in negative_emotions:
+                biased[k] = v * 1.3
+            elif self.valence < -0.2 and k in positive_emotions:
+                biased[k] = v * 0.8
+            elif self.valence > 0.2 and k in positive_emotions:
+                biased[k] = v * 1.1
+            elif self.valence > 0.2 and k in negative_emotions:
+                biased[k] = v * 0.9
+            else:
+                biased[k] = v
+
+        return max(biased, key=biased.get)
 
     def shift(self, delta_v: float, delta_a: float,
               primary_deltas: Optional[dict[str, float]] = None) -> None:
