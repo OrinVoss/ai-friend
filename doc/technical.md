@@ -487,7 +487,7 @@ def contains_fake_action(text):
 
 服务端 → 客户端:
   {"type": "init_ok", "session_id": "xxx", "emotion": "engaged"}
-  {"type": "segment", "content": "你好呀！"}    # 追加到当前气泡
+  {"type": "segment", "content": "你好呀！"}    # 创建独立气泡
   {"type": "done", "content": "...", "emotion": "engaged", "turn": 5}
   {"type": "error", "content": "..."}
   {"type": "pong"}
@@ -500,7 +500,14 @@ response = agent.process_message(content)
     │
     ▼
 _split_segments()
-    │  按 。！？.!?\n 拆分 → 超过 40 字在 ，,；; 再拆 → 合并碎片
+    │  6 级 fallback：
+    │    ① 标点分割（。！？.!?\n，含引号括号尾随）
+    │    ② 逗号拆分（，,；;，40 字以上长段）
+    │    ③ 空格分割
+    │    ④ 语气词分割（啊吗呢了吧么呀哦嘛哇）
+    │    ⑤ 自然停顿（然后/但是/所以… + 了/过/到）
+    │    ⑥ 18 字符硬切（兜底）
+    │  合并 <4 字符的碎片
     ▼
 ["你好呀！", "今天怎么样？", "我这边天气不错。"]
     │
@@ -509,21 +516,26 @@ for i, seg in enumerate(segments):
     if i > 0:
         await asyncio.sleep(_calc_delay(emotion, len(seg)))
     await ws.send({"type": "segment", "content": seg})
+    │  前端每个 segment 创建独立气泡
+    ▼
+await ws.send({"type": "done", ...})
 ```
 
 延迟计算：
 
 ```
-delay = base_speed[emotion] × (1 + seg_len/80) × random(0.8, 1.5)
+delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 ```
 
-| 情绪 | 基础速度 | 短消息 | 长消息 |
-|------|----------|--------|--------|
-| excited | 1.8s | ~2s | ~3.5s |
-| engaged | 3.0s | ~3s | ~7.5s |
-| neutral | 4.0s | ~6s | ~9s |
-| melancholy | 5.0s | ~4.5s | ~11.5s |
-| sad | 6.0s | ~5s | ~15s |
+| 情绪 | 基础延时 | 典型 20 字段约 |
+|------|----------|---------------|
+| excited / surprised | 0.7~0.8s | ~1.0~1.3s |
+| joyful / anticipating | 0.9s | ~1.2~1.6s |
+| engaged | 1.3s | ~1.6~2.3s |
+| content | 1.5s | ~1.9~2.6s |
+| neutral | 1.7s | ~2.1~3.0s |
+| melancholy | 2.2s | ~2.7~3.9s |
+| sad | 2.5s | ~3.1~4.4s |
 
 ### 7.4 主动对话后台
 

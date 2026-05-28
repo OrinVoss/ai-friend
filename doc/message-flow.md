@@ -23,7 +23,7 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 |------|-----|-----|
 | 等待输入 | 守护线程读 stdin → Queue | WebSocket 协程等待 receive_text() |
 | 处理消息 | 状态机 _on_think → _on_act → _on_reflect | 直接调 process_message() → _react_loop() |
-| 输出 | 打字机效果逐字打印 | 全量获取 → 后端分段推送 |
+| 输出 | 打字机效果逐字打印 | 全量获取 → 6 级分段 → 独立气泡推送 |
 | 主动对话 | IDLE 状态内轮询 | asyncio.create_task(_proactive_loop) |
 | 空闲检测 | time.sleep(0.1) 轮询 | await asyncio.sleep(5/15) 协程睡眠 |
 
@@ -163,7 +163,7 @@ THINK 可能执行多次（ReAct 循环），每次的流程相同：
     │                                          │
     │ ④ SSE 流式解析                            │
     │    CLI: on_token() → 打印到终端            │
-    │    Web: 全量获取 → 后端分段推送            │
+    │    Web: 全量获取 → 6 级分段 → 独立气泡     │
     │                                          │
     │ ⑤ parse_tool_calls()                     │
     │    检查 <tool_call> 标签                   │
@@ -208,9 +208,14 @@ response = agent.process_message(content)
     │
     ▼
 _split_segments(response)
-    │  按 。！？.!?\n 拆分
-    │  超过 40 字在 ，,；; 再拆
-    │  合并碎片化短句
+    │  6 级 fallback：
+    │    ① 标点（。！？.!?\n，含引号括号尾随）
+    │    ② 逗号（，,；;，40 字以上长段）
+    │    ③ 空格
+    │    ④ 语气词（啊吗呢了吧么呀哦嘛哇）
+    │    ⑤ 自然停顿（然后/但是/所以… + 了/过/到）
+    │    ⑥ 18 字符硬切（兜底）
+    │  合并 <4 字符的碎片
     ▼
 ["你好呀！", "今天怎么样？", "我这边天气不错。"]
     │
@@ -221,27 +226,29 @@ for i, seg in enumerate(segments):
     await ws.send({"type": "segment", "content": seg})
     │
     ▼
-前端 JS: segment 事件 → 追加到当前 assistant 气泡
+前端 JS: 每个 segment 创建独立 assistant 气泡
     ▼
 await ws.send({"type": "done", "emotion": "engaged", "turn": 5})
 ```
 
+客户端 REST fallback 时 `splitSegments()` 使用相同 6 级策略，`setTimeout` 模拟分段延时。
+
 **延迟计算公式**：
 
 ```
-delay = base_speed[emotion] × (1 + seg_len/80) × random(0.8, 1.5)
+delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 ```
 
-| 情绪 | 基础速度 |
+| 情绪 | 基础延时 |
 |------|----------|
-| excited / surprised | 1.8s |
-| joyful / anticipating | 2.0s |
-| trusting | 2.5s |
-| engaged | 3.0s |
-| content | 3.5s |
-| neutral | 4.0s |
-| melancholy | 5.0s |
-| sad | 6.0s |
+| excited / surprised | 0.7~0.8s |
+| joyful / anticipating | 0.9s |
+| trusting | 1.1s |
+| engaged | 1.3s |
+| content | 1.5s |
+| neutral | 1.7s |
+| melancholy | 2.2s |
+| sad | 2.5s |
 
 ---
 
@@ -322,7 +329,7 @@ delay = base_speed[emotion] × (1 + seg_len/80) × random(0.8, 1.5)
 ┌──────────────────────────────────────────────────────────────┐
 │  ACT（无 tool_call）                                          │
 │  CLI: 已在 THINK 流式打印，只做存储                             │
-│  Web: _split_segments → _calc_delay → 逐条推 WebSocket        │
+│  Web: _split_segments (6 级) → _calc_delay → 独立气泡推送     │
 └──────────────────────────────────────────────────────────────┘
     │
     ▼
