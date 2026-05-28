@@ -125,11 +125,13 @@ async def _send_segments(websocket: WebSocket, agent, response: str, emotion: st
 
 
 async def _proactive_loop(websocket: WebSocket, session_id: str):
+    cooldown = 0
     while True:
         try:
             _, agent = session_manager.get_or_create(session_id)
             idle = time.time() - agent.agent.last_activity_time
-            if idle < config.proactive_min_idle:
+            if idle < config.proactive_min_idle or cooldown > 0:
+                cooldown = max(0, cooldown - 1)
                 await asyncio.sleep(5)
                 continue
             score = agent.agent._calculate_proactivity(idle)
@@ -137,6 +139,8 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(None, agent.process_proactive)
                 if response:
+                    agent.agent.last_activity_time = time.time()
+                    cooldown = 12  # ~3 min cooldown after proactive message
                     await _send_segments(websocket, agent, response, agent.emotion)
             await asyncio.sleep(15)
         except asyncio.CancelledError:

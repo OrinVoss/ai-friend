@@ -116,7 +116,7 @@ class Agent:
         user_msg = f"用户输入：{user_input}"
         if estimate_tokens(str(messages)) + estimate_tokens(user_msg) <= COMPRESS_THRESHOLD:
             messages.append({"role": "user", "content": user_msg})
-        return self._react_loop(messages, on_token)
+        return self._react_loop(messages, on_token, add_to_history=True)
 
     def process_proactive(self, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -136,9 +136,9 @@ class Agent:
                 break
             messages.insert(1, {"role": role, "content": t.content})
         messages.append({"role": "user", "content": f"[主动开启对话] 主题方向：{topic}"})
-        return self._react_loop(messages, on_token)
+        return self._react_loop(messages, on_token, add_to_history=False)
 
-    def _react_loop(self, messages: list[dict], on_token=None) -> str:
+    def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
@@ -157,7 +157,8 @@ class Agent:
             messages.append({"role": "user", "content": format_tool_results(results)})
 
         if final_text:
-            self.short_term.add_turn("assistant", final_text)
+            if add_to_history:
+                self.short_term.add_turn("assistant", final_text)
             self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text, str(self.personality.emotion.to_dict()))
             self.turn_count += 1
         # Analyze USER input sentiment (not AI response), track consecutive hurt
