@@ -1,0 +1,5 @@
+requests==2.34.2
+tiktoken==0.13.0
+plyer==2.1.0
+fastapi==0.111.0
+uvicorn==0.30.1
