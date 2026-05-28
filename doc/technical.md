@@ -254,7 +254,33 @@ sadness  anticipation  anger  disgust
      → 基础情绪 → 中性
 ```
 
-### 3.3 情绪标签映射
+### 3.3 分速衰减
+
+不同情绪维度使用独立半衰期（单位：对话轮次）：
+
+| 情绪 | 半衰期 | 每 turn 衰减率 |
+|------|--------|---------------|
+| surprise | 3 | 0.206 |
+| fear | 6 | 0.109 |
+| anticipation | 8 | 0.083 |
+| disgust | 10 | 0.067 |
+| joy | 12 | 0.056 |
+| anger | 15 | 0.045 |
+| sadness | 20 | 0.034 |
+| trust | 25 | 0.027 |
+
+### 3.4 怨恨残留
+
+- anger > 0.6 触发累积，3%/turn 衰减
+- 增强 anger 对 joy/trust 的压制（cross_modulate）
+- joy 上限锁定：`joy_ceiling = 1.0 - resentment * 0.5`
+- 减慢 anger/sadness decay
+
+### 3.5 情绪事件记忆
+
+强情绪触发时自动记录（trigger/emotion/intensity），最近 3 条注入 prompt。AI 现在"记得为什么生气"。
+
+### 3.6 情绪标签映射
 
 ```
 valence/arousal 映射：
