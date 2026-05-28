@@ -1,5 +1,3 @@
-"""OpenAI-compatible API provider (DeepSeek, etc.)"""
-
 import json
 import time
 import logging
@@ -30,7 +28,8 @@ class KimiProvider:
 
     def generate(self, messages: list[dict],
                  stream: bool = True,
-                 on_token: Optional[callable] = None) -> str:
+                 on_token: Optional[callable] = None,
+                 max_tokens: Optional[int] = None) -> str:
         chat_url = f"{self.endpoint}/v1/chat/completions"
 
         payload = {
@@ -38,7 +37,7 @@ class KimiProvider:
             "messages": messages,
             "stream": stream,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
         }
 
         if self.reasoning_effort:
@@ -82,12 +81,10 @@ class KimiProvider:
         )
         resp.raise_for_status()
 
-        # Non-streaming: response is a single JSON object
         if not stream:
             data = resp.json()
             return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
-        # Streaming: parse SSE lines
         full_response = []
         for line in resp.iter_lines(decode_unicode=True):
             if not line:

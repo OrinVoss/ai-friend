@@ -1,9 +1,11 @@
 # Database
 data/
+*.db
+*.db-shm
+*.db-wal
 
 # Config with keys
 config.json
-get_github_cred.ps1
 
 # Runtime
 __pycache__/

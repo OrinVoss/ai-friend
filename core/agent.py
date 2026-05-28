@@ -82,7 +82,17 @@ class Agent:
         self._max_tool_iterations: int = 5
         self._tool_registry: ToolRegistry | None = None
 
-    # ── Web mode methods ──
+    def _max_tokens_for_emotion(self) -> int:
+        base = self.config.max_tokens
+        mapping = {
+            "excited": 768, "joyful": 768, "surprised": 700,
+            "engaged": base, "content": base, "trusting": base, "anticipating": base,
+            "neutral": base,
+            "anxious": 300, "afraid": 300,
+            "melancholy": 256, "sad": 256,
+            "frustrated": 256, "angry": 256, "disgusted": 256,
+        }
+        return mapping.get(self.personality.emotion.dominant_emotion, base)
 
     def process_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -128,10 +138,14 @@ class Agent:
 
     def _react_loop(self, messages: list[dict], on_token=None) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
+        max_tok = self._max_tokens_for_emotion()
         final_text = ""
         for _ in range(self._max_tool_iterations):
-            resp = self.provider.generate(messages, stream=False if _ > 0 else True,
-                                          on_token=on_token if _ == 0 else None)
+            resp = self.provider.generate(
+                messages, stream=False if _ > 0 else True,
+                on_token=on_token if _ == 0 else None,
+                max_tokens=max_tok if _ == 0 else 128,
+            )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
                 final_text = cleaned
@@ -144,7 +158,6 @@ class Agent:
             self.short_term.add_turn("assistant", final_text)
             self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text, str(self.personality.emotion.to_dict()))
             self.turn_count += 1
-
         sentiment, sharing, energy = 0.1, False, 0.5
         try:
             sentiment, sharing, energy = self.consolidator.analyze_sentiment(final_text or "")
@@ -161,14 +174,12 @@ class Agent:
             self.personality.save(self.config.personality_file)
         return final_text
 
-    # ── CLI run loop (unchanged) ──
+    # ── CLI run loop ──
 
     def run(self) -> None:
         if self.ui:
             self.ui.start()
             self.ui.display_banner(self.personality.config.name)
-        else:
-            print(f"\n=== {self.personality.config.name} ===\n")
         self.state = AgentState.BOOT
         self._on_boot()
         while self._running and self.state != AgentState.SHUTDOWN:
@@ -183,7 +194,6 @@ class Agent:
                 if handler:
                     handler()
             except KeyboardInterrupt:
-                logger.info("KeyboardInterrupt received, shutting down...")
                 self.state = AgentState.SHUTDOWN
             except Exception as e:
                 logger.error(f"Error in state {self.state}: {e}", exc_info=True)
@@ -196,8 +206,7 @@ class Agent:
     def _on_boot(self) -> None:
         greeting = self.personality.config.first_run_greeting
         if not greeting:
-            name = self.personality.config.name
-            greeting = f"你好呀！我是{name}，很高兴认识你~ 我们可以随便聊聊，你有什么想说的吗？"
+            greeting = f"你好呀！我是{self.personality.config.name}，很高兴认识你~"
         if self.ui:
             self.ui.display.respond(greeting, prefix=self.personality.config.name)
         self.state = AgentState.IDLE
@@ -213,9 +222,7 @@ class Agent:
             return
         idle_duration = time.time() - self.last_activity_time
         if idle_duration > self.config.proactive_min_idle:
-            proactivity_score = self._calculate_proactivity(idle_duration)
-            if random.random() < proactivity_score:
-                logger.info(f"Proactive trigger (score={proactivity_score:.2f})")
+            if random.random() < self._calculate_proactivity(idle_duration):
                 self.current_input = None
                 self.state = AgentState.THINK
                 return
@@ -230,9 +237,7 @@ class Agent:
             return
         self.short_term.add_turn("user", user_input)
         self.current_memory_context = self.retriever.retrieve_for_query(user_input)
-        emotion_json = self.personality.emotion.to_dict()
-        self.ltm.repo.insert_turn(self.turn_count, "user", user_input, str(emotion_json))
-        logger.info(f"Turn {self.turn_count}: user input ({len(user_input)} chars)")
+        self.ltm.repo.insert_turn(self.turn_count, "user", user_input, str(self.personality.emotion.to_dict()))
         self.state = AgentState.THINK
 
     def _on_think(self) -> None:
@@ -241,35 +246,31 @@ class Agent:
         if self._react_messages is None:
             if is_proactive:
                 self.current_memory_context = self.retriever.retrieve_for_query("")
-                proactive_topic = self._pick_proactive_topic()
-                user_message = f"[主动开启对话] 主题方向：{proactive_topic}"
+                user_message = f"[主动开启对话] 主题方向：{self._pick_proactive_topic()}"
             else:
                 user_message = f"用户输入：{self.current_input or ''}"
-            conversation_history = self.short_term.format_for_prompt(max_chars=3000)
-            system_prompt = build_system_prompt(
+            sys_prompt = build_system_prompt(
                 personality=self.personality.config, emotion=self.personality.emotion,
                 memory_context=self.current_memory_context,
-                conversation_history=conversation_history,
-                is_proactive=is_proactive,
-                compressed_summary=self._compressed_summary, tools=self._tool_registry,
+                conversation_history=self.short_term.format_for_prompt(max_chars=3000),
+                is_proactive=is_proactive, compressed_summary=self._compressed_summary,
+                tools=self._tool_registry,
             )
-            messages = [{"role": "system", "content": system_prompt}]
-            self._estimated_tokens_used = estimate_tokens(system_prompt)
+            messages = [{"role": "system", "content": sys_prompt}]
+            self._estimated_tokens_used = estimate_tokens(sys_prompt)
             for t in reversed(self.short_term.get_all()):
                 role = "assistant" if t.role == "assistant" else "user"
-                msg = {"role": role, "content": t.content}
                 msg_tokens = estimate_tokens(t.content)
                 if self._estimated_tokens_used + msg_tokens > COMPRESS_THRESHOLD:
                     break
-                messages.append(msg)
+                messages.append({"role": role, "content": t.content})
                 self._estimated_tokens_used += msg_tokens
             messages = [messages[0]] + list(reversed(messages[1:]))
             if not is_proactive:
                 user_msg = {"role": "user", "content": user_message}
-                user_tokens = estimate_tokens(user_message)
-                if self._estimated_tokens_used + user_tokens <= COMPRESS_THRESHOLD:
+                if self._estimated_tokens_used + estimate_tokens(user_message) <= COMPRESS_THRESHOLD:
                     messages.append(user_msg)
-                    self._estimated_tokens_used += user_tokens
+                    self._estimated_tokens_used += estimate_tokens(user_message)
                 else:
                     self._compress_context(messages)
             self._react_messages = messages
@@ -277,12 +278,12 @@ class Agent:
         else:
             messages = self._react_messages
         self._prompt_shown = False
-        is_tool_iteration = self._react_iteration > 0
-        if is_tool_iteration:
+        max_tok = self._max_tokens_for_emotion()
+        if self._react_iteration > 0:
             if self.ui:
                 self.ui.display.print_system(f"思考中... (第{self._react_iteration}轮)")
             try:
-                full_response = self.provider.generate(messages, stream=False)
+                full_response = self.provider.generate(messages, stream=False, max_tokens=128)
             except ConnectionError as e:
                 if self.ui:
                     self.ui.display.print_error(f"网络连接失败：{e}")
@@ -294,17 +295,16 @@ class Agent:
                 self.ui.display.show_thinking()
             accumulated = []
             stream_done = False
-            def on_token(token: str) -> None:
-                if token and not stream_done:
-                    if not accumulated:
-                        if self.ui:
-                            print("\r", end="", flush=True)
-                            print(f"\033[1;36m{self.personality.config.name}:\033[0m ", end="", flush=True)
-                    accumulated.append(token)
+            def on_token(tok: str) -> None:
+                if tok and not stream_done:
+                    if not accumulated and self.ui:
+                        print("\r", end="", flush=True)
+                        print(f"\033[1;36m{self.personality.config.name}:\033[0m ", end="", flush=True)
+                    accumulated.append(tok)
                     if self.ui:
-                        print(token, end="", flush=True)
+                        print(tok, end="", flush=True)
             try:
-                full_response = self.provider.generate(messages, stream=True, on_token=on_token)
+                full_response = self.provider.generate(messages, stream=True, on_token=on_token, max_tokens=max_tok)
             except ConnectionError as e:
                 if self.ui:
                     self.ui.display.print_error(f"网络连接失败：{e}")
@@ -336,27 +336,18 @@ class Agent:
             result_text = format_tool_results(results)
             if self._react_messages is not None:
                 self._react_messages.append({"role": "user", "content": result_text})
-            no_valid_tool = all(not r["success"] for r in results)
-            fake = contains_fake_action(self.current_response) and no_valid_tool
-            if fake and self._react_iteration < self._max_tool_iterations:
-                self._react_messages.append({
-                    "role": "user",
-                    "content": "你刚才说自己已经执行了操作，但没有成功调用任何工具。如果需要执行操作，请使用 <tool_call> 调用对应的工具。如果不需要工具，直接回复用户即可。",
-                })
+            if all(not r["success"] for r in results) and contains_fake_action(self.current_response):
+                self._react_messages.append({"role": "user", "content": "你刚才说自己已经执行了操作，但没有成功调用任何工具。如果需要执行操作，请使用 <tool_call> 调用对应的工具。如果不需要工具，直接回复用户即可。"})
             self.state = AgentState.THINK
             return
         self._finish_react_response()
 
     def _finish_react_response(self) -> None:
-        response = self.current_response
-        if response:
-            if self._react_iteration <= 1:
-                pass
-            else:
-                if self.ui:
-                    self.ui.display.respond(response, prefix=self.personality.config.name)
-            self.short_term.add_turn("assistant", response)
-            self.ltm.repo.insert_turn(self.turn_count, "assistant", response, str(self.personality.emotion.to_dict()))
+        if self.current_response:
+            if self._react_iteration > 1 and self.ui:
+                self.ui.display.respond(self.current_response, prefix=self.personality.config.name)
+            self.short_term.add_turn("assistant", self.current_response)
+            self.ltm.repo.insert_turn(self.turn_count, "assistant", self.current_response, str(self.personality.emotion.to_dict()))
             self.turn_count += 1
             self.last_activity_time = time.time()
         self._reset_react()
@@ -369,17 +360,15 @@ class Agent:
 
     def _on_reflect(self) -> None:
         if self.current_response:
-            sentiment = 0.1
-            personal_sharing = False
-            topic_energy = 0.5
+            sentiment, sharing, energy = 0.1, False, 0.5
             if self.short_term.get_all():
-                last_user = self.short_term.get_all()[-1]
-                if last_user.role == "user":
-                    sentiment, personal_sharing, topic_energy = self.consolidator.analyze_sentiment(last_user.content)
-            self.personality.apply_emotional_shift(sentiment, personal_sharing, topic_energy)
-        emotional_intensity = abs(self.personality.emotion.valence)
-        idle_duration = time.time() - self.last_activity_time
-        if self.consolidator.should_consolidate(self.turn_count, emotional_intensity, idle_duration, self.config):
+                last = self.short_term.get_all()[-1]
+                if last.role == "user":
+                    sentiment, sharing, energy = self.consolidator.analyze_sentiment(last.content)
+            self.personality.apply_emotional_shift(sentiment, sharing, energy)
+        ei = abs(self.personality.emotion.valence)
+        idle = time.time() - self.last_activity_time
+        if self.consolidator.should_consolidate(self.turn_count, ei, idle, self.config):
             self.consolidator.consolidate(self.short_term, self.personality,
                                           max_facts=self.config.max_facts,
                                           max_experiences=self.config.max_experiences,
@@ -392,18 +381,16 @@ class Agent:
         self.state = AgentState.IDLE
 
     def _on_shutdown(self) -> None:
-        if hasattr(self, 'consolidator'):
-            self.consolidator.consolidate(self.short_term, self.personality,
-                                          max_facts=self.config.max_facts,
-                                          max_experiences=self.config.max_experiences,
-                                          max_reflections=self.config.max_reflections)
+        self.consolidator.consolidate(self.short_term, self.personality,
+                                      max_facts=self.config.max_facts,
+                                      max_experiences=self.config.max_experiences,
+                                      max_reflections=self.config.max_reflections)
         self.personality.save(self.config.personality_file)
         if self.ui:
             self.ui.stop()
         print(f"\n\033[1;36m{self.personality.config.name} 记下了你们的对话。下次见~\033[0m")
 
     def _handle_command(self, cmd: str) -> None:
-        cmd = cmd.strip().lower()
         if cmd in ("/exit", "/quit"):
             self._running = False
         elif cmd == "/save":
@@ -414,28 +401,22 @@ class Agent:
             self.personality.save(self.config.personality_file)
             if self.ui:
                 self.ui.display.print_system("记忆已保存")
-        elif cmd == "/mood":
-            if self.ui:
-                e = self.personality.emotion
-                self.ui.display.print_mood(f"{e.dominant_emotion} (valence={e.valence:.2f}, arousal={e.arousal:.2f})")
-        elif cmd == "/status":
+        elif cmd == "/mood" and self.ui:
+            e = self.personality.emotion
+            self.ui.display.print_mood(f"{e.dominant_emotion} (v={e.valence:.2f} a={e.arousal:.2f})")
+        elif cmd == "/status" and self.ui:
             rel = self.ltm.get_relationship()
-            facts = self.ltm.get_all_active_facts()
-            exps = self.ltm.get_recent_experiences(5)
-            if self.ui:
-                self.ui.display.print_system(f"对话轮次: {self.turn_count} | 记忆事实: {len(facts)} | 共享体验: {len(exps)}")
-                for dim, val in rel.items():
-                    self.ui.display.print_system(f"  关系 {dim}: {val:.2f}")
+            self.ui.display.print_system(f"轮次: {self.turn_count} | 事实: {len(self.ltm.get_all_active_facts())}")
+            for k, v in rel.items():
+                self.ui.display.print_system(f"  {k}: {v:.2f}")
         elif cmd == "/forget":
             self.short_term.clear()
             if self.ui:
                 self.ui.display.print_system("短期记忆已清除")
-        elif cmd == "/help":
-            if self.ui:
-                self.ui.display_help()
-        else:
-            if self.ui:
-                self.ui.display.print_system(f"未知命令: {cmd}")
+        elif cmd == "/help" and self.ui:
+            self.ui.display_help()
+        elif self.ui:
+            self.ui.display.print_system(f"未知命令: {cmd}")
 
     def _calculate_proactivity(self, idle_duration: float) -> float:
         base = min(0.3, idle_duration / 600.0)
@@ -446,34 +427,28 @@ class Agent:
         if e.dominant_emotion in ("melancholy", "sad", "frustrated", "afraid"):
             emotion_mod -= 0.15
         rel = self.ltm.get_relationship()
-        intimacy_mod = rel.get("intimacy", 0.3) * 0.15
-        familiarity_mod = min(rel.get("familiarity", 0.3) * 0.1, 0.1)
-        recent_turns = self.short_term.get_recent(6)
-        user_turns = [t for t in recent_turns if t.role == "user"][-3:]
+        intimacy_mod = rel.get("intimacy", 0.3) * 0.15 + min(rel.get("familiarity", 0.3) * 0.1, 0.1)
+        user_turns = [t for t in self.short_term.get_recent(6) if t.role == "user"][-3:]
         sentiment_mod = 0.0
         if user_turns:
             last = user_turns[-1].content
             if any(kw in last for kw in ["烦", "滚", "生气", "讨厌", "别烦", "不想", "别吵"]):
                 sentiment_mod = -0.3
-            if any(kw in last for kw in ["哈哈", "开心", "好看", "棒", "不错", "喜欢", "好"]):
+            elif any(kw in last for kw in ["哈哈", "开心", "好看", "棒", "不错", "喜欢", "好"]):
                 sentiment_mod = 0.1
-        goodbye_count = sum(1 for t in recent_turns if any(kw in t.content for kw in ["拜拜", "再见", "bye", "下次", "睡了", "晚安"]))
-        goodbye_penalty = min(goodbye_count * 0.15, 0.3)
-        short_count = sum(1 for t in user_turns if len(t.content) < 8)
-        short_penalty = min(short_count * 0.08, 0.2)
-        score = base + time_mod + emotion_mod + intimacy_mod + familiarity_mod + sentiment_mod - goodbye_penalty - short_penalty
+        goodbye = sum(1 for t in self.short_term.get_recent(6) if any(kw in t.content for kw in ["拜拜", "再见", "bye", "下次", "睡了", "晚安"]))
+        short_c = sum(1 for t in user_turns if len(t.content) < 8)
+        score = base + time_mod + emotion_mod + intimacy_mod + sentiment_mod - min(goodbye * 0.15, 0.3) - min(short_c * 0.08, 0.2)
         return max(0.0, min(0.8, score))
 
     def _pick_proactive_topic(self) -> str:
+        exps = self.ltm.get_recent_experiences(limit=3)
         facts = self.ltm.get_all_active_facts(limit=5)
-        experiences = self.ltm.get_recent_experiences(limit=3)
         topics = []
-        if experiences:
-            latest = experiences[0]
-            topics.append(f"上次我们聊了 {latest.summary}")
+        if exps:
+            topics.append(f"上次我们聊了 {exps[0].summary}")
         if facts:
-            fact = random.choice(facts)
-            topics.append(f"{fact.fact_key}的事情")
+            topics.append(f"{random.choice(facts).fact_key}的事情")
         topics.append("随便聊聊近况")
         return random.choice(topics)
 
@@ -482,30 +457,25 @@ class Agent:
 
     def _compress_context(self, messages: list[dict]) -> None:
         from prompts.system import CONTEXT_COMPRESS_PROMPT
-        conv_parts = []
+        parts = []
         for m in messages:
             if m["role"] == "system":
                 continue
-            label = "用户" if m["role"] == "user" else "你"
             content = m["content"]
             if len(content) > 500:
                 content = content[:500] + "..."
-            conv_parts.append(f"{label}: {content}")
-        conv_text = "\n".join(conv_parts)
-        if not conv_text.strip():
+            parts.append(f"{'用户' if m['role'] == 'user' else '你'}: {content}")
+        text = "\n".join(parts)
+        if not text.strip():
             return
-        if len(conv_text) > 8000:
-            conv_text = conv_text[-8000:]
+        if len(text) > 8000:
+            text = text[-8000:]
         try:
-            prompt = CONTEXT_COMPRESS_PROMPT.format(conversation=conv_text)
-            result = self.provider.generate([{"role": "user", "content": prompt}], stream=False)
-            summary = result.strip()
-            if summary:
-                self._compressed_summary = summary
+            result = self.provider.generate([{"role": "user", "content": CONTEXT_COMPRESS_PROMPT.format(conversation=text)}], stream=False)
+            if result.strip():
+                self._compressed_summary = result.strip()
                 self._estimated_tokens_used = 0
                 self.short_term.clear()
-                logger.info(f"Context compressed. Summary: {summary[:80]}...")
-                if self.ui:
-                    self.ui.display.print_system("已压缩对话上下文")
+                logger.info(f"Context compressed: {self._compressed_summary[:80]}")
         except Exception as e:
-            logger.warning(f"Context compression failed: {e}")
+            logger.warning(f"Compression failed: {e}")
