@@ -16,3 +16,8 @@ D:\桌面\编程作品\AI朋友
 - `python main.py` — CLI 模式启动
 - `python web_main.py` — Web 模式启动（http://localhost:8000）
 - 提交前运行 `python -m py_compile *.py core/*.py memory/*.py storage/*.py tools/*.py web/*.py` 检查语法
+
+## 文档规范
+
+- 写技术文档时善于使用 ASCII 图（流程图、状态机、架构图、数据流图）来表达
+- 更新代码的同时更新对应的 doc、README、changes
