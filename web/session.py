@@ -3,7 +3,7 @@ import logging
 from threading import Lock
 from typing import Optional
 
-from config import Config, load_config
+from config import Config
 from core.personality import Personality
 from core.provider import KimiProvider
 from core.agent import Agent
@@ -63,14 +63,18 @@ class WebAgent:
         self._on_token_callback = callback
 
     def process_message(self, user_input: str) -> str:
-        return self.agent.process_message(
+        result = self.agent.process_message(
             user_input, on_token=self._on_token_callback,
         )
+        self.personality.save(self.config.personality_file)
+        return result
 
     def process_proactive(self) -> str:
-        return self.agent.process_proactive(
+        result = self.agent.process_proactive(
             on_token=self._on_token_callback,
         )
+        self.personality.save(self.config.personality_file)
+        return result
 
     @property
     def emotion(self):
