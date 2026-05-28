@@ -62,8 +62,12 @@ def _calc_delay(emotion: str, seg_len: int) -> float:
 
 
 def _split_segments(text: str) -> list[str]:
+    """Split response into natural message chunks."""
+    # Split on sentence-ending punctuation
     parts = re.split(r'(?<=[。！？.!?\n])(?:\s*)(?=\S)', text)
     segments = [s.strip() for s in parts if s.strip()]
+
+    # Further split long segments on commas
     final = []
     for s in segments:
         if len(s) > 40:
@@ -71,9 +75,23 @@ def _split_segments(text: str) -> list[str]:
             final.extend(x.strip() for x in sub if x.strip())
         else:
             final.append(s)
+
+    # If still only 1 long segment with no punctuation, try natural breaks
+    if len(final) == 1 and len(final[0]) > 40:
+        # Try splitting at语气词 + space
+        parts2 = re.split(r'(?<=[啊吗呢了吧么]\s)\s*', final[0])
+        if len(parts2) > 1:
+            final = [x.strip() for x in parts2 if x.strip()]
+        else:
+            # Fallback: split on space between Chinese phrases
+            parts3 = re.split(r'(?<=[一-鿿])\s+(?=[一-鿿\[\(])', final[0])
+            if len(parts3) > 1:
+                final = [x.strip() for x in parts3 if x.strip()]
+
+    # Merge tiny fragments
     merged = []
     for s in final:
-        if merged and len(s) < 6:
+        if merged and (len(s) < 5 or len(merged[-1]) < 10):
             merged[-1] = merged[-1] + s
         else:
             merged.append(s)
