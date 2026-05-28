@@ -1,6 +1,7 @@
 let ws = null;
 let sessionId = getCookie('session_id') || '';
 let isProcessing = false;
+let currentAssistantMsg = null;
 
 function getCookie(name) {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -21,39 +22,47 @@ function connect() {
     };
 
     ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
+        try {
+            const data = JSON.parse(event.data);
+            switch (data.type) {
+                case 'init_ok':
+                    sessionId = data.session_id;
+                    setCookie('session_id', sessionId);
+                    showEmotion(data.emotion);
+                    break;
 
-        switch (data.type) {
-            case 'init_ok':
-                sessionId = data.session_id;
-                setCookie('session_id', sessionId);
-                showEmotion(data.emotion);
-                break;
+                case 'segment':
+                    hideTyping();
+                    if (!currentAssistantMsg) {
+                        currentAssistantMsg = createMessage('assistant', '');
+                    }
+                    currentAssistantMsg.querySelector('.bubble').textContent += data.content;
+                    scrollToBottom();
+                    break;
 
-            case 'segment':
-                hideTyping();
-                createMessage('assistant', data.content);
-                scrollToBottom();
-                break;
+                case 'done':
+                    isProcessing = false;
+                    updateSendButton();
+                    setStatus('connected');
+                    hideTyping();
+                    if (data.emotion) showEmotion(data.emotion);
+                    currentAssistantMsg = null;
+                    break;
 
-            case 'done':
-                isProcessing = false;
-                updateSendButton();
-                setStatus('connected');
-                hideTyping();
-                if (data.emotion) showEmotion(data.emotion);
-                break;
+                case 'error':
+                    isProcessing = false;
+                    updateSendButton();
+                    setStatus('connected');
+                    hideTyping();
+                    addSystemMessage('错误: ' + data.content);
+                    currentAssistantMsg = null;
+                    break;
 
-            case 'error':
-                isProcessing = false;
-                updateSendButton();
-                setStatus('connected');
-                hideTyping();
-                addSystemMessage('错误: ' + data.content);
-                break;
-
-            case 'pong':
-                break;
+                case 'pong':
+                    break;
+            }
+        } catch (e) {
+            addSystemMessage('数据解析错误');
         }
     };
 
@@ -72,24 +81,15 @@ function setStatus(status) {
     const dot = document.getElementById('status-dot');
     const text = document.getElementById('status-text');
     if (!dot || !text) return;
-    switch (status) {
-        case 'connected':
-            dot.style.background = '#4ade80';
-            text.textContent = '在线';
-            break;
-        case 'disconnected':
-            dot.style.background = '#f87171';
-            text.textContent = '已断开';
-            break;
-        case 'error':
-            dot.style.background = '#fbbf24';
-            text.textContent = '连接异常';
-            break;
-        case 'thinking':
-            dot.style.background = '#fbbf24';
-            text.textContent = '输入中';
-            break;
-    }
+    const map = {
+        connected: { bg: '#4ade80', label: '在线' },
+        disconnected: { bg: '#f87171', label: '已断开' },
+        error: { bg: '#fbbf24', label: '连接异常' },
+        thinking: { bg: '#fbbf24', label: '输入中' },
+    };
+    const s = map[status] || map.disconnected;
+    dot.style.background = s.bg;
+    text.textContent = s.label;
 }
 
 function showTyping() {
@@ -156,9 +156,9 @@ function sendMessage() {
     input.style.height = 'auto';
     isProcessing = true;
     updateSendButton();
+    currentAssistantMsg = null;
     setStatus('thinking');
     showTyping();
-
     createMessage('user', text);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -188,24 +188,33 @@ function sendMessage() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    connect();
-    const input = document.getElementById('input');
-    const btn = document.getElementById('send-btn');
+// Init
+(function() {
+    const startPing = () => setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+    }, 30000);
 
-    input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    document.addEventListener('DOMContentLoaded', () => {
+        connect();
+        startPing();
+
+        const input = document.getElementById('input');
+        const btn = document.getElementById('send-btn');
+
+        input.addEventListener('input', () => {
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+            updateSendButton();
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        btn.addEventListener('click', sendMessage);
         updateSendButton();
     });
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-
-    btn.addEventListener('click', sendMessage);
-    updateSendButton();
-});
+})();
