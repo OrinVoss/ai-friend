@@ -203,6 +203,12 @@ class Agent:
         hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
         sentiment *= hurt_multiplier
         self.personality.apply_emotional_shift(sentiment, sharing, energy)
+
+        # Record significant emotion events
+        self.personality.emotion.record_emotion_event(
+            trigger=last_user_turn[:100] if last_user_turn else "",
+            context=last_user_turn[:200] if last_user_turn else "",
+        )
         if self.turn_count % 3 == 0:
             self.consolidator.add_pending(self.short_term.get_all()[-1])
             self.consolidator.consolidate(self.short_term, self.personality,
@@ -401,11 +407,17 @@ class Agent:
     def _on_reflect(self) -> None:
         if self.current_response:
             sentiment, sharing, energy = 0.1, False, 0.5
+            last_user_turn = ""
             if self.short_term.get_all():
                 last = self.short_term.get_all()[-1]
                 if last.role == "user":
+                    last_user_turn = last.content
                     sentiment, sharing, energy = self.consolidator.analyze_sentiment(last.content)
             self.personality.apply_emotional_shift(sentiment, sharing, energy)
+            self.personality.emotion.record_emotion_event(
+                trigger=last_user_turn[:100],
+                context=last_user_turn[:200],
+            )
         ei = abs(self.personality.emotion.valence)
         idle = time.time() - self.last_activity_time
         if self.consolidator.should_consolidate(self.turn_count, ei, idle, self.config):

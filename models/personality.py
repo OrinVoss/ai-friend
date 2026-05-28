@@ -1,5 +1,24 @@
+import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+
+# Per-emotion half-lives in conversation turns
+# Higher = emotion persists longer
+EMOTION_HALF_LIVES = {
+    "joy": 12,
+    "trust": 25,          # trust, once established, is very stable
+    "fear": 6,            # fear dissipates quickly
+    "surprise": 3,        # surprise is fleeting
+    "sadness": 20,        # sadness lingers
+    "anticipation": 8,    # moderate
+    "anger": 15,          # anger decays slowly
+    "disgust": 10,        # moderate-slow
+}
+# Convert half-life to per-turn decay rate: rate = 1 - 0.5^(1/half_life)
+EMOTION_DECAY_RATES = {
+    k: 1.0 - 0.5 ** (1.0 / hl) for k, hl in EMOTION_HALF_LIVES.items()
+}
+RESENTMENT_DECAY = 0.03   # resentment decays ~3% per turn (~33 turns to clear)
 
 
 @dataclass
@@ -36,6 +55,13 @@ class EmotionalState:
     anticipation: float = 0.4
     anger: float = 0.1
     disgust: float = 0.1
+
+    # Resentment: lingering bitterness after anger/sadness peaks
+    # 0 = no grudge, 1 = deeply resentful
+    resentment: float = 0.0
+
+    # Emotion events: memory of significant emotional moments
+    emotion_events: list[dict] = field(default_factory=list)
 
     # Recent emotion history for continuity
     history: list[str] = field(default_factory=lambda: ["neutral"] * 3)
@@ -105,6 +131,7 @@ class EmotionalState:
 
         Emotions aren't independent. High anger suppresses joy and trust;
         high joy counters anger and sadness; trust and fear oppose each other.
+        Resentment amplifies negative suppression and dampens positive recovery.
         """
         a = self.anger
         s = self.sadness
@@ -112,18 +139,22 @@ class EmotionalState:
         t = self.trust
         f = self.fear
         d = self.disgust
+        r = self.resentment
 
-        # Anger suppresses joy and trust
-        self.joy = max(0.0, self.joy * (1.0 - a * 0.6))
-        self.trust = max(0.0, self.trust * (1.0 - a * 0.4))
+        # Anger suppresses joy and trust (resentment amplifies)
+        anger_joy_suppress = min(0.95, a * 0.6 + r * 0.3)
+        anger_trust_suppress = min(0.9, a * 0.4 + r * 0.2)
+        self.joy = max(0.0, self.joy * (1.0 - anger_joy_suppress))
+        self.trust = max(0.0, self.trust * (1.0 - anger_trust_suppress))
 
         # Sadness dampens joy and anticipation
         self.joy = max(0.0, self.joy * (1.0 - s * 0.5))
         self.anticipation = max(0.0, self.anticipation * (1.0 - s * 0.4))
 
-        # Joy counters anger and sadness (restore some)
-        self.anger = max(0.0, self.anger * (1.0 - j * 0.4))
-        self.sadness = max(0.0, self.sadness * (1.0 - j * 0.3))
+        # Joy counters anger and sadness (resentment reduces this counter-effect)
+        joy_counter_strength = max(0.05, j * 0.4 - r * 0.3)
+        self.anger = max(0.0, self.anger * (1.0 - joy_counter_strength))
+        self.sadness = max(0.0, self.sadness * (1.0 - max(0.05, j * 0.3 - r * 0.2)))
 
         # Trust ↔ Fear mutual suppression
         self.fear = max(0.0, self.fear * (1.0 - t * 0.5))
@@ -132,6 +163,11 @@ class EmotionalState:
         # Disgust suppresses joy and trust
         self.joy = max(0.0, self.joy * (1.0 - d * 0.4))
         self.trust = max(0.0, self.trust * (1.0 - d * 0.3))
+
+        # Resentment caps joy ceiling
+        if r > 0.2:
+            joy_ceiling = 1.0 - r * 0.5
+            self.joy = min(self.joy, joy_ceiling)
 
     def shift(self, delta_v: float, delta_a: float,
               primary_deltas: Optional[dict[str, float]] = None) -> None:
@@ -151,6 +187,10 @@ class EmotionalState:
                     new_val = current + delta * inertia_factor
                     setattr(self, key, max(0.0, min(1.0, new_val)))
 
+        # Accumulate resentment when anger peaks
+        if self.anger > 0.6:
+            self.resentment = min(1.0, self.resentment + self.anger * 0.15)
+
         # Cross-dimension modulation: emotions influence each other
         self._cross_modulate()
 
@@ -161,7 +201,7 @@ class EmotionalState:
             self.history.pop(0)
 
     def decay(self) -> None:
-        """Decay toward baseline AND mood."""
+        """Decay toward baseline AND mood, with per-emotion rates."""
         # Fast decay toward baseline (turn-level)
         self.valence += (self.baseline_valence - self.valence) * self.decay_rate
         self.arousal += (self.baseline_arousal - self.arousal) * self.decay_rate
@@ -170,12 +210,52 @@ class EmotionalState:
         self.baseline_valence += (self.mood_valence - self.baseline_valence) * self.mood_decay_rate
         self.baseline_arousal += (self.mood_arousal - self.baseline_arousal) * self.mood_decay_rate
 
-        # Decay primary emotions toward neutral
+        # Decay primary emotions with per-emotion rates
+        # Resentment slows anger and sadness decay
+        r = self.resentment
         for key in ("joy", "trust", "fear", "surprise", "sadness", "anticipation", "anger", "disgust"):
             current = getattr(self, key)
             target = 0.5 if key in ("joy", "trust", "anticipation") else 0.1
-            decayed = current + (target - current) * self.decay_rate
+            rate = EMOTION_DECAY_RATES.get(key, self.decay_rate)
+            # Resentment slows decay of anger and sadness
+            if key in ("anger", "sadness") and r > 0.1:
+                rate *= (1.0 - r * 0.5)
+            decayed = current + (target - current) * rate
             setattr(self, key, max(0.0, min(1.0, decayed)))
+
+        # Resentment decays very slowly
+        if self.resentment > 0.001:
+            self.resentment = max(0.0, self.resentment * (1.0 - RESENTMENT_DECAY))
+
+    def record_emotion_event(self, trigger: str, context: str = "") -> None:
+        """Record a significant emotional moment for later reference."""
+        dom = self.dominant_emotion
+        # Only record if emotion is strong enough
+        primary_intensity = max(
+            self.anger, self.sadness, self.joy, self.fear,
+            self.surprise, self.disgust, self.anticipation, self.trust
+        )
+        if primary_intensity < 0.6:
+            return
+
+        event = {
+            "timestamp": time.time(),
+            "trigger": trigger[:100],
+            "primary_emotion": dom,
+            "intensity": primary_intensity,
+            "context": context[:200],
+        }
+        self.emotion_events.append(event)
+        # Keep last 20 events
+        if len(self.emotion_events) > 20:
+            self.emotion_events.pop(0)
+
+    def get_recent_emotion_events(self, limit: int = 3, unresolved_only: bool = True) -> list[dict]:
+        """Get recent emotion events for prompt injection."""
+        events = self.emotion_events
+        if unresolved_only:
+            events = [e for e in events if not e.get("resolved", False)]
+        return events[-limit:]
 
     def apply_mood_shift(self, delta_v: float, delta_a: float) -> None:
         """Shift background mood (slow-changing)."""

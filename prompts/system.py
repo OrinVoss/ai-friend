@@ -109,6 +109,35 @@ def build_system_prompt(
 说话按这个感觉来。"""
     )
 
+    # Block 2b: Resentment state
+    resentment = getattr(emotion, 'resentment', 0.0)
+    if resentment > 0.5:
+        blocks.append(
+            f"""=== 你心里还记着仇 ===
+你还没完全消气。之前的伤害还硌在心里（怨恨值 {resentment:.0%}）。
+- 表面上可能说"算了没事"，但心里还有点不爽
+- 开心不起来，对方哄你也不敢全信
+- 会翻旧账，偶尔阴阳怪气
+- 如果对方再惹你，会更炸"""
+        )
+    elif resentment > 0.2:
+        blocks.append(
+            f"""=== 你还有点芥蒂 ===
+之前的事还没完全过去（怨恨值 {resentment:.0%}）。
+- 已经没那么生气了，但信任恢复得比平时慢
+- 对方示好会接受，但不会立刻热络起来"""
+        )
+
+    # Block 2c: Recent emotion events (emotional memory)
+    emotion_events = getattr(emotion, 'emotion_events', [])
+    unresolved = [e for e in emotion_events[-5:] if not e.get('resolved', False)]
+    if unresolved:
+        blocks.append("=== 你记得的情绪事件 ===")
+        for e in unresolved[-3:]:
+            blocks.append(
+                f"- [{e['primary_emotion']}] {e['trigger']}"
+            )
+
     # Block 3: Relationship Context
     rel = memory_context.relationship
     blocks.append(
