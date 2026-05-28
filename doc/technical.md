@@ -263,6 +263,35 @@ valence/arousal 映射：
   sadness > 0.6 → sad   anger > 0.6 → angry
 ```
 
+### 3.4 破防机制
+
+连续负面交互的累积伤害系统。
+
+```
+用户输入
+    │
+    ▼
+analyze_sentiment(用户输入)  ← 分析用户情绪，非 AI 回复
+    │
+    ├── sentiment < -0.5  →  _consecutive_negative += 1
+    ├── sentiment > 0.1   →  _consecutive_negative -= 1
+    └── 其他              →  保持不变
+    │
+    ▼
+伤害放大：sentiment *= 1.0 + consecutive × 0.4
+    │
+    ▼
+apply_emotional_shift() → 情绪更快速地走向消极
+    │
+    ▼
+prompt 注入：
+    ├── 1-2 次  → "被怼了一下" — 轻回怼
+    ├── 3-4 次  → "有点受伤"   — 委屈，底气不足
+    └── 5+ 次   → "破防了"     — 哭腔、反问、撒娇式回击
+```
+
+引用语气的示例内嵌到 system prompt 中引导 LLM 行为。
+
 ---
 
 ## 4. 记忆系统
