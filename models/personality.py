@@ -100,6 +100,39 @@ class EmotionalState:
 
         return max(biased, key=biased.get)
 
+    def _cross_modulate(self) -> None:
+        """Apply cross-dimension emotional coherence rules.
+
+        Emotions aren't independent. High anger suppresses joy and trust;
+        high joy counters anger and sadness; trust and fear oppose each other.
+        """
+        a = self.anger
+        s = self.sadness
+        j = self.joy
+        t = self.trust
+        f = self.fear
+        d = self.disgust
+
+        # Anger suppresses joy and trust
+        self.joy = max(0.0, self.joy * (1.0 - a * 0.6))
+        self.trust = max(0.0, self.trust * (1.0 - a * 0.4))
+
+        # Sadness dampens joy and anticipation
+        self.joy = max(0.0, self.joy * (1.0 - s * 0.5))
+        self.anticipation = max(0.0, self.anticipation * (1.0 - s * 0.4))
+
+        # Joy counters anger and sadness (restore some)
+        self.anger = max(0.0, self.anger * (1.0 - j * 0.4))
+        self.sadness = max(0.0, self.sadness * (1.0 - j * 0.3))
+
+        # Trust ↔ Fear mutual suppression
+        self.fear = max(0.0, self.fear * (1.0 - t * 0.5))
+        self.trust = max(0.0, self.trust * (1.0 - f * 0.3))
+
+        # Disgust suppresses joy and trust
+        self.joy = max(0.0, self.joy * (1.0 - d * 0.4))
+        self.trust = max(0.0, self.trust * (1.0 - d * 0.3))
+
     def shift(self, delta_v: float, delta_a: float,
               primary_deltas: Optional[dict[str, float]] = None) -> None:
         """Apply emotional shift with inertia damping."""
@@ -117,6 +150,9 @@ class EmotionalState:
                     current = getattr(self, key)
                     new_val = current + delta * inertia_factor
                     setattr(self, key, max(0.0, min(1.0, new_val)))
+
+        # Cross-dimension modulation: emotions influence each other
+        self._cross_modulate()
 
         # Record history
         current = self.dominant_emotion
