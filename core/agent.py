@@ -73,6 +73,7 @@ class Agent:
         self.current_response: str = ""
         self.current_memory_context: MemoryContext | None = None
         self._proactive_count = 0
+        self._consecutive_negative = 0
         self._running = True
         self._compressed_summary: str = ""
         self._estimated_tokens_used: int = 0
@@ -104,6 +105,7 @@ class Agent:
             personality=self.personality.config, emotion=self.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=self._compressed_summary, tools=self._tool_registry,
+            consecutive_negative=self._consecutive_negative,
         )
         messages = [{"role": "system", "content": sys_prompt}]
         for t in reversed(self.short_term.get_all()):
@@ -125,7 +127,7 @@ class Agent:
             personality=self.personality.config, emotion=self.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=self._compressed_summary, tools=self._tool_registry,
-            is_proactive=True,
+            is_proactive=True, consecutive_negative=self._consecutive_negative,
         )
         messages = [{"role": "system", "content": sys_prompt}]
         for t in reversed(self.short_term.get_all()):
@@ -158,11 +160,29 @@ class Agent:
             self.short_term.add_turn("assistant", final_text)
             self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text, str(self.personality.emotion.to_dict()))
             self.turn_count += 1
+        # Analyze USER input sentiment (not AI response), track consecutive hurt
         sentiment, sharing, energy = 0.1, False, 0.5
         try:
-            sentiment, sharing, energy = self.consolidator.analyze_sentiment(final_text or "")
+            all_turns = self.short_term.get_all()
+            last_user_turn = ""
+            for t in reversed(all_turns):
+                if t.role == "user":
+                    last_user_turn = t.content
+                    break
+            sentiment, sharing, energy = self.consolidator.analyze_sentiment(last_user_turn)
         except Exception:
             pass
+
+        # Track consecutive insults for 破防 mechanism
+        if sentiment < -0.5:
+            self._consecutive_negative += 1
+        elif sentiment > 0.1:
+            self._consecutive_negative = max(0, self._consecutive_negative - 1)
+        # neutral: keep current count
+
+        # Amplify emotional damage based on consecutive attacks
+        hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
+        sentiment *= hurt_multiplier
         self.personality.apply_emotional_shift(sentiment, sharing, energy)
         if self.turn_count % 3 == 0:
             self.consolidator.add_pending(self.short_term.get_all()[-1])
@@ -255,6 +275,7 @@ class Agent:
                 conversation_history=self.short_term.format_for_prompt(max_chars=3000),
                 is_proactive=is_proactive, compressed_summary=self._compressed_summary,
                 tools=self._tool_registry,
+                consecutive_negative=self._consecutive_negative,
             )
             messages = [{"role": "system", "content": sys_prompt}]
             self._estimated_tokens_used = estimate_tokens(sys_prompt)
