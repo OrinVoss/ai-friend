@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 import time
@@ -111,14 +112,15 @@ class Agent:
         overflow = False
         for t in reversed(self.short_term.get_all()):
             role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(str(messages[-5:])) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
+            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 overflow = True
                 break
             messages.insert(1, {"role": role, "content": t.content})
         if overflow and self._compressed_summary:
             messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._compressed_summary}"})
         user_msg = f"用户输入：{user_input}"
-        if estimate_tokens(str(messages)) + estimate_tokens(user_msg) > COMPRESS_THRESHOLD:
+        msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
+        if msg_tokens + estimate_tokens(user_msg) > COMPRESS_THRESHOLD:
             self._compress_context(messages)
         messages.append({"role": "user", "content": user_msg})
         return self._react_loop(messages, on_token, add_to_history=True)
@@ -138,7 +140,7 @@ class Agent:
         overflow = False
         for t in reversed(self.short_term.get_all()):
             role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(str(messages[-5:])) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
+            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 overflow = True
                 break
             messages.insert(1, {"role": role, "content": t.content})
