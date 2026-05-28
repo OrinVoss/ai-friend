@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import os
 
@@ -11,7 +11,7 @@ class Config:
     thinking: str = "disabled"
     reasoning_effort: str = ""
     personality_file: str = "personality.json"
-    db_path: str = "ai_friend.db"
+    db_path: str = "data/ai_friend.db"
     short_term_capacity: int = 500
     consolidation_interval: int = 5
     proactive_min_idle: float = 180.0

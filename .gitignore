@@ -1,8 +1,5 @@
 # Database
-ai_friend.db
-ai_friend.db-shm
-ai_friend.db-wal
-*.db
+data/
 
 # Config with keys
 config.json

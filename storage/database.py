@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -8,6 +9,7 @@ class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._lock = threading.Lock()
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -97,7 +99,6 @@ class Database:
                     ('playfulness', 0.3);
             """)
 
-            # Migrations for existing databases (ignore if column exists)
             for stmt in [
                 "ALTER TABLE user_facts ADD COLUMN importance REAL DEFAULT 0.5",
                 "ALTER TABLE experiences ADD COLUMN importance REAL DEFAULT 0.5",
