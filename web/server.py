@@ -196,8 +196,8 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         try:
             await websocket.send_text(json.dumps({"type": "error", "content": str(e)}))
-        except Exception:
-            pass
+        except (WebSocketDisconnect, ConnectionError, RuntimeError):
+            pass  # Client already disconnected, can't send error
     finally:
         if proactive_task:
             proactive_task.cancel()

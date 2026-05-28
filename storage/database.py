@@ -26,7 +26,7 @@ class Database:
             try:
                 yield c
                 self.conn.commit()
-            except Exception:
+            except sqlite3.Error:
                 self.conn.rollback()
                 raise
             finally:

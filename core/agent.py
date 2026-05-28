@@ -28,7 +28,7 @@ def _get_tokenizer():
         try:
             import tiktoken
             _TOKENIZER = tiktoken.get_encoding("cl100k_base")
-        except Exception:
+        except (ImportError, Exception):
             _TOKENIZER = False
     return _TOKENIZER
 
@@ -171,8 +171,8 @@ class Agent:
                     last_user_turn = t.content
                     break
             sentiment, sharing, energy = self.consolidator.analyze_sentiment(last_user_turn)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning(f"Sentiment analysis parse error: {e}")
 
         # Track consecutive insults for 破防 mechanism
         if sentiment < -0.5:
