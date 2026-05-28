@@ -53,11 +53,11 @@ async def chat_api(body: dict):
 
 def _calc_delay(emotion: str, seg_len: int) -> float:
     base = {
-        "excited": 0.8, "joyful": 1.0, "trusting": 1.2, "surprised": 0.9,
-        "engaged": 1.5, "content": 1.8, "anticipating": 1.0,
-        "neutral": 2.0, "anxious": 1.2, "afraid": 1.5,
-        "melancholy": 2.5, "sad": 3.0, "frustrated": 1.8, "angry": 1.2, "disgusted": 1.5,
-    }.get(emotion, 2.0)
+        "excited": 0.7, "joyful": 0.9, "trusting": 1.1, "surprised": 0.8,
+        "engaged": 1.3, "content": 1.5, "anticipating": 0.9,
+        "neutral": 1.7, "anxious": 1.0, "afraid": 1.3,
+        "melancholy": 2.2, "sad": 2.5, "frustrated": 1.5, "angry": 1.0, "disgusted": 1.3,
+    }.get(emotion, 1.7)
     return base * (1.0 + seg_len / 80) * random.uniform(0.8, 1.3)
 
 
