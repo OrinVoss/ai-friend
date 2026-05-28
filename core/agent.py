@@ -74,7 +74,14 @@ class Agent:
         self.current_response: str = ""
         self.current_memory_context: MemoryContext | None = None
         self._proactive_count = 0
-        self._consecutive_negative = 0
+        e = self.personality.emotion
+        neg_score = max(e.anger, e.sadness, e.disgust)
+        if neg_score > 0.8:
+            self._consecutive_negative = 4  # one push from breaking
+        elif neg_score > 0.5:
+            self._consecutive_negative = 2
+        else:
+            self._consecutive_negative = 0
         self._running = True
         self._compressed_summary: str = ""
         self._estimated_tokens_used: int = 0
