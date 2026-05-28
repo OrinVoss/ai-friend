@@ -1,8 +1,11 @@
+import logging
 import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from typing import Generator
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -74,6 +77,7 @@ class Database:
                     insight_type TEXT,
                     related_experience_ids TEXT DEFAULT '[]',
                     significance REAL DEFAULT 0.5,
+                    is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -99,14 +103,17 @@ class Database:
                     ('playfulness', 0.3);
             """)
 
-            for stmt in [
-                "ALTER TABLE user_facts ADD COLUMN importance REAL DEFAULT 0.5",
-                "ALTER TABLE experiences ADD COLUMN importance REAL DEFAULT 0.5",
+            # Schema migration: add columns only if they don't exist
+            for table, column, col_type, default_val in [
+                ("user_facts", "importance", "REAL", "0.5"),
+                ("experiences", "importance", "REAL", "0.5"),
+                ("reflections", "is_active", "INTEGER", "1"),
             ]:
-                try:
-                    c.execute(stmt)
-                except Exception:
-                    self.conn.rollback()
+                c.execute(f"PRAGMA table_info({table})")
+                columns = [row[1] for row in c.fetchall()]
+                if column not in columns:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
+                    logger.info(f"Schema migration: added {table}.{column}")
 
     def close(self) -> None:
         self.conn.close()

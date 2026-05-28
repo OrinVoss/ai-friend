@@ -138,7 +138,7 @@ class Repository:
     def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
         with self.db.cursor() as c:
             c.execute("""
-                SELECT * FROM reflections
+                SELECT * FROM reflections WHERE is_active = 1
                 ORDER BY created_at DESC
                 LIMIT ?
             """, (limit,))
@@ -210,14 +210,14 @@ class Repository:
 
     def prune_reflections(self, max_count: int) -> int:
         with self.db.cursor() as c:
-            c.execute("SELECT COUNT(*) FROM reflections")
+            c.execute("SELECT COUNT(*) FROM reflections WHERE is_active = 1")
             count = c.fetchone()[0]
             if count <= max_count:
                 return 0
             excess = count - max_count
             c.execute("""
-                DELETE FROM reflections WHERE id IN (
-                    SELECT id FROM reflections
+                UPDATE reflections SET is_active = 0 WHERE id IN (
+                    SELECT id FROM reflections WHERE is_active = 1
                     ORDER BY significance ASC, created_at ASC
                     LIMIT ?
                 )

@@ -51,8 +51,14 @@ class ReadFileTool(Tool):
         if not filepath:
             return ToolResult.fail("请提供文件路径")
 
-        # Resolve path
+        # Resolve path and restrict to project directory
         resolved = os.path.abspath(filepath)
+        project_dir = os.path.abspath(os.path.dirname(__file__) or ".")
+        # Allow up to 2 levels above tools/ for project root
+        allowed_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        rel = os.path.relpath(resolved, allowed_root)
+        if rel.startswith(".."):
+            return ToolResult.fail(f"路径超出项目目录范围: {filepath}")
         if not os.path.exists(resolved):
             return ToolResult.fail(f"文件不存在: {filepath}")
 

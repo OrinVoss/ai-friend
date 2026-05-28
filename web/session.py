@@ -36,6 +36,7 @@ class WebAgent:
             model=config.api_model, temperature=config.temperature,
             max_tokens=config.max_tokens,
             thinking=config.thinking, reasoning_effort=config.reasoning_effort,
+            timeout=config.api_timeout,
         )
 
         def llm_gen(prompt, temperature=0.2):

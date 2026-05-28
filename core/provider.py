@@ -12,7 +12,8 @@ class KimiProvider:
     def __init__(self, endpoint: str, api_key: str, model: str,
                  temperature: float = 0.8, max_tokens: int = 2048,
                  thinking: Optional[str] = None,
-                 reasoning_effort: Optional[str] = None):
+                 reasoning_effort: Optional[str] = None,
+                 timeout: int = 180):
         self.endpoint = endpoint.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -20,6 +21,7 @@ class KimiProvider:
         self.max_tokens = max_tokens
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers.update({
@@ -78,7 +80,7 @@ class KimiProvider:
             url,
             json=payload,
             stream=True,
-            timeout=180,
+            timeout=self.timeout,
         )
         resp.raise_for_status()
 

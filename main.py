@@ -56,6 +56,7 @@ def main():
         max_tokens=config.max_tokens,
         thinking=config.thinking,
         reasoning_effort=config.reasoning_effort,
+        timeout=config.api_timeout,
     )
 
     # Wrap LLM for single-turn structured calls

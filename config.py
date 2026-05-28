@@ -6,8 +6,9 @@ import os
 @dataclass
 class Config:
     api_endpoint: str = "https://api.deepseek.com"
-    api_key: str = ""
+    api_key: str = ""  # can be overridden by DEEPSEEK_API_KEY env var
     api_model: str = "deepseek-v4-flash"
+    api_timeout: int = 180
     thinking: str = "disabled"
     reasoning_effort: str = ""
     personality_file: str = "personality.json"
@@ -41,6 +42,20 @@ def load_config(path: str = CONFIG_PATH) -> Config:
                     setattr(cfg, k, v)
         except (json.JSONDecodeError, OSError):
             pass
+
+    # Environment variable overrides
+    env_map = {
+        "DEEPSEEK_API_KEY": "api_key",
+        "DEEPSEEK_API_ENDPOINT": "api_endpoint",
+        "DEEPSEEK_API_MODEL": "api_model",
+        "AI_FRIEND_DB_PATH": "db_path",
+        "AI_FRIEND_LOG_LEVEL": "log_level",
+    }
+    for env_var, attr in env_map.items():
+        val = os.environ.get(env_var, "")
+        if val:
+            setattr(cfg, attr, val)
+
     return cfg
 
 
