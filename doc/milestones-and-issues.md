@@ -1,63 +1,84 @@
-# 里程碑与 Issue 规划
+# 里程碑与 Issue
 
-## Milestone 1: 架构与工程化 — 从"能跑"到"健壮"
+## 版本规划
 
-### Issue 1.1: 异步数据库驱动
-- **描述**：当前 `Database` 类使用 `threading.Lock` + `sqlite3`，在 FastAPI 异步环境下会阻塞事件循环。
-- **方案**：替换为 `aiosqlite`，实现真正的异步数据库操作。
-- **涉及文件**：`storage/database.py`, `storage/repository.py`, `web/session.py`
+| 版本 | 聚焦 | Issues |
+|------|------|--------|
+| v0.1 | 基础架构稳定：异步 DB、配置管理、工具解析、会话隔离、安全加固 | 22 |
+| v0.2 | 记忆系统升级：向量检索、分层次反思、情感值归一化、数据隔离 | 9 |
+| v0.3 | 情感与人格：情绪模型增强、人格特质深度化、Provider 抽象 | 4 |
+| v0.4 | 主动性与规划：主动性升级、Web 安全、REST API 加固、性能优化 | 6 |
+| v0.5 | 工程与质量：单元测试、前端优化、文档、错误处理 | 13 |
 
-### Issue 1.2: 工具调用解析优化
-- **描述**：`dispatcher.py` 用正则在自由文本中提取 `<tool_call>`，LLM 输出格式不稳定时易失败。
-- **方案**：改用 JSON Schema 约束 + 结构化输出（如 OpenAI Function Calling），让模型直接输出结构化 JSON。
-- **涉及文件**：`core/dispatcher.py`, `core/provider.py`
+**总计**: 54 issues
 
-### Issue 1.3: 配置管理增强
-- **描述**：配置全部挤在 `config.json`，不支持环境变量覆盖，敏感信息（API_KEY）在容器化部署时不便。
-- **方案**：支持 `os.environ` 环境变量覆盖配置项（如 `DEEPSEEK_API_KEY`），优先级：环境变量 > config.json > 默认值。
-- **涉及文件**：`config.py`
+## Issue 列表
 
----
+### v0.1 — 基础架构稳定
 
-## Milestone 2: 记忆与认知 — 从"存储"到"理解"
+- 重构：拆分 Agent God Class
+- 重构：统一 CLI/API 双代码路径
+- 异步数据库驱动：替换 sqlite3 为 aiosqlite
+- 工具调用解析：用结构化输出替代正则提取
+- 配置管理：支持环境变量覆盖
+- 会话隔离：conversation_turns 加 session_id 列
+- Session 泄漏：WebAgent 字典永不清理
+- 多 proactive_loop 竞争条件
+- 安全：API Key 改为环境变量读取
+- 工厂函数：消除 main.py/session.py 重复初始化
+- 性能：情感分析每轮重复调用两次
+- 安全：ReadFileTool 路径穿越
+- 线程安全：ConversationBuffer 加锁
+- 错误处理：bare except 静默吞异常
+- Token 估算：替换 cl100k_base 为 DeepSeek tokenizer
+- Bug：API 路径上下文压缩永不触发
+- 配置：config.json 与 config.py 默认值不一致
+- Schema 迁移：ALTER TABLE 每次启动都执行
+- 数据安全：Reflections 直接 DELETE 无软删除
+- Bug：format_for_prompt 截断方向错误
+- 超时：provider 180s timeout 硬编码
+- 工程：缺 requirements.txt / pyproject.toml
 
-### Issue 2.1: 向量检索
-- **描述**：当前检索基于关键词命中 + 重要性评分，对"我上次说的那个有点辣的菜"这类模糊查询完全失效。
-- **方案**：引入 Embedding 模型，对 facts/experiences 生成向量，语义检索。
-- **涉及文件**：`memory/retrieval.py`, `memory/long_term.py`, `storage/repository.py`
+### v0.2 — 记忆系统升级
 
-### Issue 2.2: 分层次反思机制
-- **描述**：每轮合并都生成反思，产生大量浅层、重复的感悟。
-- **方案**：低层反思总结事实，高层反思在积累足够经验后触发，形成更深度的认知。
-- **涉及文件**：`memory/consolidation.py`, `prompts/templates.py`
+- 向量检索：引入 Embedding 语义检索
+- 分层次反思：深层/浅层反思分离
+- 虚假记忆修正：矛盾事实置信度递减
+- 情感值饱和：decay_rate 过低丧失动态范围
+- 特质忽略：humor/sass 无实际效果
+- Bug：_score_facts 原地覆写不写回 DB
+- Bug：consolidation pending 重复处理
+- 数据隔离：LongTermMemory 无 session_id 过滤
+- 性能：情感分析三处重复调用
 
-### Issue 2.3: 虚假记忆修正机制
-- **描述**：用户说"不对，我不喜欢吃鱼"时，系统只新增事实，不降低矛盾事实的置信度。
-- **方案**：事实合并时检测矛盾，降低旧置信度或标记为已修正。
-- **涉及文件**：`memory/consolidation.py`, `storage/repository.py`
+### v0.3 — 情感与人格
 
----
+- 情绪模型：引入对话节奏多维影响
+- 人格特质：影响记忆/检索/规划全环节
+- Provider：定义 BaseProvider ABC
+- 情感值归一化：达上下限后重置机制
 
-## Milestone 3: 情感与人格 — 从"模拟"到"涌现"
+### v0.4 — 主动性与规划
 
-### Issue 3.1: 情绪模型增强
-- **描述**：情绪更新过度依赖最后一条输入的 sentiment，真实情感是对话动态博弈的结果。持续反驳应升高 arousal 而非单纯由内容正负决定。
-- **方案**：引入对话节奏检测（反驳/附和/转换话题），多轮累积情感影响。
-- **涉及文件**：`core/personality.py`, `models/personality.py`
+- 主动性：基于未完成话题/长期目标驱动
+- Web 安全：添加 CORS/速率限制/CSP
+- REST API：添加 Pydantic 输入验证
+- 性能：每消息写 personality.json 到磁盘
+- 封装：Web 层访问 agent 私有方法
+- 性能：默认线程池耗尽风险
 
-### Issue 3.2: 人格特质深度化
-- **描述**：当前特质只是参数调整（playfulness > 0.6 让 arousal 衰减更慢），未真正影响认知环节。
-- **方案**：特质影响记忆编码（开放性→新奇话题权重高）、检索（神经质→易想起负面体验）、回应规划（宜人性→多一层委婉思考）。
-- **涉及文件**：`core/personality.py`, `memory/retrieval.py`, `memory/consolidation.py`
+### v0.5 — 工程与质量
 
----
-
-## Milestone 4: 主动性与规划 — 从"被动反应"到"具有内部驱动力"
-
-### Issue 4.1: 主动性机制升级
-- **描述**：`_calculate_proactivity()` 基于空闲时间 + 随机命中，缺乏内在驱动力。
-- **方案**：主动性基于三个维度：
-  - 未完成话题（上次聊到一半）
-  - 长期目标（用户设定的提醒或AI生成的健康目标）
-  - 情感联结需求（intimacy 高但久未联系时主动问候）
-- **涉及文件**：`core/agent.py`, `memory/long_term.py`
+- 测试：搭建单元测试体系（pytest + mock）
+- 前端：角色名硬编码 + 缺心跳 + 缺异常处理
+- Shutdown：不关闭 DB/取消 task
+- Prompt：对话示例可配置化减少浪费
+- Bug：异常退出不清理 react 状态
+- 前端：segment 独立气泡应合并
+- UI：CJK 终端换行宽度计算错误
+- Bug：CLI 打字速度忽略配置值
+- 文档：architecture.md 过期 + 缺 Web 端文档
+- 错误处理：WebSocket 异常静默
+- 前端：缺 ARIA/键盘导航
+- 安全：前端缺 CSP 头
+- CSS：颜色值集中为 CSS 自定义属性
