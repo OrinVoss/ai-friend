@@ -53,21 +53,20 @@ async def chat_api(body: dict):
 
 def _calc_delay(emotion: str, seg_len: int) -> float:
     base = {
-        "excited": 1.8, "joyful": 2.0, "trusting": 2.5, "surprised": 1.8,
-        "engaged": 3.0, "content": 3.5, "anticipating": 2.0,
-        "neutral": 4.0, "anxious": 2.5, "afraid": 3.0,
-        "melancholy": 5.0, "sad": 6.0, "frustrated": 3.5, "angry": 2.5, "disgusted": 3.0,
-    }.get(emotion, 4.0)
-    return base * (1.0 + seg_len / 80) * random.uniform(0.8, 1.5)
+        "excited": 0.8, "joyful": 1.0, "trusting": 1.2, "surprised": 0.9,
+        "engaged": 1.5, "content": 1.8, "anticipating": 1.0,
+        "neutral": 2.0, "anxious": 1.2, "afraid": 1.5,
+        "melancholy": 2.5, "sad": 3.0, "frustrated": 1.8, "angry": 1.2, "disgusted": 1.5,
+    }.get(emotion, 2.0)
+    return base * (1.0 + seg_len / 80) * random.uniform(0.8, 1.3)
 
 
 def _split_segments(text: str) -> list[str]:
-    """Split response into natural message chunks."""
-    # Split on sentence-ending punctuation
-    parts = re.split(r'(?<=[。！？.!?\n])(?:\s*)(?=\S)', text)
+    # Step 1: split on sentence-ending punctuation (handles trailing quotes/brackets)
+    parts = re.split(r'(?<=[。！？.!?\n])(?:[」"''）]?\s*)(?=\S)', text)
     segments = [s.strip() for s in parts if s.strip()]
 
-    # Further split long segments on commas
+    # Step 2: split long segments on commas / semicolons
     final = []
     for s in segments:
         if len(s) > 40:
@@ -76,22 +75,35 @@ def _split_segments(text: str) -> list[str]:
         else:
             final.append(s)
 
-    # If still only 1 long segment with no punctuation, try natural breaks
-    if len(final) == 1 and len(final[0]) > 40:
-        # Try splitting at语气词 + space
-        parts2 = re.split(r'(?<=[啊吗呢了吧么]\s)\s*', final[0])
+    # Step 3: if still one big chunk, try whitespace split
+    if len(final) == 1 and len(final[0]) > 10:
+        sub = re.split(r'\s+', final[0])
+        parts2 = [x.strip() for x in sub if x.strip()]
         if len(parts2) > 1:
-            final = [x.strip() for x in parts2 if x.strip()]
-        else:
-            # Fallback: split on space between Chinese phrases
-            parts3 = re.split(r'(?<=[一-鿿])\s+(?=[一-鿿\[\(])', final[0])
-            if len(parts3) > 1:
-                final = [x.strip() for x in parts3 if x.strip()]
+            final = parts2
 
-    # Merge tiny fragments
+    # Step 4: if still one big chunk, try splitting after 语气词
+    if len(final) == 1 and len(final[0]) > 10:
+        sub = re.split(r'(?<=[啊吗呢了吧么呀哦嘛哇])', final[0])
+        parts2 = [x.strip() for x in sub if x.strip()]
+        if len(parts2) > 1:
+            final = parts2
+
+    # Step 5: last resort — split at natural pauses (连词 / 介词 / 时间词)
+    if len(final) == 1 and len(final[0]) > 25:
+        s = final[0]
+        sub = re.split(r'(?<=[了过完好到])|(?<=然后|但是|不过|所以|因为|而且|或者|只是|于是|接着|还有|另外|虽然|如果|可以|应该)|(?<=\d[年月日号])', s)
+        parts2 = [x.strip() for x in sub if x.strip()]
+        if len(parts2) > 1:
+            final = parts2
+        else:
+            # absolute fallback: hard-split every ~18 chars
+            final = [s[i:i+18] for i in range(0, len(s), 18)]
+
+    # Step 6: merge tiny trailing fragments (only very short ones)
     merged = []
     for s in final:
-        if merged and (len(s) < 5 or len(merged[-1]) < 10):
+        if merged and len(s) < 4:
             merged[-1] = merged[-1] + s
         else:
             merged.append(s)

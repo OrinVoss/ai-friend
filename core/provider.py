@@ -21,6 +21,7 @@ class KimiProvider:
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.session = requests.Session()
+        self.session.trust_env = False
         self.session.headers.update({
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
