@@ -30,6 +30,9 @@ class WebAgent:
         self.personality = Personality.load(config.personality_file)
         self.ltm = LongTermMemory(repo)
         self.short_term = ConversationBuffer(maxlen=config.short_term_capacity)
+        # Restore recent conversation from DB (fixes #98)
+        for t in repo.get_recent_turns(30):
+            self.short_term.add_turn(t["role"], t["content"])
         self._on_token_callback = None
 
         self.provider = KimiProvider(

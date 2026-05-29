@@ -171,6 +171,17 @@ class Repository:
             """, (turn_number, role, content, emotional_state))
             return c.lastrowid
 
+    def get_recent_turns(self, limit: int = 30) -> list[dict]:
+        """Get recent conversation turns for short-term memory restoration."""
+        with self.db.cursor() as c:
+            c.execute("""
+                SELECT role, content FROM conversation_turns
+                ORDER BY id DESC LIMIT ?
+            """, (limit,))
+            rows = c.fetchall()
+        rows.reverse()
+        return [{"role": r[0], "content": r[1]} for r in rows]
+
     # ── Pruning ──
 
     def prune_facts(self, max_count: int) -> int:
