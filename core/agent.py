@@ -114,6 +114,13 @@ class Agent:
 
     def process_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
+
+        # Sleep check: auto-reply if sleeping
+        if self._sleeping:
+            self.last_activity_time = time.time()
+            zzz = random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
+            return zzz
+
         idle = time.time() - self.last_activity_time
         self.current_input = user_input
         self.last_activity_time = time.time()
