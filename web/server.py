@@ -126,21 +126,37 @@ async def _send_segments(websocket: WebSocket, agent, response: str, emotion: st
 
 async def _proactive_loop(websocket: WebSocket, session_id: str):
     cooldown = 0
+    dream_cooldown = 0
     while True:
         try:
             _, agent = session_manager.get_or_create(session_id)
             idle = time.time() - agent.agent.last_activity_time
-            if idle < 30 or cooldown > 0:  # absolute floor, emotion handles rest
+            if idle < 30 or cooldown > 0:
                 cooldown = max(0, cooldown - 1)
+                dream_cooldown = max(0, dream_cooldown - 1)
                 await asyncio.sleep(5)
                 continue
+
+            # Dream mode: deep idle (>30min) triggers dream consolidation
+            if idle > 1800 and dream_cooldown == 0 and random.random() < 0.3:
+                dream_cooldown = 120  # ~10 min between dreams
+                loop = asyncio.get_event_loop()
+                dream = await loop.run_in_executor(None, agent.process_dream)
+                if dream:
+                    logger.info(f"Dream: {dream[:100]}")
+                continue
+
             score = agent.agent._calculate_proactivity(idle)
             if random.random() < score:
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.process_proactive)
+                # 40% chance: explore mode (free tool use, share if interesting)
+                if random.random() < 0.4:
+                    response = await loop.run_in_executor(None, agent.process_explore)
+                else:
+                    response = await loop.run_in_executor(None, agent.process_proactive)
                 if response:
                     agent.agent.last_activity_time = time.time()
-                    cooldown = 12  # ~3 min cooldown after proactive message
+                    cooldown = 12
                     await _send_segments(websocket, agent, response, agent.emotion)
             await asyncio.sleep(15)
         except asyncio.CancelledError:

@@ -247,7 +247,26 @@ def build_system_prompt(
         )
 
     # Block 7: Instructions
-    if is_proactive:
+    explore_mode = kwargs.get("explore_mode", False)
+    if explore_mode:
+        blocks.append(
+            f"""=== 自由探索模式 ===
+当前时间：{now}。
+
+你现在闲着，可以做点自己感兴趣的事。使用工具自由探索：
+- 用 web_search 搜你好奇的东西（科技新闻、冷笑话、好听的歌、有趣的知识...）
+- 用 web_fetch 看看感兴趣的网页
+- 用 music_list 翻翻有什么歌
+
+重要规则：
+- **如果发现了特别有意思的东西想分享**，说出来。比如"卧槽我刚搜到一个巨好笑的梗..."
+- **如果没什么特别的**，回复"。"或"没啥"就行，别硬聊
+- 别假装调用了工具——真的去调 <tool_call>
+- 根据你的兴趣和当前情绪来选方向，别太正经
+
+你是自由的，玩得开心。"""
+        )
+    elif is_proactive:
         blocks.append(
             f"""=== 指令 ===
 当前时间：{now}。有人问时间直接告诉ta。

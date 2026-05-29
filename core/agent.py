@@ -166,6 +166,73 @@ class Agent:
         messages.append({"role": "user", "content": f"[主动开启对话] 主题方向：{topic}"})
         return self._react_loop(messages, on_token, add_to_history=False)
 
+    def process_explore(self) -> str | None:
+        """Autonomous exploration: freely use tools, optionally share findings.
+        Returns message if something worth sharing, None if nothing."""
+        from prompts.system import build_system_prompt
+        mem_ctx = self.retriever.retrieve_for_query("")
+        topic = self._pick_proactive_topic()
+        conv_hist = self.short_term.format_for_prompt(max_chars=3000)
+        sys_prompt = build_system_prompt(
+            personality=self.personality.config, emotion=self.personality.emotion,
+            memory_context=mem_ctx, conversation_history=conv_hist,
+            compressed_summary=self._compressed_summary, tools=self._tool_registry,
+            is_proactive=True, consecutive_negative=self._consecutive_negative,
+            explore_mode=True,
+        )
+        messages = [{"role": "system", "content": sys_prompt}]
+        for t in self.short_term.get_all_reversed():
+            role = "assistant" if t.role == "assistant" else "user"
+            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
+                break
+            messages.insert(1, {"role": role, "content": t.content})
+        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着，可以做点自己感兴趣的事——上网搜搜、翻翻文件、听听歌。如果发现了特别有意思的东西想分享，就说一声。没什么特别的就安静待着。"})
+        result = self._react_loop(messages, on_token=None, add_to_history=False)
+        # Only share if result is substantial (not just "ok" or tool output)
+        if result and len(result.strip()) > 30 and not result.startswith("搜索"):
+            return result
+        return None
+
+    def process_dream(self) -> str:
+        """Generate a dream during deep idle/sleep. Not shared with user."""
+        from prompts.system import CONTEXT_COMPRESS_PROMPT
+        recent = self.short_term.format_for_prompt(max_chars=2000)
+        facts = self.ltm.get_all_active_facts(limit=10)
+        exps = self.ltm.get_recent_experiences(limit=5)
+        fact_str = "\n".join(f"- {f.fact_key}: {f.fact_value}" for f in facts)
+        exp_str = "\n".join(f"- [{e.emotional_tone}] {e.summary}" for e in exps)
+
+        dream_prompt = f"""你即将入睡。请基于以下记忆碎片生成一段梦境。
+梦境应该是碎片化的、跳跃的、带有情感色彩的——就像真实的梦一样。
+不需要逻辑连贯，可以有超现实的元素。
+
+=== 最近对话 ===
+{recent}
+
+=== 你知道的事实 ===
+{fact_str}
+
+=== 共同经历 ===
+{exp_str}
+
+=== 当前情绪 ===
+{self.personality.emotion.dominant_emotion}
+
+请用 2-3 句话描述你今晚的梦境。用第一人称，带点诗意。"""
+        try:
+            dream = self.provider.generate(
+                [{"role": "user", "content": dream_prompt}],
+                stream=False, max_tokens=200,
+            )
+            # Store dream as emotion event
+            self.personality.emotion.record_emotion_event(
+                trigger=f"梦: {dream[:100]}",
+                context=dream[:200],
+            )
+            return dream.strip()
+        except Exception:
+            return ""
+
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
         max_tok = self._max_tokens_for_emotion()
