@@ -27,13 +27,22 @@ def _is_binary(filepath: str) -> bool:
         return False
 
 
-def _path_in_project(filepath: str) -> str | None:
-    """Resolve and check path is in project. Returns absolute path or None."""
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# Allowed read directories (absolute paths)
+ALLOWED_READ_ROOTS = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),  # project root
+    r"D:\音乐",
+    r"D:\桌面",
+    os.path.expanduser("~/Documents"),
+    os.path.expanduser("~/Downloads"),
+]
+
+def _path_in_allowed(filepath: str) -> str | None:
+    """Resolve and check path is in an allowed directory. Returns absolute path or None."""
     resolved = os.path.abspath(filepath)
-    if not resolved.startswith(project_root):
-        return None
-    return resolved
+    for root in ALLOWED_READ_ROOTS:
+        if resolved.startswith(os.path.abspath(root)):
+            return resolved
+    return None
 
 
 class ReadFileTool(Tool):
@@ -71,7 +80,7 @@ class ReadFileTool(Tool):
         }
 
     def _read_one(self, filepath: str, limit: int, offset: int) -> ToolResult:
-        resolved = _path_in_project(filepath)
+        resolved = _path_in_allowed(filepath)
         if resolved is None:
             return ToolResult.fail(f"路径超出项目范围: {filepath}")
 

@@ -25,32 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.6721983119230499,
-    "arousal": 0.9830585310676009,
-    "baseline_valence": -0.121919153497817,
-    "baseline_arousal": 0.9699253896840782,
+    "valence": 0.6324924386520066,
+    "arousal": 0.9684368739984247,
+    "baseline_valence": -0.11815846196283883,
+    "baseline_arousal": 0.9702051357872373,
     "decay_rate": 0.05,
     "mood_valence": 0.25415000000000004,
-    "mood_arousal": 0.9979,
+    "mood_arousal": 0.9958,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.3043627320708494,
-    "trust": 0.78831563523267,
-    "fear": 0.021615584850035768,
-    "surprise": 0.10247302875347933,
-    "sadness": 0.07274685002085632,
-    "anticipation": 0.321502380428746,
-    "anger": 0.04735921699750573,
-    "disgust": 0.10000206414116179,
-    "resentment": 0.14676390503592945,
+    "joy": 0.2972447880357085,
+    "trust": 0.7668743109564752,
+    "fear": 0.02203780661576841,
+    "surprise": 0.10196284422241035,
+    "sadness": 0.06865043889798118,
+    "anticipation": 0.32773810022209476,
+    "anger": 0.045527167355966486,
+    "disgust": 0.10000192591180314,
+    "resentment": 0.14236098788485158,
     "emotion_events": [
-      {
-        "timestamp": 1780048593.8547242,
-        "trigger": "没有播放记录",
-        "primary_emotion": "sad",
-        "intensity": 0.7072285582332742,
-        "context": "没有播放记录"
-      },
       {
         "timestamp": 1780048627.7685406,
         "trigger": "没有，我要工具调用记录",
@@ -183,6 +176,13 @@
         "primary_emotion": "trusting",
         "intensity": 0.78831563523267,
         "context": "“冰版小星就是这个"
+      },
+      {
+        "timestamp": 1780065472.7277598,
+        "trigger": "“冰版小星就是这个",
+        "primary_emotion": "trusting",
+        "intensity": 0.7668743109564752,
+        "context": "“冰版小星就是这个"
       }
     ],
     "history": [
@@ -193,7 +193,7 @@
       "excited",
       "excited",
       "excited",
-      "excited",
+      "trusting",
       "trusting",
       "trusting"
     ],

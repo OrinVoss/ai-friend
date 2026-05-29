@@ -19,7 +19,7 @@ from tools.memory_tools import RecallTool, RememberTool
 from tools.file_tools import ReadFileTool
 from tools.notify_tool import NotifyTool
 from tools.web_tools import WebSearchTool, WebFetchTool
-from tools.music_tool import MusicListTool, MusicPlayTool
+from tools.music_tool import MusicPlayTool
 from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
@@ -87,7 +87,6 @@ def main():
     tool_registry.register(NotifyTool())
     tool_registry.register(WebSearchTool())
     tool_registry.register(WebFetchTool())
-    tool_registry.register(MusicListTool())
     tool_registry.register(MusicPlayTool())
     tool_registry.register(GlobTool())
     tool_registry.register(GrepTool())
