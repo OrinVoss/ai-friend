@@ -40,29 +40,30 @@ class NotifyTool(Tool):
     def execute(self, args: dict[str, Any]) -> ToolResult:
         title = args.get("title", "").strip()
         message = args.get("message", "").strip()
-        duration = int(args.get("duration", 5))
 
         if not title or not message:
             return ToolResult.fail("标题和内容不能为空")
 
-        try:
-            from plyer import notification
-            notification.notify(
-                title=title,
-                message=message,
-                timeout=duration,
-                app_name="小星",
-            )
-            logger.info(f"Notification sent: {title}")
-            return ToolResult.ok(f"已发送通知：{title}")
-        except ImportError:
-            pass
+        import subprocess, threading
 
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(0, message, title, 0x40 | 0x1000)
-            logger.info(f"Notification sent (MessageBox): {title}")
-            return ToolResult.ok(f"已发送通知：{title}")
-        except Exception as e:
-            logger.warning(f"Notification failed: {e}")
-            return ToolResult.fail(f"通知发送失败: {e}")
+        def _show():
+            ps = f'''
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
+$template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$textNodes = $template.GetElementsByTagName('text')
+$textNodes.Item(0).AppendChild($template.CreateTextNode('{title}')) > $null
+$textNodes.Item(1).AppendChild($template.CreateTextNode('{message}')) > $null
+$toast = [Windows.UI.Notifications.ToastNotification]::new($template)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AI Friend').Show($toast)
+'''
+            try:
+                subprocess.run(
+                    ['powershell', '-NoProfile', '-Command', ps],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_show, daemon=True).start()
+        logger.info(f"Notification sent: {title}")
+        return ToolResult.ok(f"已发送通知：{title}")

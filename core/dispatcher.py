@@ -140,7 +140,7 @@ def _normalize_args(args: dict) -> dict:
     """Map common aliases to canonical field names."""
     aliases = [
         (("query", "search", "keyword", "question"), "query"),
-        (("text", "message", "msg", "content"), "content"),
+        (("text", "msg", "content"), "content"),
         (("person", "who", "user", "target"), "name"),
     ]
     result = dict(args)
