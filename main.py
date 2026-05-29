@@ -19,6 +19,7 @@ from tools.memory_tools import RecallTool, RememberTool
 from tools.file_tools import ReadFileTool
 from tools.notify_tool import NotifyTool
 from tools.web_tools import WebSearchTool, WebFetchTool
+from tools.music_tool import MusicListTool, MusicPlayTool
 from ui.cli import ConsoleInterface
 
 
@@ -85,6 +86,8 @@ def main():
     tool_registry.register(NotifyTool())
     tool_registry.register(WebSearchTool())
     tool_registry.register(WebFetchTool())
+    tool_registry.register(MusicListTool())
+    tool_registry.register(MusicPlayTool())
     logger.info(f"Registered {len(tool_registry.list_specs())} tools")
 
     # Initialize agent
