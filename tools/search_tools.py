@@ -5,17 +5,26 @@ import os
 import re
 from typing import Any
 
+from tools.file_tools import ALLOWED_READ_ROOTS
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
-def _safe_path(path: str, root: str) -> str | None:
-    """Resolve path, return None if outside root."""
-    resolved = os.path.abspath(os.path.join(root, path))
-    if not resolved.startswith(os.path.abspath(root)):
-        return None
-    return resolved
+def _resolve_search_path(search_path: str) -> str | None:
+    """Resolve a search path, return absolute if within any allowed root."""
+    resolved = os.path.abspath(search_path)
+    for root in ALLOWED_READ_ROOTS:
+        try:
+            if resolved.startswith(os.path.abspath(root)):
+                return resolved
+        except Exception:
+            pass
+    # Also allow searching within project root subdirectories
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if resolved.startswith(project_root):
+        return resolved
+    return None
 
 
 class GlobTool(Tool):
@@ -25,7 +34,10 @@ class GlobTool(Tool):
         return "glob"
 
     def description(self) -> str:
-        return "用 glob 模式搜索文件。支持 ** 递归匹配。例如 '**/*.py' 找所有 Python 文件。搜索范围：项目根目录。"
+        return (
+            "用 glob 模式搜索文件。支持 ** 递归匹配。例如 '**/*.py' 找所有 Python 文件。\n"
+            "搜索范围：项目根目录、D:\\音乐、D:\\桌面、Documents、Downloads"
+        )
 
     def parameters_schema(self) -> dict:
         return {
@@ -51,10 +63,9 @@ class GlobTool(Tool):
         if not pattern:
             return ToolResult.fail("请提供 glob 模式")
 
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        root = os.path.abspath(os.path.join(project_root, search_root))
-        if not root.startswith(project_root):
-            return ToolResult.fail("路径超出项目目录范围")
+        root = _resolve_search_path(search_root)
+        if root is None:
+            return ToolResult.fail(f"路径不在可访问范围内: {search_root}")
 
         results = []
         for dirpath, _, fnames in os.walk(root):
@@ -96,7 +107,10 @@ class GrepTool(Tool):
         return "grep"
 
     def description(self) -> str:
-        return "用正则表达式搜索文件内容。支持 glob 过滤文件、上下文行数。用于查找代码中的函数定义、配置项、错误信息等。"
+        return (
+            "用正则表达式搜索文件内容。支持 glob 过滤文件、上下文行数。\n"
+            "搜索范围：项目根目录、D:\\音乐、D:\\桌面、Documents、Downloads"
+        )
 
     def parameters_schema(self) -> dict:
         return {
@@ -139,10 +153,9 @@ class GrepTool(Tool):
         if not pattern:
             return ToolResult.fail("请提供搜索模式")
 
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        target = os.path.abspath(os.path.join(project_root, search_path))
-        if not target.startswith(project_root):
-            return ToolResult.fail("路径超出项目目录范围")
+        target = _resolve_search_path(search_path)
+        if target is None:
+            return ToolResult.fail(f"路径不在可访问范围内: {search_path}")
 
         try:
             regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
@@ -187,7 +200,7 @@ class GrepTool(Tool):
                     total_matches += 1
 
             if file_matches:
-                rel = os.path.relpath(filepath, project_root)
+                rel = os.path.relpath(filepath, target)
                 results.append(f"\n--- {rel} ({len(file_matches)} matches) ---")
                 shown = set()
                 for line_num in file_matches[:20]:
