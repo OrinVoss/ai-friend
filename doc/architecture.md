@@ -14,9 +14,9 @@
 ### 安装
 
 ```bash
-pip install requests tiktoken plyer fastapi uvicorn
+pip install -r requirements.txt
 cp config.example.json config.json
-# 编辑 config.json 填入 API Key
+# 编辑 config.json 填入 API Key（或用环境变量 DEEPSEEK_API_KEY）
 ```
 
 ### 启动
@@ -107,17 +107,26 @@ BOOT → IDLE → PERCEIVE → THINK → ACT → REFLECT → IDLE
 - **ACT**：有工具调用则执行并继续迭代，否则输出最终回复
 - **REFLECT**：情绪更新、记忆合并、定期保存
 
-### 情绪模型
+### 情绪模型（四层架构）
 
-VAD 二维空间 + 8 维 Plutchik 基础情绪：
+**Layer 1 — 多维输入**：内容 sentiment + 交互模式（反驳数、回复速度趋势、态度一致性）
 
-| 维度 | 范围 | 说明 |
-|------|------|------|
-| valence | -1~1 | 积极/消极 |
-| arousal | 0~1 | 兴奋/平静 |
-| joy/trust/fear... | 0~1 | 8 维基础情绪 |
+**Layer 2 — 交叉调制 + 分速衰减**：情绪维度互相制约，不同维度不同半衰期
 
-特质调制情绪反应：高 empathy → 情感响应 1.5x，高 playfulness → arousal 衰减慢。
+| 情绪 | 半衰期（轮次） | 说明 |
+|------|--------------|------|
+| surprise | 3 | 转瞬即逝 |
+| fear | 6 | 快 |
+| joy | 12 | 中等 |
+| anger | 15 | 慢，残留 |
+| sadness | 20 | 持久 |
+| trust | 25 | 最难动摇 |
+
+**Layer 3 — 怨恨残留**：anger > 0.6 触发 resentment 累积，压制 joy 上限、减慢 trust 恢复（3%/turn 衰减）
+
+**Layer 4 — 情绪事件记忆**：强情绪自动记录（为什么生气），注入后续 prompt
+
+破防机制：连续 5 次负面交互触发，有累积伤害放大（1.4x/turn），三级递进（轻怼 → 受伤 → 破防）
 
 回复长度随情绪变化：兴奋时 768 tokens，平静时 512，难过时 256。
 

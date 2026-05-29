@@ -256,14 +256,22 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 
 ```
     ┌─────────────────────────────────────────┐
-    │  ① 情感分析                             │
+    │  ① 情感分析（分析用户输入，非 AI 回复） │
     │     consolidator.analyze_sentiment("你好") │
-    │     → {sentiment: 0.3, personal_sharing: false, topic_energy: 0.5} │
+    │     → {sentiment: 0.3, sharing: false, energy: 0.5} │
     │                                          │
-    │  ② 情绪更新（带特质调制 + 惯性阻尼）     │
-    │     dv = 0.3 × 0.3 × 1.5(empathy)       │
-    │     valence += dv × (1 - inertia)        │
-    │     decay → 趋向 baseline → 趋向 mood    │
+    │  ② 情绪更新（四层处理）                 │
+    │     2a. shift(dv, da, primary_deltas)    │
+    │     2b. _cross_modulate()               │
+    │         anger×0.6 → joy↓ trust↓          │
+    │         sadness → joy↓ anticipation↓     │
+    │         resentment 放大压制、锁 joy 天花板│
+    │     2c. 怨恨累积 (anger>0.6 → resentment↑)│
+    │     2d. decay() — 分速衰减                │
+    │         surprise 3t, anger 15t, trust 25t │
+    │         resentment 3%/turn 慢衰减          │
+    │     2e. record_emotion_event()            │
+    │         强情绪自动记录（为什么生气）       │
     │                                          │
     │  ③ 记忆合并检查                          │
     │     should_consolidate() → True?          │
