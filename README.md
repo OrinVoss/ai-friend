@@ -51,7 +51,7 @@
 
 三层检索：Hot Memory → Query-Guided（评分 + LLM重排）→ On-Demand（recall 工具）
 
-### 工具系统（10 个）
+### 工具系统（9 个）
 
 | 工具 | 功能 | 参数 | 后端 |
 |------|------|------|------|
@@ -63,7 +63,6 @@
 | `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT |
 | `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API |
 | `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API |
-| `music_list` | 浏览音乐目录 | path, search | D:\音乐 |
 | `music_play` | 播放音乐（模糊搜索） | song | 默认播放器 |
 
 LLM 通过 `<tool_call>` XML 标签自主调用。每次调用自动记录到 `_tool_call_history`（最多 20 条），注入 prompt。
