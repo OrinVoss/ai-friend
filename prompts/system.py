@@ -217,9 +217,13 @@ def build_system_prompt(
                 "=== 使用提示 ===\n"
                 "- web_search: 用户让你查东西时主动用，别反问他。搜不到就换个关键词再试一次\n"
                 "- web_fetch: 搜索到有趣链接时点进去看详情\n"
-                "- music_list: 用户说\"看看有什么歌\"时用，可以先列目录再搜具体歌手\n"
                 "- music_play: 用户说\"放首歌\"\"来点音乐\"时用，模糊搜索自动匹配\n"
-                "- notify: 用户说\"提醒我\"时发 Windows 桌面通知"
+                "- notify: 用户说\"提醒我\"时发 Windows 桌面通知\n\n"
+                "=== 文件工具使用流程 ===\n"
+                "找文件/列目录 → read_file(目录路径) 或 glob(模式, 路径)\n"
+                "读文件内容 → read_file(文件路径)\n"
+                "搜文件内容 → grep(正则, path=路径, glob=过滤)\n"
+                "工具返回什么就说什么，没找到就说没找到，不要编造。"
             )
 
     # Block 4d: Tool call history (from current session)
@@ -321,7 +325,8 @@ def build_system_prompt(
 - 保持聊天感，一段话别太长
 - 可以偶尔欠揍，但不能真伤人
 - 如果她说了个人信息觉得值得记，用 remember 工具记一下
-- 需要回忆之前的事用 recall 工具查"""
+- 需要回忆之前的事用 recall 工具查
+- **工具调用后必须如实报告结果，不要编造内容。工具返回什么就是什么，没看到就说没看到。**"""
         )
 
     return "\n\n".join(blocks)

@@ -100,8 +100,36 @@ class ReadFileTool(Tool):
 
         if not os.path.exists(resolved):
             return ToolResult.fail(f"文件不存在: {filepath}")
+
+        # If it's a directory, list contents
+        if os.path.isdir(resolved):
+            try:
+                items = sorted(os.listdir(resolved))
+            except PermissionError:
+                return ToolResult.fail(f"无权限访问目录: {filepath}")
+            if not items:
+                return ToolResult.ok(f"目录 {filepath}: (空)")
+            files = []
+            dirs = []
+            for item in items:
+                full = os.path.join(resolved, item)
+                try:
+                    if os.path.isdir(full):
+                        dirs.append(item + "/")
+                    else:
+                        sz = os.path.getsize(full)
+                        files.append((item, sz))
+                except OSError:
+                    files.append((item, 0))
+            lines = [f"目录 {filepath} ({len(items)} 项):"]
+            for d in sorted(dirs)[:30]:
+                lines.append(f"  📁 {d}")
+            for fname, sz in sorted(files)[:50]:
+                lines.append(f"  📄 {fname}  ({sz/1024:.1f} KB)")
+            return ToolResult.ok("\n".join(lines))
+
         if not os.path.isfile(resolved):
-            return ToolResult.fail(f"不是文件: {filepath}")
+            return ToolResult.fail(f"不是文件也不是目录: {filepath}")
 
         size = os.path.getsize(resolved)
         if size > MAX_FILE_SIZE:
