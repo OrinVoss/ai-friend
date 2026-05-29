@@ -66,6 +66,33 @@
 
 LLM 通过 `<tool_call>` XML 标签自主调用。每次调用自动记录到 `_tool_call_history`（最多 20 条），注入 prompt。
 
+### 人格实现
+
+```
+personality.json → PersonalityConfig + EmotionalState
+    │
+    ▼
+每次对话:
+  analyze_sentiment(user_input) → sentiment 值
+  estimate_emotional_impact(sentiment) → trait 调制 → shift()
+  _cross_modulate() → 情绪互相制约
+  decay() → 分速衰减
+    │
+    ▼
+build_system_prompt() → LLM 看到 "我是{name}，{speaking_style}…" + 情绪 + 怨恨
+    │
+    ▼
+AI 回复 = 人格底色 × 当前情绪 × 对话上下文
+```
+
+四层实现：
+1. `personality.json` — 名字、特质、说话风格、背景故事、兴趣
+2. `EmotionalState` — VAD + 8 Plutchik + resentment + emotion_events（运行时动态）
+3. `Personality.estimate_emotional_impact()` — 特质调制情绪变化幅度（高 empathy → 响应 ×1.5）
+4. `prompts/system.py` — 人格翻译为自然语言 + 对话示例 + 破防/怨恨/梦境注入
+
+人格是底色，情绪是滤镜——小星永远嘴贫，但开心时贫得更欢，愤怒时贫中带刺，破防时贫不起来了。
+
 ### 双端界面
 
 | | CLI | Web |
