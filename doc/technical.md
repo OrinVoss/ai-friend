@@ -482,21 +482,129 @@ LLM 输出格式：
 
 每次执行后记录到 `_tool_call_history` (最多 20 条)，注入系统 prompt，AI 可告知用户真实调用记录。
 
-### 5.5 自主行为（作息 + 探索）
+### 5.5 自主行为（作息 + 探索 + 聊天）
 
-#### 作息系统
-- **午睡**: 12:00-13:00 情绪驱动入睡，睡前发消息
-- **午醒**: 13:10-16:00 随机，arousal 高醒得早，分享梦境
-- **夜睡**: 23:30-0:30 情绪驱动入睡，睡前发晚安
-- **晨醒**: 7:00-10:00 随机，分享梦境
+所有自主行为由 `web/server.py:_proactive_loop` 后台协程驱动，15 秒轮询一次。
 
-#### 频率限制
-- 探索：1 次/小时
-- 聊天：2 次/小时
-- 梦境：每次睡眠 1 次
+#### 完整决策流程
 
-#### 梦境生成
-LLM 基于最近事实 + 经历 + 情绪生成碎片化梦境（1-2 句），存储为情绪事件，醒来注入 prompt。
+```
+_proactive_loop (15s tick)
+    │
+    ├──▶ _get_sleep_state()
+    │    │ 检查当前时间是否在睡眠/醒来窗口
+    │    │
+    │    ├── 入睡窗口命中:
+    │    │   │ 午睡 12:00-13:00, 夜睡 23:30-0:30
+    │    │   │
+    │    │   │ sleepiness 计算:
+    │    │   │   base = 0.0
+    │    │   │   +0.4 if sad/melancholy
+    │    │   │   +0.3 if arousal < 0.3
+    │    │   │   -0.2 if excited/joyful
+    │    │   │   +0.2 × resentment
+    │    │   │
+    │    │   │ random() < max(threshold, sleepiness) → 入睡
+    │    │   │
+    │    │   ├── self._sleeping = True
+    │    │   ├── 消息: "我去午睡了…[困]" / "夜深了…晚安[月亮]"
+    │    │   └── _generate_dream()
+    │    │       │ prompt: 事实+经历+情绪 → 碎片化梦境(1-2句)
+    │    │       │ 存储: record_emotion_event("梦: {dream}")
+    │    │
+    │    └── 醒来窗口命中:
+    │         │ 午醒 13:10-16:00, 晨醒 7:00-10:00
+    │         │
+    │         │ wake_chance 计算:
+    │         │   base = 0.3 (午醒) / 0.2 (晨醒)
+    │         │   + (hour - window_start) / window_width (越晚越高)
+    │         │   + (arousal - 0.3) × 0.2 (高 arousal → 醒得早)
+    │         │   - resentment × 0.1 (怨恨 → 醒得晚)
+    │         │
+    │         │ random() < wake_chance → 醒来
+    │         │
+    │         ├── self._sleeping = False
+    │         └── 消息: "睡醒了…做了个梦：{dream}" 或 "没做梦睡得挺香"
+    │
+    ├── ag._sleeping? → await sleep(30), continue (睡着的AI不活动)
+    │
+    ├── idle < 30s? → 绝对底线, continue
+    │
+    ├── idle > 情绪阈值? → _calculate_proactivity(idle)
+    │    │
+    │    │ 情绪阈值表:
+    │    │   excited: 60s    joyful: 90s     engaged: 180s
+    │    │   neutral: 360s   sad: 900s        angry: 480s
+    │    │   + resentment × 300s (额外惩罚)
+    │    │
+    │    │ score 计算:
+    │    │   base = min(0.3, (idle - threshold) / 900)
+    │    │   + time_mod (10-21点 +0.2, 7-22点 +0.1, 深夜 0)
+    │    │   + emotion_mod (arousal × 0.2, sad -0.15)
+    │    │   + intimacy_mod (intimacy × 0.15 + familiarity × 0.1)
+    │    │   + sentiment_mod (positive +0.1, negative -0.3)
+    │    │   - goodbye_penalty (晚安/再见 每句 -0.15)
+    │    │   - short_penalty (短回复 每句 -0.08)
+    │    │   capped at [0, 0.8]
+    │    │
+    │    └── random() < score? → 触发!
+    │         │
+    │         ├── 40% → process_explore()
+    │         │    │ _check_rate_limit("explore"): 距上次 < 1hr → 拒绝
+    │         │    │
+    │         │    │ prompt: explore_mode=True
+    │         │    │ "你现在闲着，可以做点感兴趣的事"
+    │         │    │ "用 web_search 搜好奇的东西"
+    │         │    │ "如果发现了特别有意思的想分享，说出来"
+    │         │    │ "没什么特别就回复'.'或'没啥'"
+    │         │    │
+    │         │    │ _react_loop(messages, add_to_history=False)
+    │         │    │ AI 可自由调用 web_search/web_fetch/music_list 等
+    │         │    │
+    │         │    │ 返回值:
+    │         │    │   len > 30 且非工具输出 → 视为分享 → 发送消息
+    │         │    │   否则 → 返回 None (安静)
+    │         │    │
+    │         │    └── 发送? → cooldown=12 (3min), reset last_activity_time
+    │         │
+    │         └── 60% → process_proactive()
+    │              │ _check_rate_limit("chat"): 距上次 < 30min → 拒绝
+    │              │
+    │              │ prompt: is_proactive=True
+    │              │ "用户有一会儿没说话了。嘴贱一下开启话题"
+    │              │ "调侃一句/分享一下你在想啥/说好无聊"
+    │              │
+    │              │ topic: _pick_proactive_topic()
+    │              │   最近体验/用户事实/通用话题 随机选一
+    │              │
+    │              │ _react_loop(messages, add_to_history=False)
+    │              │ (主动回复不进入短期记忆)
+    │              │
+    │              └── 发送 → cooldown=12, reset last_activity_time
+    │
+    └── 未触发 → await sleep(15), continue
+```
+
+#### 关键实现方法
+
+| 方法 | 位置 | 说明 |
+|------|------|------|
+| `_get_sleep_state()` | core/agent.py | 返回 (should_sleep, message_or_None) |
+| `_generate_dream()` | core/agent.py | LLM 生成 1-2 句碎片化梦境 |
+| `_check_rate_limit(action)` | core/agent.py | explore: 3600s 间隔, chat: 1800s 间隔 |
+| `_calculate_proactivity(idle)` | core/agent.py | 返回 0.0~0.8 的触发概率 |
+| `_pick_proactive_topic()` | core/agent.py | 从经历/事实/通用中随机选话题 |
+| `process_explore()` | core/agent.py | 探索模式: 自由工具调用, 有趣才分享 |
+| `process_proactive()` | core/agent.py | 主动搭话: 调侃/分享/找话题 |
+| `process_dream()` | core/agent.py | 旧版梦境生成 (已被 _generate_dream 替代) |
+
+#### 状态追踪
+
+```python
+self._sleeping: bool = False          # 当前是否在睡眠
+self._last_explore_time: float = 0    # 上次探索时间戳
+self._last_chat_time: float = 0       # 上次聊天时间戳
+```
 
 ### 5.6 虚假操作检测
 
