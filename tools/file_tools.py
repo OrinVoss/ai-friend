@@ -54,7 +54,8 @@ class ReadFileTool(Tool):
     def description(self) -> str:
         return (
             "读取本地文件内容（只读）。自动添加行号，支持分段读取和批量读取。\n"
-            "先用 glob 找文件，再用 grep 搜内容，最后用本工具读具体文件。"
+            "先用 glob 找文件，再用 grep 搜内容，最后用本工具读具体文件。\n"
+            "可读取的目录：项目根目录、D:\\音乐、D:\\桌面、Documents、Downloads"
         )
 
     def parameters_schema(self) -> dict:

@@ -25,7 +25,7 @@ class GlobTool(Tool):
         return "glob"
 
     def description(self) -> str:
-        return "用 glob 模式搜索文件。支持 ** 递归匹配。例如 '**/*.py' 找所有 Python 文件。"
+        return "用 glob 模式搜索文件。支持 ** 递归匹配。例如 '**/*.py' 找所有 Python 文件。搜索范围：项目根目录。"
 
     def parameters_schema(self) -> dict:
         return {
