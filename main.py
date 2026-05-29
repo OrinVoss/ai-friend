@@ -20,6 +20,7 @@ from tools.file_tools import ReadFileTool
 from tools.notify_tool import NotifyTool
 from tools.web_tools import WebSearchTool, WebFetchTool
 from tools.music_tool import MusicListTool, MusicPlayTool
+from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
 
@@ -88,6 +89,8 @@ def main():
     tool_registry.register(WebFetchTool())
     tool_registry.register(MusicListTool())
     tool_registry.register(MusicPlayTool())
+    tool_registry.register(GlobTool())
+    tool_registry.register(GrepTool())
     logger.info(f"Registered {len(tool_registry.list_specs())} tools")
 
     # Initialize agent

@@ -1,14 +1,13 @@
-"""File operation tools: read local files."""
-
-import os
+"""File operation tools: read local files (read-only)."""
 import logging
+import os
 from typing import Any
 
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE = 100 * 1024  # 100KB
+MAX_FILE_SIZE = 500 * 1024  # 500KB
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".py", ".rs", ".js", ".ts", ".json", ".xml", ".html",
     ".css", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
@@ -18,14 +17,36 @@ TEXT_EXTENSIONS = {
 }
 
 
+def _is_binary(filepath: str) -> bool:
+    """Quick check if file is likely binary."""
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(1024)
+        return b"\x00" in chunk
+    except Exception:
+        return False
+
+
+def _path_in_project(filepath: str) -> str | None:
+    """Resolve and check path is in project. Returns absolute path or None."""
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    resolved = os.path.abspath(filepath)
+    if not resolved.startswith(project_root):
+        return None
+    return resolved
+
+
 class ReadFileTool(Tool):
-    """Read content from a local text file."""
+    """Read content from a local text file with line numbers."""
 
     def name(self) -> str:
         return "read_file"
 
     def description(self) -> str:
-        return "读取本地文件的内容。支持文本文件（代码、文档、配置等），最大 100KB。用于查看项目文件、配置文件、笔记等。"
+        return (
+            "读取本地文件内容（只读）。自动添加行号，支持分段读取和批量读取。\n"
+            "先用 glob 找文件，再用 grep 搜内容，最后用本工具读具体文件。"
+        )
 
     def parameters_schema(self) -> dict:
         return {
@@ -33,70 +54,82 @@ class ReadFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "文件路径，相对于项目目录或绝对路径。支持逗号分隔的多个路径",
+                    "description": "文件路径（绝对路径）。支持逗号分隔多个路径，最多 5 个",
                 },
-                "max_chars": {
+                "limit": {
                     "type": "integer",
-                    "description": "每个文件最多读取字符数（默认 10000）",
-                    "default": 10000,
+                    "description": "最多读取多少行（默认 200，最大 2000）",
+                    "default": 200,
                 },
                 "offset": {
                     "type": "integer",
-                    "description": "从文件的第几个字符开始读（默认 0）",
+                    "description": "从第几行开始读（0=第一行）",
                     "default": 0,
                 },
             },
             "required": ["path"],
         }
 
-    def _read_one(self, filepath: str, max_chars: int, offset: int) -> ToolResult:
-        resolved = os.path.abspath(filepath)
-        allowed_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        rel = os.path.relpath(resolved, allowed_root)
-        if rel.startswith(".."):
-            return ToolResult.fail(f"路径超出项目目录范围: {filepath}")
+    def _read_one(self, filepath: str, limit: int, offset: int) -> ToolResult:
+        resolved = _path_in_project(filepath)
+        if resolved is None:
+            return ToolResult.fail(f"路径超出项目范围: {filepath}")
+
         if not os.path.exists(resolved):
             return ToolResult.fail(f"文件不存在: {filepath}")
         if not os.path.isfile(resolved):
-            return ToolResult.fail(f"路径不是文件: {filepath}")
+            return ToolResult.fail(f"不是文件: {filepath}")
+
         size = os.path.getsize(resolved)
         if size > MAX_FILE_SIZE:
-            return ToolResult.fail(f"文件太大 ({size/1024:.0f}KB)，超过 100KB 限制")
-        _, ext = os.path.splitext(resolved)
-        if ext and ext.lower() not in TEXT_EXTENSIONS:
-            return ToolResult.fail(f"不支持的文件类型: {ext}")
+            return ToolResult.fail(f"文件太大 ({size/1024:.0f}KB > {MAX_FILE_SIZE/1024:.0f}KB)")
+
+        if _is_binary(resolved):
+            return ToolResult.fail(f"二进制文件，无法读取文本内容")
+
         try:
             with open(resolved, encoding="utf-8", errors="replace") as f:
-                if offset > 0:
-                    f.seek(offset)
-                content = f.read(max_chars)
-            if len(content) >= max_chars:
-                content += "\n...(已截断)"
-            short_path = os.path.relpath(resolved) if os.path.isabs(resolved) else resolved
-            return ToolResult.ok(f"文件 {short_path} ({size / 1024:.1f}KB, offset={offset}):\n```\n{content}\n```")
+                all_lines = f.readlines()
         except PermissionError:
-            return ToolResult.fail(f"无权限读取文件: {filepath}")
+            return ToolResult.fail(f"无权限: {filepath}")
         except Exception as e:
-            return ToolResult.fail(f"读取文件失败: {e}")
+            return ToolResult.fail(f"读取失败: {e}")
+
+        total_lines = len(all_lines)
+        start = max(0, offset)
+        end = min(total_lines, start + limit)
+        selected = all_lines[start:end]
+
+        short = os.path.relpath(resolved, os.path.join(os.path.dirname(__file__), ".."))
+        header = f"{short}  ({total_lines}行, {size/1024:.1f}KB, L{start+1}-L{end})"
+
+        out = [header]
+        for i, line in enumerate(selected):
+            line_num = start + i + 1
+            out.append(f"{line_num:>6}|{line.rstrip()}")
+
+        if end < total_lines:
+            out.append(f"...(剩余 {total_lines - end} 行, offset={end} 继续)")
+
+        return ToolResult.ok("\n".join(out))
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         filepath_raw = args.get("path", "").strip()
-        max_chars = min(int(args.get("max_chars", 10000)), 50000)
+        limit = min(int(args.get("limit", 200)), 2000)
         offset = max(0, int(args.get("offset", 0)))
 
         if not filepath_raw:
             return ToolResult.fail("请提供文件路径")
 
-        # Support multiple files separated by comma
         paths = [p.strip() for p in filepath_raw.split(",") if p.strip()]
         if len(paths) > 5:
             return ToolResult.fail("最多同时读取 5 个文件")
 
         if len(paths) == 1:
-            return self._read_one(paths[0], max_chars, offset)
+            return self._read_one(paths[0], limit, offset)
 
         results = []
         for p in paths:
-            r = self._read_one(p, max_chars, offset)
+            r = self._read_one(p, limit, offset)
             results.append(r.output if r.success else f"[失败] {p}: {r.output}")
         return ToolResult.ok("\n\n---\n\n".join(results))

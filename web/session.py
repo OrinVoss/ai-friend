@@ -17,6 +17,7 @@ from tools.file_tools import ReadFileTool
 from tools.notify_tool import NotifyTool
 from tools.web_tools import WebSearchTool, WebFetchTool
 from tools.music_tool import MusicListTool, MusicPlayTool
+from tools.search_tools import GlobTool, GrepTool
 from storage.database import Database
 from storage.repository import Repository
 
@@ -59,6 +60,8 @@ class WebAgent:
         registry.register(WebFetchTool())
         registry.register(MusicListTool())
         registry.register(MusicPlayTool())
+        registry.register(GlobTool())
+        registry.register(GrepTool())
         self.tool_registry = registry
 
         self.agent = Agent(

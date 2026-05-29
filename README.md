@@ -51,13 +51,15 @@
 
 三层检索：Hot Memory → Query-Guided（评分 + LLM重排）→ On-Demand（recall 工具）
 
-### 工具系统（8 个）
+### 工具系统（10 个）
 
 | 工具 | 功能 | 参数 | 后端 |
 |------|------|------|------|
 | `recall` | 回忆用户信息或共同经历 | query | SQLite |
 | `remember` | 记住用户重要信息 | category, key, value, importance | SQLite |
-| `read_file` | 读取本地文本文件（≤100KB，限项目目录） | path, max_chars | 本地 IO |
+| `read_file` | 读取本地文件（≤500KB，行号+行偏移+多文件） | path, limit, offset | 本地 IO |
+| `glob` | glob 模式搜索文件（`**/*.py` 等） | pattern, path | 本地遍历 |
+| `grep` | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 |
 | `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT |
 | `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API |
 | `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API |
