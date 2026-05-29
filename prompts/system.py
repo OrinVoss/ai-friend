@@ -165,6 +165,23 @@ def build_system_prompt(
         for r in memory_context.reflections[:3]:
             blocks.append(f"- {r.content}")
 
+    # Dreams (from emotion events) — inject on wake-up
+    dreams = [e for e in getattr(emotion, 'emotion_events', []) if '梦' in e.get('trigger', '')]
+    idle_duration = kwargs.get("idle_duration", 0)
+    if dreams and idle_duration > 600:
+        latest = dreams[-1]
+        blocks.append(
+            f"=== 你刚睡醒 ===\n"
+            f"你刚才睡了{idle_duration/60:.0f}分钟，做了一个梦：\n"
+            f"{latest['trigger']}\n\n"
+            f"用户回来了——可以自然地把梦带到对话里，比如'我刚才做了个奇怪的梦...' "
+            f"或者如果噩梦的话可以说'刚做了个噩梦，看到你真好...'"
+        )
+    elif dreams and idle_duration <= 600:
+        blocks.append("=== 你最近的梦 ===")
+        for d in dreams[-3:]:
+            blocks.append(f"- {d['trigger']}")
+
     # Block 4b: Compressed conversation summary (from context compression)
     if compressed_summary:
         blocks.append(
