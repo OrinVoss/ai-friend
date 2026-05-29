@@ -21,14 +21,18 @@ from config import Config
 MODEL_CONTEXT = 180_000
 COMPRESS_THRESHOLD = int(MODEL_CONTEXT * 0.8)
 
+# DeepSeek v4 uses a BPE tokenizer similar to GPT-4's cl100k_base.
+# tiktoken's cl100k_base is a close approximation for context management.
+# Falls back to character-based heuristic if tiktoken unavailable.
 _TOKENIZER = None
+_TOKENIZER_ENCODING = "cl100k_base"
 
 def _get_tokenizer():
     global _TOKENIZER
     if _TOKENIZER is None:
         try:
             import tiktoken
-            _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+            _TOKENIZER = tiktoken.get_encoding(_TOKENIZER_ENCODING)
         except (ImportError, Exception):
             _TOKENIZER = False
     return _TOKENIZER
@@ -105,8 +109,11 @@ class Agent:
 
     def process_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
+        self.current_input = user_input
+        self.last_activity_time = time.time()
         self.short_term.add_turn("user", user_input)
         mem_ctx = self.retriever.retrieve_for_query(user_input)
+        self.current_memory_context = mem_ctx
         self.ltm.repo.insert_turn(self.turn_count, "user", user_input, str(self.personality.emotion.to_dict()))
         conv_hist = self.short_term.format_for_prompt(max_chars=3000)
         sys_prompt = build_system_prompt(
