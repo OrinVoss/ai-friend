@@ -97,7 +97,7 @@ class Agent:
         self._prompt_shown: bool = False
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
-        self._max_tool_iterations: int = 5
+        self._max_tool_iterations: int = 10
         self._tool_registry: ToolRegistry = ToolRegistry()
 
     def _max_tokens_for_emotion(self) -> int:
@@ -258,7 +258,7 @@ class Agent:
             resp = self.provider.generate(
                 messages, stream=False if _ > 0 else True,
                 on_token=on_token if _ == 0 else None,
-                max_tokens=max_tok if _ == 0 else max(256, max_tok // 2),
+                max_tokens=max_tok if _ == 0 else max(384, max_tok * 2 // 3),
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
@@ -431,7 +431,7 @@ class Agent:
             if self.ui:
                 self.ui.display.print_system(f"思考中... (第{self._react_iteration}轮)")
             try:
-                full_response = self.provider.generate(messages, stream=False, max_tokens=128)
+                full_response = self.provider.generate(messages, stream=False, max_tokens=384)
             except ConnectionError as e:
                 if self.ui:
                     self.ui.display.print_error(f"网络连接失败：{e}")
