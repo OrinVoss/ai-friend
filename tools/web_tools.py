@@ -83,25 +83,14 @@ class WebSearchTool(Tool):
                 arguments["freshness"] = freshness
             result = _anysearch_api("search", arguments)
 
-            items = result.get("content", []) or result.get("results", [])
-            if isinstance(items, str):
-                items = [{"snippet": items}]
+            # AnySearch returns content as [{"type": "text", "text": "markdown..."}]
+            content = result.get("content", [])
+            if isinstance(content, str):
+                return ToolResult.ok(f"搜索「{query}」结果：\n{content}")
+            if isinstance(content, list) and content and "text" in content[0]:
+                return ToolResult.ok(f"搜索「{query}」结果：\n{content[0]['text']}")
 
-            if not items:
-                return ToolResult.ok(f"未找到关于「{query}」的结果。")
-
-            lines = [f"搜索「{query}」结果："]
-            for i, item in enumerate(items[:max_results], 1):
-                title = item.get("title", "") or item.get("name", "")
-                snippet = item.get("snippet", "") or item.get("description", "") or item.get("content", "")
-                url = item.get("url", "") or item.get("link", "")
-                lines.append(f"{i}. {title}")
-                if snippet:
-                    lines.append(f"   {snippet}")
-                if url:
-                    lines.append(f"   {url}")
-
-            return ToolResult.ok("\n".join(lines))
+            return ToolResult.ok(f"未找到关于「{query}」的结果。")
         except Exception as e:
             logger.warning(f"Web search failed: {e}")
             return ToolResult.fail(f"搜索失败: {e}")
