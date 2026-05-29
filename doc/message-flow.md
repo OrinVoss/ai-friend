@@ -98,7 +98,8 @@ _proactive_loop (15s tick)
     │        午醒: 13:10-16:00, 晨醒: 7:00-10:00
     │        arousal 高 → 醒得早, resentment 高 → 醒得晚
     │
-    ├── ag._sleeping? → skip (睡着的AI不活动)
+    ├── ag._sleeping? → await sleep(30), continue
+    │   (睡着的AI: 所有消息自动回复 "zzz...💤", 探索暂停)
     │
     ├── idle < 30s? → skip
     │

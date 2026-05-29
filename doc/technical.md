@@ -526,7 +526,7 @@ _proactive_loop (15s tick)
     │         ├── self._sleeping = False
     │         └── 消息: "睡醒了…做了个梦：{dream}" 或 "没做梦睡得挺香"
     │
-    ├── ag._sleeping? → await sleep(30), continue (睡着的AI不活动)
+    ├── ag._sleeping? → skip + 用户消息 "zzz...💤"
     │
     ├── idle < 30s? → 绝对底线, continue
     │
