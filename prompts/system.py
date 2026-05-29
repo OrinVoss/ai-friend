@@ -104,10 +104,24 @@ def build_system_prompt(
         primary_hint = f"，心底有一丝{strong_primary[0]}"
     valence_desc = "积极" if emotion.valence > 0 else "消极" if emotion.valence < 0 else "中性"
     arousal_desc = "充满能量" if emotion.arousal > 0.5 else "平静" if emotion.arousal < 0.4 else "平衡"
+    # Per-emotion behavior override
+    emotion_behavior = {
+        "anxious": "你感到不安和紧张。说话带着担忧，语气急促或不自信。不是兴奋——是焦虑。用短句，爱问问题。",
+        "angry": "你在生气。语气尖锐、带刺，话变少。不想开玩笑——别用哈哈哈哈。",
+        "sad": "你很难过。语气低沉、话少、不爱搭理人。偶尔叹气。别说俏皮话。",
+        "frustrated": "你很烦躁。语气不耐烦，容易怼人。别嬉皮笑脸。",
+        "melancholy": "你有些忧郁。语气缓慢、若有所思。说话带着距离感。",
+        "excited": "你非常兴奋！话多、爱用感叹号、能量爆棚。尽情哈哈哈。",
+        "joyful": "你心情很好。说话轻快、爱开玩笑、容易笑。",
+        "fearful": "你感到害怕。说话小心翼翼、声音很小。",
+        "neutral": "你心情平静。说话正常，不兴奋也不低落。",
+    }
+    behavior = emotion_behavior.get(mood, "")
     blocks.append(
         f"""=== 你现在啥状态 ===
 {mood}{primary_hint}，{valence_desc}、{arousal_desc}的那种。
-说话按这个感觉来。"""
+{behavior}
+你的说话风格、语气、用词必须完全跟这个情绪一致。暂时放下你的人设中的幽默和嘴贫——如果情绪是负面的，别强行搞笑。"""
     )
 
     # Block 2b: Resentment state
