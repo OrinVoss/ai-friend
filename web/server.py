@@ -130,7 +130,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
         try:
             _, agent = session_manager.get_or_create(session_id)
             idle = time.time() - agent.agent.last_activity_time
-            if idle < config.proactive_min_idle or cooldown > 0:
+            if idle < 30 or cooldown > 0:  # absolute floor, emotion handles rest
                 cooldown = max(0, cooldown - 1)
                 await asyncio.sleep(5)
                 continue

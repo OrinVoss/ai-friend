@@ -479,10 +479,28 @@ class Agent:
             self.ui.display.print_system(f"未知命令: {cmd}")
 
     def _calculate_proactivity(self, idle_duration: float) -> float:
-        base = min(0.3, idle_duration / 600.0)
+        e = self.personality.emotion
+
+        # Emotion-driven idle threshold (seconds)
+        r = getattr(e, 'resentment', 0.0)
+        idle_thresholds = {
+            "excited": 60, "joyful": 90, "surprised": 120,
+            "engaged": 180, "content": 300, "trusting": 240, "anticipating": 150,
+            "neutral": 360,
+            "anxious": 90, "afraid": 180,
+            "melancholy": 600, "sad": 900,
+            "frustrated": 300, "angry": 480, "disgusted": 600,
+        }
+        min_idle = idle_thresholds.get(e.dominant_emotion, 300)
+        # Resentment increases idle time (still upset, needs space)
+        min_idle += int(r * 300)
+
+        if idle_duration < min_idle:
+            return 0.0
+
+        base = min(0.3, (idle_duration - min_idle) / 900.0)
         hour = datetime.now().hour
         time_mod = 0.2 if 10 <= hour <= 21 else 0.1 if 7 <= hour <= 22 else 0.0
-        e = self.personality.emotion
         emotion_mod = e.arousal * 0.2
         if e.dominant_emotion in ("melancholy", "sad", "frustrated", "afraid"):
             emotion_mod -= 0.15
