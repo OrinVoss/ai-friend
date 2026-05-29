@@ -82,6 +82,8 @@ class Agent:
         self._sleeping: bool = False  # sleep/wake state
         self._last_explore_time: float = 0  # rate limit: max 1/hr
         self._last_chat_time: float = 0  # rate limit: max 2/hr
+        self._compressing = False  # recursion guard for _compress_context
+        self._running = True
         e = self.personality.emotion
         neg_score = max(e.anger, e.sadness, e.disgust)
         if neg_score > 0.8:
@@ -89,9 +91,7 @@ class Agent:
         elif neg_score > 0.5:
             self._consecutive_negative = 2
         else:
-            self._compressing = False  # recursion guard for _compress_context
-        self._consecutive_negative = 0
-        self._running = True
+            self._consecutive_negative = 0
         self._compressed_summary: str = ""
         self._estimated_tokens_used: int = 0
         self._prompt_shown: bool = False
@@ -209,46 +209,6 @@ class Agent:
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
             return result
         return None
-
-    def process_dream(self) -> str:
-        """Generate a dream during deep idle/sleep. Not shared with user."""
-        from prompts.system import CONTEXT_COMPRESS_PROMPT
-        recent = self.short_term.format_for_prompt(max_chars=2000)
-        facts = self.ltm.get_all_active_facts(limit=10)
-        exps = self.ltm.get_recent_experiences(limit=5)
-        fact_str = "\n".join(f"- {f.fact_key}: {f.fact_value}" for f in facts)
-        exp_str = "\n".join(f"- [{e.emotional_tone}] {e.summary}" for e in exps)
-
-        dream_prompt = f"""你即将入睡。请基于以下记忆碎片生成一段梦境。
-梦境应该是碎片化的、跳跃的、带有情感色彩的——就像真实的梦一样。
-不需要逻辑连贯，可以有超现实的元素。
-
-=== 最近对话 ===
-{recent}
-
-=== 你知道的事实 ===
-{fact_str}
-
-=== 共同经历 ===
-{exp_str}
-
-=== 当前情绪 ===
-{self.personality.emotion.dominant_emotion}
-
-请用 2-3 句话描述你今晚的梦境。用第一人称，带点诗意。"""
-        try:
-            dream = self.provider.generate(
-                [{"role": "user", "content": dream_prompt}],
-                stream=False, max_tokens=200,
-            )
-            # Store dream as emotion event
-            self.personality.emotion.record_emotion_event(
-                trigger=f"梦: {dream[:100]}",
-                context=dream[:200],
-            )
-            return dream.strip()
-        except Exception:
-            return ""
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
