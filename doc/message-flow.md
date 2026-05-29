@@ -78,6 +78,68 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 
 ---
 
+### 1.5 自主行为循环（Web 后台协程）
+
+```
+_proactive_loop (15s tick)
+    │
+    ├──▶ _get_sleep_state()
+    │    │ 检查是否在睡眠时间窗口
+    │    │ 午睡: 12:00-13:00, 夜睡: 23:30-0:30
+    │    │ 情绪驱动 sleepiness:
+    │    │   sad/melancholy +0.4, low arousal +0.3
+    │    │   excited/joyful -0.2, resentment +0.2
+    │    │
+    │    ├── 触发入睡 → 发睡前消息 → _generate_dream()
+    │    │   LLM: 基于事实+经历+情绪 → 碎片化梦境(1-2句)
+    │    │   存储: record_emotion_event("梦: ...")
+    │    │
+    │    └── 触发醒来 → 发梦境分享消息
+    │        午醒: 13:10-16:00, 晨醒: 7:00-10:00
+    │        arousal 高 → 醒得早, resentment 高 → 醒得晚
+    │
+    ├── ag._sleeping? → skip (睡着的AI不活动)
+    │
+    ├── idle < 30s? → skip
+    │
+    ├── idle > 情绪阈值? → _calculate_proactivity()
+    │    │ excited 60s, joyful 90s, engaged 180s
+    │    │ neutral 360s, sad 900s, angry 480s
+    │    │ resentment 额外 +300s
+    │    │
+    │    └── random < score?
+    │         │
+    │         ├── 40% → process_explore()
+    │         │    │ _check_rate_limit("explore") → 1/hr
+    │         │    │ prompt: explore_mode=True
+    │         │    │ AI 自主: web_search, web_fetch, music_list...
+    │         │    │ 有趣的? → 返回分享消息
+    │         │    │ 没趣的? → 返回 None (安静)
+    │         │
+    │         └── 60% → process_proactive()
+    │              │ _check_rate_limit("chat") → 2/hr
+    │              │ prompt: is_proactive=True
+    │              │ 主动搭话, 调侃, 分享日常
+    │              │ add_to_history=False (不发到短期记忆)
+    │
+    └── 未命中 → await asyncio.sleep(15)
+```
+
+### 工具调用记录
+
+每次 `_react_loop` 中执行工具后:
+```
+self._tool_call_history.append({
+    "name": tool_name,
+    "success": True/False,
+    "output": result[:200],
+    "time": time.time(),
+})
+```
+最多保留 20 条, 注入下一次 prompt (`=== 你的工具调用记录 ===`)。
+
+---
+
 ### 2. PERCEIVE — 理解输入（CLI 独占，Web 走 process_message）
 
 ```

@@ -460,16 +460,27 @@ LLM 输出格式：
 
 ### 5.4 内置工具（8 个）
 
-| 工具 | 功能 | 后端 |
-|------|------|------|
-| recall | 回忆用户信息或共同经历 | SQLite + embedding |
-| remember | 记住用户重要信息 | SQLite upsert |
-| read_file | 读取本地文本文件（限 100KB） | 本地文件系统 |
-| notify | Windows toast 通知 | PowerShell WinRT |
-| web_search | 网络搜索，支持中文 + 时效过滤 | AnySearch API |
-| web_fetch | 提取网页正文内容 | AnySearch extract |
-| music_list | 浏览音乐目录，搜索歌曲 | D:\音乐 |
-| music_play | 播放音乐文件 | 默认播放器 |
+| 工具 | 功能 | 参数 | 后端 |
+|------|------|------|------|
+| recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 |
+| remember | 记住用户重要信息 | category, key, value, importance | SQLite upsert |
+| read_file | 读取本地文本文件（限 100KB，路径限项目目录） | path, max_chars | 本地文件系统 |
+| notify | Windows toast 桌面通知（独立线程，不阻塞） | title, message, duration | PowerShell WinRT |
+| web_search | 网络搜索，支持中文 + freshness(day/week/month/year) | query, max_results, freshness | AnySearch API (JSON-RPC 2.0) |
+| web_fetch | 提取网页正文内容（自动去 HTML） | url | AnySearch extract |
+| music_list | 浏览 D:\音乐 目录，列出子目录和歌曲，支持搜索 | path, search | 本地文件系统 |
+| music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile |
+
+#### 工具别名归一化
+
+`_normalize_args()` 自动处理参数别名:
+- `query/search/keyword/question` → `query`
+- `text/msg/content` → `content` (message 保留原样，供 notify 使用)
+- `person/who/user/target` → `name`
+
+#### 工具调用记录
+
+每次执行后记录到 `_tool_call_history` (最多 20 条)，注入系统 prompt，AI 可告知用户真实调用记录。
 
 ### 5.5 自主行为（作息 + 探索）
 
