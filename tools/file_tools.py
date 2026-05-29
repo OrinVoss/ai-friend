@@ -33,61 +33,70 @@ class ReadFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "文件路径，相对于项目目录或绝对路径",
+                    "description": "文件路径，相对于项目目录或绝对路径。支持逗号分隔的多个路径",
                 },
                 "max_chars": {
                     "type": "integer",
-                    "description": "最多读取多少字符（默认 10000）",
+                    "description": "每个文件最多读取字符数（默认 10000）",
                     "default": 10000,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "从文件的第几个字符开始读（默认 0）",
+                    "default": 0,
                 },
             },
             "required": ["path"],
         }
 
-    def execute(self, args: dict[str, Any]) -> ToolResult:
-        filepath = args.get("path", "").strip()
-        max_chars = int(args.get("max_chars", 10000))
-
-        if not filepath:
-            return ToolResult.fail("请提供文件路径")
-
-        # Resolve path and restrict to project directory
+    def _read_one(self, filepath: str, max_chars: int, offset: int) -> ToolResult:
         resolved = os.path.abspath(filepath)
-        project_dir = os.path.abspath(os.path.dirname(__file__) or ".")
-        # Allow up to 2 levels above tools/ for project root
         allowed_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         rel = os.path.relpath(resolved, allowed_root)
         if rel.startswith(".."):
             return ToolResult.fail(f"路径超出项目目录范围: {filepath}")
         if not os.path.exists(resolved):
             return ToolResult.fail(f"文件不存在: {filepath}")
-
         if not os.path.isfile(resolved):
             return ToolResult.fail(f"路径不是文件: {filepath}")
-
-        # Check file size
         size = os.path.getsize(resolved)
         if size > MAX_FILE_SIZE:
-            return ToolResult.fail(
-                f"文件太大 ({size/1024:.0f}KB)，超过 100KB 限制"
-            )
-
-        # Check extension (warn but allow if no extension)
+            return ToolResult.fail(f"文件太大 ({size/1024:.0f}KB)，超过 100KB 限制")
         _, ext = os.path.splitext(resolved)
         if ext and ext.lower() not in TEXT_EXTENSIONS:
-            return ToolResult.fail(
-                f"不支持的文件类型: {ext}。支持: {', '.join(sorted(TEXT_EXTENSIONS))}"
-            )
-
+            return ToolResult.fail(f"不支持的文件类型: {ext}")
         try:
             with open(resolved, encoding="utf-8", errors="replace") as f:
+                if offset > 0:
+                    f.seek(offset)
                 content = f.read(max_chars)
             if len(content) >= max_chars:
-                content += "\n...(已截断，文件超过读取限制)"
-
+                content += "\n...(已截断)"
             short_path = os.path.relpath(resolved) if os.path.isabs(resolved) else resolved
-            return ToolResult.ok(f"文件 {short_path} ({size / 1024:.1f}KB):\n```\n{content}\n```")
+            return ToolResult.ok(f"文件 {short_path} ({size / 1024:.1f}KB, offset={offset}):\n```\n{content}\n```")
         except PermissionError:
             return ToolResult.fail(f"无权限读取文件: {filepath}")
         except Exception as e:
             return ToolResult.fail(f"读取文件失败: {e}")
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        filepath_raw = args.get("path", "").strip()
+        max_chars = min(int(args.get("max_chars", 10000)), 50000)
+        offset = max(0, int(args.get("offset", 0)))
+
+        if not filepath_raw:
+            return ToolResult.fail("请提供文件路径")
+
+        # Support multiple files separated by comma
+        paths = [p.strip() for p in filepath_raw.split(",") if p.strip()]
+        if len(paths) > 5:
+            return ToolResult.fail("最多同时读取 5 个文件")
+
+        if len(paths) == 1:
+            return self._read_one(paths[0], max_chars, offset)
+
+        results = []
+        for p in paths:
+            r = self._read_one(p, max_chars, offset)
+            results.append(r.output if r.success else f"[失败] {p}: {r.output}")
+        return ToolResult.ok("\n\n---\n\n".join(results))
