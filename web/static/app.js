@@ -1,6 +1,30 @@
 let ws = null;
 let sessionId = getCookie('session_id') || '';
 let isProcessing = false;
+let lastMessageTime = 0;
+
+function formatTime(ts) {
+    var d = new Date(ts);
+    var h = d.getHours();
+    var m = d.getMinutes();
+    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+}
+
+function insertTimeMarker(ts) {
+    var container = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'time-marker';
+    div.textContent = formatTime(ts);
+    container.appendChild(div);
+}
+
+function maybeInsertTimeMarker() {
+    var now = Date.now();
+    if (now - lastMessageTime > 120000) {  // 2 min gap
+        insertTimeMarker(now);
+    }
+    lastMessageTime = now;
+}
 
 function getCookie(name) {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -153,6 +177,7 @@ function addSystemMessage(text) {
 
 function createMessage(role, content) {
     var container = document.getElementById('chat-messages');
+    maybeInsertTimeMarker();
     var div = document.createElement('div');
     div.className = 'message ' + role;
     var av = document.createElement('div');
