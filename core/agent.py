@@ -89,7 +89,7 @@ class Agent:
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
         self._max_tool_iterations: int = 5
-        self._tool_registry: ToolRegistry | None = None
+        self._tool_registry: ToolRegistry = ToolRegistry()
 
     def _max_tokens_for_emotion(self) -> int:
         base = self.config.max_tokens
@@ -117,7 +117,7 @@ class Agent:
         )
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
-        for t in reversed(self.short_term.get_all()):
+        for t in self.short_term.get_all_reversed():
             role = "assistant" if t.role == "assistant" else "user"
             if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 overflow = True
@@ -145,7 +145,7 @@ class Agent:
         )
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
-        for t in reversed(self.short_term.get_all()):
+        for t in self.short_term.get_all_reversed():
             role = "assistant" if t.role == "assistant" else "user"
             if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 overflow = True
@@ -303,7 +303,7 @@ class Agent:
             )
             messages = [{"role": "system", "content": sys_prompt}]
             self._estimated_tokens_used = estimate_tokens(sys_prompt)
-            for t in reversed(self.short_term.get_all()):
+            for t in self.short_term.get_all_reversed():
                 role = "assistant" if t.role == "assistant" else "user"
                 msg_tokens = estimate_tokens(t.content)
                 if self._estimated_tokens_used + msg_tokens > COMPRESS_THRESHOLD:

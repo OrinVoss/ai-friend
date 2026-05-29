@@ -39,6 +39,11 @@ class ConversationBuffer:
         with self._lock:
             return list(self._turns)
 
+    def get_all_reversed(self) -> list[Turn]:
+        """Return turns in reverse order (newest first) without extra copy."""
+        with self._lock:
+            return list(reversed(self._turns))
+
     def format_for_prompt(self, max_chars: int = 3000) -> str:
         with self._lock:
             lines = []
