@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any
 
-from tools.file_tools import ALLOWED_READ_ROOTS
+from tools.file_tools import _get_allowed_roots
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -14,16 +14,12 @@ logger = logging.getLogger(__name__)
 def _resolve_search_path(search_path: str) -> str | None:
     """Resolve a search path, return absolute if within any allowed root."""
     resolved = os.path.abspath(search_path)
-    for root in ALLOWED_READ_ROOTS:
+    for root in _get_allowed_roots():
         try:
             if resolved.startswith(os.path.abspath(root)):
                 return resolved
         except Exception:
             pass
-    # Also allow searching within project root subdirectories
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if resolved.startswith(project_root):
-        return resolved
     return None
 
 

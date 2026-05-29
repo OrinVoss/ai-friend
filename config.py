@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 
@@ -26,6 +26,13 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8000
     log_level: str = "INFO"
+    allowed_read_paths: list[str] = field(default_factory=lambda: [
+        ".",
+        "D:\\音乐",
+        "D:\\桌面",
+        "~/Documents",
+        "~/Downloads",
+    ])
 
 
 CONFIG_PATH = "config.json"

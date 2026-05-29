@@ -27,21 +27,34 @@ def _is_binary(filepath: str) -> bool:
         return False
 
 
-# Allowed read directories (absolute paths)
-ALLOWED_READ_ROOTS = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),  # project root
-    r"D:\音乐",
-    r"D:\桌面",
-    os.path.expanduser("~/Documents"),
-    os.path.expanduser("~/Downloads"),
-]
+def _get_allowed_roots() -> list[str]:
+    """Load allowed read directories from config."""
+    try:
+        from config import load_config
+        cfg = load_config()
+        paths = []
+        project = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        for p in getattr(cfg, 'allowed_read_paths', []):
+            if p == ".":
+                paths.append(project)
+            else:
+                paths.append(os.path.abspath(os.path.expanduser(p)))
+        if project not in paths:
+            paths.append(project)
+        return paths
+    except Exception:
+        return [os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))]
+
 
 def _path_in_allowed(filepath: str) -> str | None:
     """Resolve and check path is in an allowed directory. Returns absolute path or None."""
     resolved = os.path.abspath(filepath)
-    for root in ALLOWED_READ_ROOTS:
-        if resolved.startswith(os.path.abspath(root)):
-            return resolved
+    for root in _get_allowed_roots():
+        try:
+            if resolved.startswith(os.path.abspath(root)):
+                return resolved
+        except Exception:
+            pass
     return None
 
 
