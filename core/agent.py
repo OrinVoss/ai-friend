@@ -404,19 +404,9 @@ class Agent:
         self._tool_calls_pending = []
 
     def _on_reflect(self) -> None:
-        if self.current_response:
-            sentiment, sharing, energy = 0.1, False, 0.5
-            last_user_turn = ""
-            if self.short_term.get_all():
-                last = self.short_term.get_all()[-1]
-                if last.role == "user":
-                    last_user_turn = last.content
-                    sentiment, sharing, energy = self.consolidator.analyze_sentiment(last.content)
-            self.personality.apply_emotional_shift(sentiment, sharing, energy)
-            self.personality.emotion.record_emotion_event(
-                trigger=last_user_turn[:100],
-                context=last_user_turn[:200],
-            )
+        # Sentiment analysis + emotional shift already done in _react_loop
+        # (shared by both CLI and Web paths). _on_reflect handles only
+        # consolidation, pending turns, and periodic save.
         ei = abs(self.personality.emotion.valence)
         idle = time.time() - self.last_activity_time
         if self.consolidator.should_consolidate(self.turn_count, ei, idle, self.config):
