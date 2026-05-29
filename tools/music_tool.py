@@ -146,21 +146,7 @@ class MusicPlayTool(Tool):
 
     def _play(self, filepath: str, display_name: str) -> ToolResult:
         try:
-            # Use PowerShell to play audio via Windows Media Player COM
-            ps = f'''
-$player = New-Object -ComObject WMPlayer.OCX
-$player.URL = '{filepath}'
-$player.controls.play()
-'''
-            subprocess.Popen(
-                ['powershell', '-NoProfile', '-Command', ps],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            os.startfile(filepath)
             return ToolResult.ok(f"正在播放: {display_name}")
         except Exception as e:
-            # Fallback: open with default player
-            try:
-                os.startfile(filepath)
-                return ToolResult.ok(f"正在播放: {display_name}")
-            except Exception as e2:
-                return ToolResult.fail(f"播放失败: {e2}")
+            return ToolResult.fail(f"播放失败: {e}")

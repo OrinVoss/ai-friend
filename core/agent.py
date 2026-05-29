@@ -78,6 +78,7 @@ class Agent:
         self.current_response: str = ""
         self.current_memory_context: MemoryContext | None = None
         self._proactive_count = 0
+        self._tool_call_history: list[dict] = []  # recent tool call records
         e = self.personality.emotion
         neg_score = max(e.anger, e.sadness, e.disgust)
         if neg_score > 0.8:
@@ -122,6 +123,7 @@ class Agent:
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=self._compressed_summary, tools=self._tool_registry,
             consecutive_negative=self._consecutive_negative,
+            tool_call_history=self._tool_call_history,
         )
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
@@ -180,6 +182,15 @@ class Agent:
                 break
             messages.append({"role": "assistant", "content": resp})
             results = execute_tool_calls(self._tool_registry, calls)
+            for r in results:
+                self._tool_call_history.append({
+                    "name": r["name"],
+                    "success": r["success"],
+                    "output": r["output"][:200],
+                    "time": time.time(),
+                })
+            if len(self._tool_call_history) > 20:
+                self._tool_call_history = self._tool_call_history[-20:]
             messages.append({"role": "user", "content": format_tool_results(results)})
 
         if final_text:

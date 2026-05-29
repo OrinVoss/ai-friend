@@ -28,6 +28,7 @@ def build_system_prompt(
     compressed_summary: str = "",
     tools=None,
     consecutive_negative: int = 0,
+    **kwargs,
 ) -> str:
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -181,8 +182,22 @@ def build_system_prompt(
                 "示例：\n"
                 '<tool_call>\n{"name": "recall", "arguments": {"query": "用户喜欢什么"}}\n</tool_call>\n\n'
                 "工具会依次执行，执行结果会返回给你。如果需要多次调用工具，继续输出 <tool_call> 即可。\n"
-                "如果不需要调用工具，正常回复就好。"
+                "如果不需要调用工具，正常回复就好。\n\n"
+                "=== 使用提示 ===\n"
+                "- web_search: 用户让你查东西时主动用，别反问他。搜不到就换个关键词再试一次\n"
+                "- web_fetch: 搜索到有趣链接时点进去看详情\n"
+                "- music_list: 用户说\"看看有什么歌\"时用，可以先列目录再搜具体歌手\n"
+                "- music_play: 用户说\"放首歌\"\"来点音乐\"时用，模糊搜索自动匹配\n"
+                "- notify: 用户说\"提醒我\"时发 Windows 桌面通知"
             )
+
+    # Block 4d: Tool call history (from current session)
+    tool_history = kwargs.get("tool_call_history", [])
+    if tool_history:
+        blocks.append("=== 你的工具调用记录 ===")
+        for tc in tool_history[-5:]:
+            status = "✅" if tc["success"] else "❌"
+            blocks.append(f"- {status} {tc['name']}: {tc['output'][:100]}")
 
     # Block 5: Recent Conversation
     blocks.append("=== 最近对话 ===")
