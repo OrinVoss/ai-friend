@@ -203,7 +203,7 @@ class Agent:
         if interests:
             picked = random.sample(interests, min(2, len(interests)))
             interest_hint = f"可以搜搜关于{'/'.join(picked)}的内容，或者看看最近有什么相关新闻。"
-        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。发现了特别有意思的再分享，没什么就安静待着。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
+        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。**你必须真的调用工具去搜一下**——别直接说没啥。搜完了如果发现有特别有意思的，分享出来；实在没意思才说没啥。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
         result = self._react_loop(messages, on_token=None, add_to_history=False)
         # Only share if result is substantial (not just "ok" or tool output)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
