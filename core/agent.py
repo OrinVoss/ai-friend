@@ -85,7 +85,8 @@ class Agent:
         elif neg_score > 0.5:
             self._consecutive_negative = 2
         else:
-            self._consecutive_negative = 0
+            self._compressing = False  # recursion guard for _compress_context
+        self._consecutive_negative = 0
         self._running = True
         self._compressed_summary: str = ""
         self._estimated_tokens_used: int = 0
@@ -171,7 +172,7 @@ class Agent:
             resp = self.provider.generate(
                 messages, stream=False if _ > 0 else True,
                 on_token=on_token if _ == 0 else None,
-                max_tokens=max_tok if _ == 0 else 128,
+                max_tokens=max_tok if _ == 0 else max(256, max_tok // 2),
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
@@ -504,6 +505,15 @@ class Agent:
         return self._proactive_count > 0 and self.current_input is None
 
     def _compress_context(self, messages: list[dict]) -> None:
+        if self._compressing:
+            return  # prevent recursive compression
+        self._compressing = True
+        try:
+            self._do_compress(messages)
+        finally:
+            self._compressing = False
+
+    def _do_compress(self, messages: list[dict]) -> None:
         from prompts.system import CONTEXT_COMPRESS_PROMPT
         parts = []
         for m in messages:
