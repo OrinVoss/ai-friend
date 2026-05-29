@@ -2,136 +2,221 @@
 
 > 最后更新：2026-05-29 | 总计 76 issues（24 已完成，52 开放）
 
-## 版本规划
+---
 
-| 版本 | 聚焦 | Issues | 已完成 | 开放 |
-|------|------|--------|--------|------|
-| v0.1 | 基础架构稳定 | 29 | 17 | 12 |
-| v0.2 | 记忆系统升级 | 9 | 0 | 9 |
-| v0.3 | 情感与人格 | 9 | 4 | 5 |
-| v0.4 | Web 工程化 | 8 | 1 | 7 |
-| v0.5 | 前瞻与质量 | 21 | 2 | 19 |
+## 总览
+
+```
+v0.1 ████████████████░░░░ 58%  基础架构稳定
+v0.2 ░░░░░░░░░░░░░░░░░░░░  0%  记忆系统升级
+v0.3 ████████░░░░░░░░░░░░ 44%  情感与人格
+v0.4 ██░░░░░░░░░░░░░░░░░░ 13%  Web 工程化
+v0.5 █░░░░░░░░░░░░░░░░░░░ 10%  前瞻与质量
+```
 
 ---
 
 ## v0.1 — 基础架构稳定（17/29 完成）
 
+**目标**：消除代码审查报告中的关键 bug 和安全问题，让项目达到可维护的基线。
+
 ### 已完成
 
-| # | 标签 | 标题 |
-|---|------|------|
-| #3 | enhancement | 配置管理：支持环境变量覆盖 |
-| #11 | bug | Session 泄漏：WebAgent 字典永不清理 |
-| #12 | bug | 竞争条件：多 proactive_loop 冲突 |
-| #13 | security | 安全：API Key 改为环境变量读取 |
-| #14 | refactoring | 工厂函数：消除 main.py/session.py 重复初始化 |
-| #15 | performance | 性能：情感分析每轮重复调用两次 |
-| #16 | security | 安全：ReadFileTool 路径穿越 |
-| #17 | bug | 线程安全：ConversationBuffer 加锁 |
-| #18 | bug | 错误处理：bare except 静默吞异常 |
-| #31 | refactoring | 重构：统一 CLI/API 双代码路径 |
-| #33 | bug | Bug：API 路径上下文压缩永不触发 |
-| #34 | bug | 配置：config.json 与 config.py 默认值不一致 |
-| #35 | bug | Schema 迁移：ALTER TABLE 每次启动都执行 |
-| #36 | bug | 数据安全：Reflections 直接 DELETE 无软删除 |
-| #37 | bug | Bug：format_for_prompt 截断方向错误 |
-| #38 | bug | 超时：provider 180s timeout 硬编码 |
-| #39 | infrastructure | 工程：缺 requirements.txt |
+#### 安全加固
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #13 | API Key 环境变量读取 | `config.py` 支持 `DEEPSEEK_API_KEY` 等环境变量覆盖 |
+| #16 | ReadFileTool 路径穿越 | 限制读取范围在项目目录内 |
 
-### 开放
+#### 线程安全与错误处理
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #17 | ConversationBuffer 加锁 | 所有读写操作包裹 `threading.Lock` |
+| #18 | bare except 清理 | 替换为具体异常类型，加日志 |
 
-| # | 标签 | 标题 | 说明 |
+#### 配置与 Schema
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #34 | config.json 默认值不一致 | 补全 `api_timeout`、`max_facts` 等缺失字段 |
+| #35 | Schema 迁移重复 ALTER | 改为 `PRAGMA table_info` 检查列存在性 |
+| #36 | Reflections 软删除 | 新增 `is_active` 列，DELETE → UPDATE |
+| #38 | timeout 配置化 | 新增 `api_timeout` 配置项，不再硬编码 180s |
+| #39 | 缺 requirements.txt | 锁定 5 个依赖及版本 |
+
+#### 内存与数据流
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #33 | 上下文压缩不触发 | process_message 路径超阈值时注入压缩摘要 |
+| #37 | format_for_prompt 截断方向 | 从保留最早改为保留最新对话 |
+
+#### 性能
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #15 | 情感分析重复调用 | CLI/Web 路径统一为单次分析 |
+
+#### 重构（被后续 issue 覆盖）
+| # | 标题 | 覆盖者 |
+|---|------|--------|
+| #3 | 环境变量覆盖 | #13 |
+| #11 | Session 泄漏 | #59 |
+| #12 | proactive_loop 竞争 | #59 |
+| #14 | 工厂函数 | #58 |
+| #31 | 统一 CLI/API 路径 | #58 |
+
+### 开放（12 个）
+
+#### 大型重构
+| # | 标题 | 风险 | 说明 |
 |---|------|------|------|
-| #1 | performance | 替换 sqlite3 为 aiosqlite | 大重构，后续迭代 |
-| #2 | enhancement | 用结构化输出替代正则提取 tool_call | 需 API 支持 |
-| #10 | bug | conversation_turns 加 session_id | schema 变更 |
-| #30 | refactoring | 拆分 Agent God Class | 大重构 |
-| #32 | bug | 替换 cl100k_base 为 DeepSeek tokenizer | 调研中 |
-| #68 | bug | process_message 与状态机双重处理 | |
-| #69 | bug | 破防机制 Web 路径情感分析滞后一轮 | |
-| #70 | bug | 工具调用循环后续轮 token 限制过低 | |
-| #71 | bug | _compress_context 缺少递归保护 | |
-| #72 | performance | reversed(get_all) 频繁创建迭代器 | |
-| #73 | bug | personality.save 重复保存 | |
-| #74 | bug | _tool_registry 初始化为 None | |
-| #75 | bug | CLI 路径 sentiment + consecutive_negative 重复 | |
+| #1 | 替换 sqlite3 为 aiosqlite | 高 | 全部数据库访问改写异步，可能引入新 bug |
+| #2 | 结构化输出替代正则 tool_call | 中 | 需 DeepSeek API 支持 JSON mode |
+| #10 | conversation_turns 加 session_id | 中 | Schema 变更，需迁移现有数据 |
+| #30 | 拆分 Agent God Class | 高 | 10+ 职责拆为独立模块 |
+
+#### Bug 修复
+| # | 标题 | 严重度 |
+|---|------|--------|
+| #68 | process_message 绕过状态机，current_input 未设置 | 🔴 |
+| #69 | 破防 Web 路径情感分析滞后一轮 | 🔴 |
+| #75 | CLI 路径 sentiment + consecutive_negative 重复 | 🔴 |
+| #70 | 工具调用后续轮 token 限制过低 (128) | 🟡 |
+| #71 | _compress_context 缺少递归保护 | 🟡 |
+| #73 | personality.save 重复保存 | 🟡 |
+| #74 | _tool_registry 初始 None | 🟡 |
+
+#### 优化
+| # | 标题 |
+|---|------|
+| #32 | 替换 cl100k_base 为 DeepSeek tokenizer |
+| #72 | reversed(get_all) 频繁创建迭代器 |
 
 ---
 
 ## v0.2 — 记忆系统升级（0/9 完成）
 
-| # | 标签 | 标题 |
+**目标**：从"关键词搜索引擎"升级为"语义理解 + 分层记忆 + 自我修正"。
+
+### 核心架构升级
+| # | 标题 | 说明 |
 |---|------|------|
-| #4 | enhancement | 向量检索：引入 Embedding 语义检索 |
-| #5 | enhancement | 分层次反思：深层/浅层反思分离 |
-| #6 | enhancement | 虚假记忆修正：矛盾事实置信度递减 |
-| #19 | bug | 情感值饱和：decay_rate 过低丧失动态范围 |
-| #20 | bug | 特质忽略：humor/sass 无实际效果 |
-| #21 | bug | _score_facts 原地覆写不写回 DB |
-| #22 | bug | consolidation pending 重复处理 |
-| #40 | bug | LongTermMemory 无 session_id 过滤 |
-| #41 | performance | 情感分析三处重复调用 |
+| #4 | 向量语义检索 | all-MiniLM-L6-v2 本地嵌入，384 维，SQLite BLOB 存储 |
+| #5 | 分层反思 | L1 事实 → L2 模式归纳 → L3 深度洞察，防止浅层重复 |
+| #6 | 虚假记忆修正 | 矛盾检测 + 置信度衰减 + 用户纠正高权重 |
+
+### Bug 修复
+| # | 标题 | 说明 |
+|---|------|------|
+| #19 | 情感值饱和 | decay_rate 过低导致情感丧失动态范围 |
+| #20 | humor/sass 无实际效果 | 特质定义后在代码中未使用 |
+| #21 | _score_facts 原地覆写 | 评分结果未写回 DB |
+| #22 | consolidation pending 重复 | pending 队列可能包含同一 turn 多次 |
+| #40 | 无 session_id 过滤 | 多用户时记忆互相串扰 |
+| #41 | 情感分析三处调用 | 仍有冗余 LLM 调用 |
 
 ---
 
 ## v0.3 — 情感与人格（4/9 完成）
 
+**目标**：让 AI 拥有真正的情感深度——会记仇、情绪有惯性、行为被深层人格驱动。
+
 ### 已完成
 
-| # | 标签 | 标题 |
-|---|------|------|
-| #59 | bug | Bug：主动回复循环触发导致刷屏 |
-| #76 | enhancement | 情绪记仇/怨恨机制 — 高 anger 后信任恢复减速 |
-| #77 | enhancement | 情绪维度分速衰减 — 不同情绪不同半衰期 |
-| #78 | enhancement | 情绪事件的对话记忆 — AI 记得为什么生气 |
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #59 | 主动回复刷屏 | reset last_activity_time + cooldown + add_to_history=False |
+| #76 | 怨恨机制 | resentment 累积/衰减，压制 joy 上限，减慢 trust 恢复 |
+| #77 | 分速衰减 | 8 个情绪各独立半衰期（surprise 3t ~ trust 25t） |
+| #78 | 情绪事件记忆 | 强情绪自动记录，注入后续 prompt |
 
 ### 开放
 
-| # | 标签 | 标题 |
+| # | 标题 | 说明 |
 |---|------|------|
-| #7 | enhancement | 情绪模型：引入对话节奏多维影响 |
-| #8 | enhancement | 人格特质：影响记忆/检索/规划全环节 |
-| #23 | refactoring | Provider：定义 BaseProvider ABC |
-| #42 | enhancement | 情感值归一化：达上下限后重置机制 |
-| #55 | enhancement | 梦境机制：午睡和夜间做梦巩固记忆 |
+| #7 | 对话节奏多维影响 | 反驳链、回复速度趋势、态度一致性参与情绪更新 |
+| #8 | 人格特质全链路 | OCEAN × 记忆编码/检索/回应三层 |
+| #42 | 情感值归一化 | 达 ±1.0 极限后的重置与反弹机制 |
+| #23 | BaseProvider ABC | 抽象 Provider 接口，方便切换模型 |
+| #55 | 梦境机制 | 空闲时 LLM 驱动的记忆巩固，时长随情绪变化 |
 
 ---
 
 ## v0.4 — Web 工程化（1/8 完成）
 
-| # | 标签 | 标题 | 状态 |
+**目标**：Web 端达到生产可用水平——安全、高效、可维护。
+
+| # | 标题 | 状态 | 说明 |
 |---|------|------|------|
-| #9 | enhancement | 主动性：基于未完成话题/长期目标驱动 | ✅ |
-| #24 | security | Web 安全：添加 CORS/速率限制/CSP | |
-| #43 | enhancement | REST API：添加 Pydantic 输入验证 | |
-| #44 | performance | 性能：每消息写 personality.json | |
-| #45 | refactoring | 封装：Web 层访问 agent 私有方法 | |
-| #46 | performance | 性能：默认线程池耗尽风险 | |
-| #57 | bug | 持久化：Web 端持久化全面排查与修复 | |
-| #58 | refactoring | 重构：统一启动入口 + 消除重复初始化 | |
+| #9 | 主动驱动升级 | ✅ | 基于未完成话题/长期目标（被更详细的 #64 覆盖） |
+| #57 | Web 持久化排查 | 🔴 | DB 路径/写放大/session 析构/shutdown 清理/WAL checkpoint |
+| #58 | 统一启动入口 | 🔴 | start.py + create_agent 工厂，消除重复初始化 |
+| #24 | Web 安全 | 🔴 | CORS 配置、速率限制、CSP 头 |
+| #43 | Pydantic 验证 | 🔴 | REST API 输入模型校验 |
+| #44 | 写放大优化 | 🔴 | personality 每消息写 → 每 10 轮写（和 CLI 一致） |
+| #45 | Web 封装 | 🔴 | 停止直接访问 agent 私有方法 |
+| #46 | 线程池风险 | 🔴 | 同步阻塞调用导致默认线程池耗尽 |
 
 ---
 
 ## v0.5 — 前瞻与质量（2/21 完成）
 
-| # | 标签 | 标题 | 状态 |
-|---|------|------|------|
-| #60 | enhancement | 情绪模型从单向度升级为多维对话动态 | |
-| #63 | enhancement | 人格特质渗透到全认知链路（OCEAN） | |
-| #64 | enhancement | 主动对话加入内在驱动力模型 | |
-| #65 | enhancement | 记忆检索引入向量语义搜索 | |
-| #66 | enhancement | 记忆反思机制升级为分层反思 | |
-| #67 | bug | 虚假记忆检测与矛盾修正机制 | |
-| #25 | infrastructure | 测试：搭建单元测试体系（pytest） | |
-| #26 | bug | 前端：角色名硬编码 + 缺心跳 | |
-| #27 | bug | Shutdown：不关闭 DB/取消 task | |
-| #28 | enhancement | Prompt：对话示例可配置化 | |
-| #29 | bug | 异常退出不清理 react 状态 | |
-| #47 | enhancement | 前端：segment 独立气泡应合并 | |
-| #48 | bug | UI：CJK 终端换行宽度计算错误 | |
-| #49 | bug | CLI 打字速度忽略配置值 | |
-| #50 | documentation | 文档过期 + 缺 Web 端文档 | |
-| #51 | bug | WebSocket 异常静默 | |
-| #52 | enhancement | 前端缺 ARIA/键盘导航 | |
-| #53 | security | 前端缺 CSP 头 | |
-| #54 | refactoring | CSS 颜色集中为自定义属性 | |
+**目标**：面向未来的架构演进 + 工程质量底座。
+
+### 情感与记忆前瞻
+
+| # | 标题 | 说明 |
+|---|------|------|
+| #60 | 情绪多维动态 | 交互模式特征（反驳链/速度/一致性）参与情绪计算 |
+| #63 | OCEAN 人格渗透 | 五大人格特质影响记忆编码权重、检索偏向、回应生成 |
+| #64 | 内在驱动力 | 未完成对话 + 长期目标 + 思念状态驱动主动对话 |
+| #65 | 向量语义搜索 | 本地 Embedding 替换纯关键词检索 |
+| #66 | 分层反思 | L1 事实 → L2 模式 → L3 深度洞察 |
+| #67 | 虚假记忆修正 | 矛盾检测 + 置信度衰减 + 纠正高权重 |
+
+### 工程质量
+
+| # | 标题 | 说明 |
+|---|------|------|
+| #25 | 单元测试 | pytest + mock，覆盖 agent/provider/memory |
+| #28 | Prompt 可配置 | 对话示例外置为 JSON/YAML，减少 token 浪费 |
+| #50 | 文档补全 | architecture.md 更新 + Web 端专门文档 |
+
+### 前端打磨
+
+| # | 标题 | 说明 |
+|---|------|------|
+| #26 | 角色名/心跳/异常 | 硬编码"星"→ 读取 personality.name，心跳重连 |
+| #47 | 气泡合并 | segment 独立气泡改回追加到同一气泡 |
+| #48 | CJK 换行 | 中文终端换行宽度计算 |
+| #49 | 打字速度 | CLI typing_speed 配置不生效 |
+| #52 | ARIA/键盘 | 无障碍访问 |
+| #53 | CSP 头 | 前端安全头 |
+| #54 | CSS 变量 | 颜色集中管理 |
+
+### 稳定性
+
+| # | 标题 | 说明 |
+|---|------|------|
+| #27 | Shutdown 清理 | 关闭 DB、取消 task、保存 session |
+| #29 | React 状态清理 | 异常退出不残留 _react_messages |
+| #51 | WS 异常处理 | WebSocket 异常不再静默吞 |
+
+---
+
+## 路线图
+
+```
+现在 ──▶ v0.1 收尾（12 issue）
+            │
+            ▼
+         v0.3 情感深化（5 issue）
+            │  记仇、对话节奏、人格全链路、归一化、梦境
+            ▼
+         v0.4 Web 工程化（7 issue）
+            │  持久化、统一入口、安全、性能
+            ▼
+         v0.2 记忆升级（9 issue）
+            │  向量检索、分层反思、虚假记忆修正
+            ▼
+         v0.5 前瞻 + 质量（19 issue）
+                测试、文档、前端打磨、OCEAN
+```
