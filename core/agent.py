@@ -198,7 +198,12 @@ class Agent:
             if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 break
             messages.insert(1, {"role": role, "content": t.content})
-        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着，可以做点自己感兴趣的事——上网搜搜、翻翻文件、听听歌。如果发现了特别有意思的东西想分享，就说一声。没什么特别的就安静待着。"})
+        interests = getattr(self.personality.config, 'interests', [])
+        interest_hint = ""
+        if interests:
+            picked = random.sample(interests, min(2, len(interests)))
+            interest_hint = f"可以搜搜关于{'/'.join(picked)}的内容，或者看看最近有什么相关新闻。"
+        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。发现了特别有意思的再分享，没什么就安静待着。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
         result = self._react_loop(messages, on_token=None, add_to_history=False)
         # Only share if result is substantial (not just "ok" or tool output)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
@@ -695,12 +700,35 @@ class Agent:
     def _pick_proactive_topic(self) -> str:
         exps = self.ltm.get_recent_experiences(limit=3)
         facts = self.ltm.get_all_active_facts(limit=5)
+        interests = getattr(self.personality.config, 'interests', [])
         topics = []
+
+        # 最近聊过的话题（最有上下文）
         if exps:
-            topics.append(f"上次我们聊了 {exps[0].summary}")
+            topics.append(f"上次聊的: {exps[0].summary}")
+
+        # 用户相关的事实
         if facts:
-            topics.append(f"{random.choice(facts).fact_key}的事情")
-        topics.append("随便聊聊近况")
+            f = random.choice(facts)
+            topics.append(f"关于用户的: {f.fact_key} = {f.fact_value}")
+
+        # 从兴趣标签出发
+        if interests:
+            topic = random.choice(interests)
+            topics.append(f"聊点关于「{topic}」的")
+
+        # 最后才兜底——但给具体方向而不是"随便"
+        if not topics:
+            hour = datetime.now().hour
+            if 6 <= hour < 9:
+                topics.append("早上好，聊聊今天的计划")
+            elif 12 <= hour < 14:
+                topics.append("午饭时间，聊聊吃了什么")
+            elif 21 <= hour < 24:
+                topics.append("夜深了，聊聊今天过得怎么样")
+            else:
+                topics.append("聊聊最近有什么新鲜事")
+
         return random.choice(topics)
 
     def _proactive_flag(self) -> bool:
