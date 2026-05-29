@@ -64,14 +64,15 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 └──────────────────────────────────────────┘
 
 ┌─ _proactive_loop 后台协程 ─────────────┐
-│  while True:                             │
-│    idle = time.time() - last_active      │
-│    if idle > 180s:                       │
-│      score = _calculate_proactivity()   │
-│      if random.random() < score:         │
-│        response = process_proactive()   │
-│        await send_segments(response)     │
-│    await asyncio.sleep(15)               │
+│  15s tick:                               │
+│    ├─ _get_sleep_state()                │
+│    │   午睡 12-13 / 夜睡 23:30-0:30     │
+│    │   醒来自动分享梦境                  │
+│    ├─ idle > 情绪阈值?                   │
+│    │   excited 60s / sad 900s           │
+│    │   └─ 40% explore / 60% chat       │
+│    │       探索 1/hr, 聊天 2/hr         │
+│    └─ 睡着? → skip                      │
 └──────────────────────────────────────────┘
 ```
 

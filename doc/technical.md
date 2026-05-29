@@ -458,16 +458,36 @@ LLM 输出格式：
 3. JSON 解析，参数别名归一化（search → query, text → content）
 4. 回退：尝试将整个响应作为 JSON 解析
 
-### 5.4 内置工具
+### 5.4 内置工具（8 个）
 
-| 工具 | 功能 | 参数 |
+| 工具 | 功能 | 后端 |
 |------|------|------|
-| recall | 回忆用户信息或共同经历 | query: string |
-| remember | 记住用户重要信息 | category, key, value, importance |
-| read_file | 读取本地文本文件（限 100KB） | path, max_chars |
-| notify | 发送 Windows 桌面通知 | title, message, duration |
+| recall | 回忆用户信息或共同经历 | SQLite + embedding |
+| remember | 记住用户重要信息 | SQLite upsert |
+| read_file | 读取本地文本文件（限 100KB） | 本地文件系统 |
+| notify | Windows toast 通知 | PowerShell WinRT |
+| web_search | 网络搜索，支持中文 + 时效过滤 | AnySearch API |
+| web_fetch | 提取网页正文内容 | AnySearch extract |
+| music_list | 浏览音乐目录，搜索歌曲 | D:\音乐 |
+| music_play | 播放音乐文件 | 默认播放器 |
 
-### 5.5 虚假操作检测
+### 5.5 自主行为（作息 + 探索）
+
+#### 作息系统
+- **午睡**: 12:00-13:00 情绪驱动入睡，睡前发消息
+- **午醒**: 13:10-16:00 随机，arousal 高醒得早，分享梦境
+- **夜睡**: 23:30-0:30 情绪驱动入睡，睡前发晚安
+- **晨醒**: 7:00-10:00 随机，分享梦境
+
+#### 频率限制
+- 探索：1 次/小时
+- 聊天：2 次/小时
+- 梦境：每次睡眠 1 次
+
+#### 梦境生成
+LLM 基于最近事实 + 经历 + 情绪生成碎片化梦境（1-2 句），存储为情绪事件，醒来注入 prompt。
+
+### 5.6 虚假操作检测
 
 ```python
 def contains_fake_action(text):
@@ -600,13 +620,26 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 | melancholy | 2.2s | ~2.7~3.9s |
 | sad | 2.5s | ~3.1~4.4s |
 
-### 7.4 主动对话后台
+### 7.4 自主行为循环
 
-```python
-async def _proactive_loop(ws, session_id):
-    while True:
-        _, agent = session_manager.get_or_create(session_id)
-        idle = time.time() - agent.agent.last_activity_time
+```
+_proactive_loop (15s tick)
+    │
+    ├─ 入睡? → 发睡前消息 → 生成梦境
+    ├─ 醒来? → 发梦境分享
+    ├─ 睡着? → skip (30s后重试)
+    ├─ 空闲 < 30s? → skip
+    │
+    ├─ 空闲 > 情绪阈值?
+    │   └─ 随机命中?
+    │       ├─ 40% 探索 (1/hr limit) → 自由工具 → 有趣才分享
+    │       └─ 60% 聊天 (2/hr limit) → 主动搭话
+    └─ 未命中 → 等15s
+```
+
+空闲阈值与情绪挂钩：excited 60s, sad 900s, neutral 360s，resentment 额外+300s。
+
+### 7.5 主动对话后台（旧）
         if idle > config.proactive_min_idle:
             score = agent.agent._calculate_proactivity(idle)
             if random.random() < score:
