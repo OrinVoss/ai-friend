@@ -15,6 +15,7 @@ from tools.traits import ToolRegistry
 from tools.memory_tools import RecallTool, RememberTool
 from tools.file_tools import ReadFileTool
 from tools.notify_tool import NotifyTool
+from tools.web_tools import WebSearchTool, WebFetchTool
 from storage.database import Database
 from storage.repository import Repository
 
@@ -50,6 +51,8 @@ class WebAgent:
         registry.register(RememberTool(self.ltm))
         registry.register(ReadFileTool())
         registry.register(NotifyTool())
+        registry.register(WebSearchTool())
+        registry.register(WebFetchTool())
         self.tool_registry = registry
 
         self.agent = Agent(

@@ -1,0 +1,152 @@
+"""Web search and fetch tools using AnySearch API."""
+import json
+import logging
+import os
+from typing import Any
+
+import requests
+
+from tools.traits import Tool, ToolResult
+
+logger = logging.getLogger(__name__)
+
+ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
+
+
+def _anysearch_api(tool_name: str, arguments: dict) -> dict:
+    """Call AnySearch JSON-RPC 2.0 API."""
+    api_key = os.environ.get("ANYSEARCH_API_KEY", "")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }
+    session = requests.Session()
+    session.trust_env = False
+    resp = session.post(ANYSEARCH_ENDPOINT, json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    result = resp.json()
+    if "error" in result:
+        raise RuntimeError(result["error"].get("message", str(result["error"])))
+    return result.get("result", {})
+
+
+class WebSearchTool(Tool):
+    """Search the web using AnySearch API."""
+
+    def name(self) -> str:
+        return "web_search"
+
+    def description(self) -> str:
+        return (
+            "搜索网络信息，获取实时资讯、新闻、百科知识。支持中文搜索。"
+            "用于查找你不确定的最新信息、事实核查、资料查询。"
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词，支持自然语言",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "最多返回多少条结果，默认 5",
+                    "default": 5,
+                },
+                "freshness": {
+                    "type": "string",
+                    "description": "时效性：day/week/month/year，不填则不限制",
+                    "enum": ["day", "week", "month", "year"],
+                },
+            },
+            "required": ["query"],
+        }
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        query = args.get("query", "").strip()
+        max_results = min(int(args.get("max_results", 5)), 10)
+        freshness = args.get("freshness", "").strip() or None
+
+        if not query:
+            return ToolResult.fail("请提供搜索关键词")
+
+        try:
+            arguments = {"query": query, "max_results": max_results}
+            if freshness:
+                arguments["freshness"] = freshness
+            result = _anysearch_api("search", arguments)
+
+            items = result.get("content", []) or result.get("results", [])
+            if isinstance(items, str):
+                items = [{"snippet": items}]
+
+            if not items:
+                return ToolResult.ok(f"未找到关于「{query}」的结果。")
+
+            lines = [f"搜索「{query}」结果："]
+            for i, item in enumerate(items[:max_results], 1):
+                title = item.get("title", "") or item.get("name", "")
+                snippet = item.get("snippet", "") or item.get("description", "") or item.get("content", "")
+                url = item.get("url", "") or item.get("link", "")
+                lines.append(f"{i}. {title}")
+                if snippet:
+                    lines.append(f"   {snippet}")
+                if url:
+                    lines.append(f"   {url}")
+
+            return ToolResult.ok("\n".join(lines))
+        except Exception as e:
+            logger.warning(f"Web search failed: {e}")
+            return ToolResult.fail(f"搜索失败: {e}")
+
+
+class WebFetchTool(Tool):
+    """Fetch and extract content from a URL using AnySearch extract API."""
+
+    def name(self) -> str:
+        return "web_fetch"
+
+    def description(self) -> str:
+        return "获取网页的完整文本内容。用于阅读URL指向的文章、文档、新闻等。"
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "要获取的网页URL",
+                },
+            },
+            "required": ["url"],
+        }
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        url = args.get("url", "").strip()
+
+        if not url:
+            return ToolResult.fail("请提供URL")
+
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+
+        try:
+            result = _anysearch_api("extract", {"url": url})
+            content = result.get("content", "") or result.get("text", "")
+
+            if not content:
+                return ToolResult.fail(f"未能提取网页内容: {url}")
+
+            title = result.get("title", "")
+            header = f"网页 {url}" + (f"\n标题: {title}" if title else "")
+            return ToolResult.ok(f"{header}:\n```\n{content[:8000]}\n```")
+        except Exception as e:
+            logger.warning(f"Web fetch failed: {e}")
+            return ToolResult.fail(f"获取网页失败: {e}")
