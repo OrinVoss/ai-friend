@@ -126,21 +126,25 @@ async def _send_segments(websocket: WebSocket, agent, response: str, emotion: st
 
 async def _proactive_loop(websocket: WebSocket, session_id: str):
     cooldown = 0
+    sleep_cooldown = 0
     while True:
         try:
             _, agent = session_manager.get_or_create(session_id)
             ag = agent.agent
 
-            # Sleep/Wake cycle
-            should_sleep, msg = ag._get_sleep_state()
-            if msg:
-                ag.last_activity_time = time.time()
-                cooldown = 60  # longer cooldown after sleep/wake
-                await _send_segments(websocket, agent, msg, agent.emotion)
-                if should_sleep:
-                    # Generate a dream during sleep
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, ag._generate_dream)
+            # Sleep/Wake cycle (only check if not in transition cooldown)
+            if sleep_cooldown == 0:
+                should_sleep, msg = ag._get_sleep_state()
+                if msg:
+                    ag.last_activity_time = time.time()
+                    cooldown = 60
+                    sleep_cooldown = 120  # 10 min cooldown on sleep transitions
+                    await _send_segments(websocket, agent, msg, agent.emotion)
+                    if should_sleep:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, ag._generate_dream)
+            else:
+                sleep_cooldown = max(0, sleep_cooldown - 1)
             if ag._sleeping:
                 await asyncio.sleep(30)
                 continue
