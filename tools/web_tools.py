@@ -77,6 +77,7 @@ class WebSearchTool(Tool):
         if not query:
             return ToolResult.fail("请提供搜索关键词")
 
+        logger.info(f"[tool] web_search query={query[:60]} n={max_results}")
         try:
             arguments = {"query": query, "max_results": max_results}
             if freshness:
@@ -126,6 +127,7 @@ class WebFetchTool(Tool):
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
 
+        logger.info(f"[tool] web_fetch url={url[:80]}")
         try:
             result = _anysearch_api("extract", {"url": url})
             content = result.get("content", "") or result.get("text", "")

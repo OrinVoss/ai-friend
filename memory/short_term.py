@@ -1,3 +1,4 @@
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -5,6 +6,8 @@ from collections import deque
 from typing import Optional
 
 from models.conversation import Turn
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,6 +32,7 @@ class ConversationBuffer:
         with self._lock:
             self._next_id += 1
             self._turns.append(turn)
+        logger.debug(f"[mem] short_term add: role={role} len={len(content)} total={len(self._turns)}")
         return turn
 
     def get_recent(self, k: int) -> list[Turn]:
@@ -61,7 +65,9 @@ class ConversationBuffer:
 
     def clear(self) -> None:
         with self._lock:
+            n = len(self._turns)
             self._turns.clear()
+        logger.info(f"[mem] short_term cleared: was {n} turns")
 
     @property
     def is_full(self) -> bool:

@@ -56,26 +56,30 @@ class KimiProvider:
             except requests.exceptions.ConnectionError as e:
                 last_error = e
                 wait = 2 ** attempt
-                logger.warning(f"API connection error, retrying in {wait}s: {e}")
+                logger.warning(f"[api] connection error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
             except requests.exceptions.HTTPError as e:
                 last_error = e
                 if e.response.status_code < 500:
                     raise
                 wait = 2 ** attempt
-                logger.warning(f"API http error, retrying in {wait}s: {e}")
+                logger.warning(f"[api] http error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
             except (requests.exceptions.ChunkedEncodingError,
                     requests.exceptions.StreamConsumedError) as e:
                 last_error = e
                 wait = 2 ** attempt
-                logger.warning(f"Stream error, retrying in {wait}s: {e}")
+                logger.warning(f"[api] stream error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
 
+        logger.error(f"[api] failed after 3 retries: {last_error}")
         raise ConnectionError(f"API request failed after 3 retries: {last_error}")
 
     def _do_request(self, url: str, payload: dict, stream: bool,
                     on_token: Optional[callable]) -> str:
+        t0 = time.time()
+        input_chars = sum(len(m.get("content", "")) for m in payload.get("messages", []))
+
         resp = self.session.post(
             url,
             json=payload,
@@ -86,7 +90,15 @@ class KimiProvider:
 
         if not stream:
             data = resp.json()
-            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            usage = data.get("usage", {})
+            elapsed = time.time() - t0
+            logger.info(
+                f"[api] model={self.model} stream=off "
+                f"tok_in={usage.get('prompt_tokens', '?')} tok_out={usage.get('completion_tokens', '?')} "
+                f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
+            )
+            return content
 
         full_response = []
         for line in resp.iter_lines(decode_unicode=True):
@@ -109,4 +121,10 @@ class KimiProvider:
                 except json.JSONDecodeError:
                     continue
 
-        return "".join(full_response)
+        content = "".join(full_response)
+        elapsed = time.time() - t0
+        logger.info(
+            f"[api] model={self.model} stream=on "
+            f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
+        )
+        return content

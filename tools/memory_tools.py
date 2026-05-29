@@ -40,10 +40,12 @@ class RecallTool(Tool):
         if not query:
             return ToolResult.fail("请告诉我你想回忆什么")
 
+        logger.info(f"[tool] recall query={query[:60]}")
         keywords = self.retriever._extract_keywords(query)
         facts = self.ltm.search_facts(query, limit=5)
         experiences = self.ltm.search_experiences(keywords, limit=3)
         reflections = self.ltm.get_recent_reflections(limit=2)
+        logger.info(f"[tool] recall result: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
 
         parts = []
 

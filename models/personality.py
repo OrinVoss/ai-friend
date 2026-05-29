@@ -1,6 +1,9 @@
+import logging
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Per-emotion half-lives in conversation turns
 # Higher = emotion persists longer
@@ -200,6 +203,10 @@ class EmotionalState:
         if len(self.history) > 10:
             self.history.pop(0)
 
+        logger.debug(f"[emotion] shift_end: {current} v={self.valence:+.2f} a={self.arousal:.2f} "
+                     f"joy={self.joy:.2f} anger={self.anger:.2f} sadness={self.sadness:.2f} "
+                     f"resentment={self.resentment:.2f}")
+
     def decay(self) -> None:
         """Decay toward baseline AND mood, with per-emotion rates."""
         # Fast decay toward baseline (turn-level)
@@ -227,6 +234,8 @@ class EmotionalState:
         if self.resentment > 0.001:
             self.resentment = max(0.0, self.resentment * (1.0 - RESENTMENT_DECAY))
 
+        logger.debug(f"[emotion] decay_end: v={self.valence:+.2f} a={self.arousal:.2f} resentment={self.resentment:.3f}")
+
     def record_emotion_event(self, trigger: str, context: str = "") -> None:
         """Record a significant emotional moment for later reference."""
         dom = self.dominant_emotion
@@ -236,6 +245,7 @@ class EmotionalState:
             self.surprise, self.disgust, self.anticipation, self.trust
         )
         if primary_intensity < 0.6:
+            logger.debug(f"[emotion] event_skip: intensity={primary_intensity:.2f} < 0.6")
             return
 
         event = {
@@ -246,6 +256,7 @@ class EmotionalState:
             "context": context[:200],
         }
         self.emotion_events.append(event)
+        logger.info(f"[emotion] event: {dom} intensity={primary_intensity:.2f} trigger={trigger[:60]}")
         # Keep last 20 events
         if len(self.emotion_events) > 20:
             self.emotion_events.pop(0)

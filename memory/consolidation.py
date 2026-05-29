@@ -26,12 +26,16 @@ class MemoryConsolidator:
     def should_consolidate(self, turn_count: int, emotional_intensity: float,
                            idle_duration: float, config) -> bool:
         if turn_count > 0 and turn_count % config.consolidation_interval == 0:
+            logger.debug(f"[consolidate] trigger: interval turn={turn_count}")
             return True
         if emotional_intensity > 0.7:
+            logger.debug(f"[consolidate] trigger: intensity={emotional_intensity:.2f}")
             return True
         if len(self._pending_buffer) >= 10:
+            logger.debug(f"[consolidate] trigger: buffer_full size={len(self._pending_buffer)}")
             return True
         if idle_duration > 120 and self._pending_buffer:
+            logger.debug(f"[consolidate] trigger: idle idle={idle_duration:.0f}s")
             return True
         return False
 

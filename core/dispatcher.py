@@ -113,6 +113,8 @@ def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[d
                 "output": str(e),
             })
 
+    successes = sum(1 for r in results if r["success"])
+    logger.info(f"[tool] executed {len(results)} tools, {successes} ok, {len(results)-successes} failed")
     return results
 
 

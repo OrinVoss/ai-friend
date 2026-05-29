@@ -1,8 +1,11 @@
+import logging
 from typing import Optional
 
 from models.memory import UserFact, Experience, Reflection
 from storage.repository import Repository
 from models.conversation import MemoryContext
+
+logger = logging.getLogger(__name__)
 
 
 class LongTermMemory:
@@ -13,6 +16,7 @@ class LongTermMemory:
                    confidence: float = 1.0,
                    source_turn: Optional[int] = None,
                    importance: float = 0.5) -> int:
+        logger.debug(f"[mem] store_fact: {category}/{key}")
         return self.repo.upsert_fact(category, key, value, confidence, source_turn, importance)
 
     def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
@@ -25,6 +29,7 @@ class LongTermMemory:
                          tags: list[str], turn_start: Optional[int] = None,
                          turn_end: Optional[int] = None,
                          importance: float = 0.5) -> int:
+        logger.debug(f"[mem] store_exp: {summary[:50]} significance={significance:.2f}")
         return self.repo.insert_experience(summary, tone, significance,
                                            tags, turn_start, turn_end, importance)
 
@@ -58,6 +63,7 @@ class LongTermMemory:
             experiences = self.get_recent_experiences(limit=3)
         reflections = self.get_recent_reflections(limit=3)
         relationship = self.get_relationship()
+        logger.debug(f"[mem] context built: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
         return MemoryContext(
             facts=facts,
             experiences=experiences,

@@ -1,5 +1,15 @@
 import json
 import logging
+import os
+import random
+import time
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+import json
+import logging
+import os
 import random
 import time
 from datetime import datetime
@@ -18,12 +28,9 @@ from tools.traits import ToolRegistry
 from ui.cli import ConsoleInterface
 from config import Config
 
-MODEL_CONTEXT = 180_000
-COMPRESS_THRESHOLD = int(MODEL_CONTEXT * 0.8)
+_MODEL_CONTEXT = 180_000
+COMPRESS_THRESHOLD = int(_MODEL_CONTEXT * 0.8)
 
-# DeepSeek v4 uses a BPE tokenizer similar to GPT-4's cl100k_base.
-# tiktoken's cl100k_base is a close approximation for context management.
-# Falls back to character-based heuristic if tiktoken unavailable.
 _TOKENIZER = None
 _TOKENIZER_ENCODING = "cl100k_base"
 
@@ -79,7 +86,12 @@ class Agent:
         self.current_memory_context: MemoryContext | None = None
         self._proactive_count = 0
         self._tool_call_history: list[dict] = []  # recent tool call records
-        self._sleeping: bool = False  # sleep/wake state
+        # Persist sleep state across restarts
+        self._sleep_state_file = os.path.join(
+            os.path.dirname(config.personality_file) or ".", ".sleep_state"
+        )
+        self._sleeping: bool = self._load_sleep_state()
+
         self._last_explore_time: float = 0  # rate limit: max 1/hr
         self._last_chat_time: float = 0  # rate limit: max 2/hr
         self._compressing = False  # recursion guard for _compress_context
@@ -120,6 +132,8 @@ class Agent:
             self.last_activity_time = time.time()
             zzz = random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
             return zzz
+
+        logger.info(f"[msg] turn={self.turn_count} len={len(user_input)}")
 
         idle = time.time() - self.last_activity_time
         self.current_input = user_input
@@ -176,6 +190,7 @@ class Agent:
         if overflow and self._compressed_summary:
             messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._compressed_summary}"})
         messages.append({"role": "user", "content": f"[主动开启对话] 主题方向：{topic}"})
+        logger.info(f"[proactive] chat: topic={topic}")
         return self._react_loop(messages, on_token, add_to_history=False)
 
     def process_explore(self) -> str | None:
@@ -204,21 +219,25 @@ class Agent:
             picked = random.sample(interests, min(2, len(interests)))
             interest_hint = f"可以搜搜关于{'/'.join(picked)}的内容，或者看看最近有什么相关新闻。"
         messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。**你必须真的调用工具去搜一下**——别直接说没啥。搜完了如果发现有特别有意思的，分享出来；实在没意思才说没啥。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
+        logger.info(f"[explore] start: topic={topic}")
         result = self._react_loop(messages, on_token=None, add_to_history=False)
         # Only share if result is substantial (not just "ok" or tool output)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
+            logger.info(f"[explore] shared: {len(result)} chars")
             return result
+        logger.debug(f"[explore] silent: result={result[:80] if result else 'None'}")
         return None
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
-        for _ in range(self._max_tool_iterations):
+        for _idx in range(self._max_tool_iterations):
+            logger.debug(f"[react] iter={_idx+1}/{self._max_tool_iterations}")
             resp = self.provider.generate(
                 messages, stream=False if _ > 0 else True,
-                on_token=on_token if _ == 0 else None,
-                max_tokens=max_tok if _ == 0 else max(384, max_tok * 2 // 3),
+                on_token=on_token if _idx == 0 else None,
+                max_tokens=max_tok if _idx == 0 else max(384, max_tok * 2 // 3),
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
@@ -265,7 +284,13 @@ class Agent:
         # Amplify emotional damage based on consecutive attacks
         hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
         sentiment *= hurt_multiplier
+        old_dom = self.personality.emotion.dominant_emotion
         self.personality.apply_emotional_shift(sentiment, sharing, energy)
+        new_dom = self.personality.emotion.dominant_emotion
+        if old_dom != new_dom:
+            logger.info(f"[emotion] {old_dom}->{new_dom} valence={self.personality.emotion.valence:+.2f} "
+                        f"arousal={self.personality.emotion.arousal:.2f} sentiment={sentiment:+.2f} "
+                        f"consec_neg={self._consecutive_negative}")
 
         # Record significant emotion events
         self.personality.emotion.record_emotion_event(
@@ -522,6 +547,20 @@ class Agent:
         elif self.ui:
             self.ui.display.print_system(f"未知命令: {cmd}")
 
+    def _load_sleep_state(self) -> bool:
+        try:
+            with open(self._sleep_state_file) as f:
+                return f.read().strip() == "1"
+        except Exception:
+            return False
+
+    def _save_sleep_state(self) -> None:
+        try:
+            with open(self._sleep_state_file, "w") as f:
+                f.write("1" if self._sleeping else "0")
+        except Exception:
+            pass
+
     def _get_sleep_state(self) -> tuple[bool, str | None]:
         """Check if AI should sleep/wake. Returns (should_sleep, wake_message_or_None)."""
         now = datetime.now()
@@ -542,14 +581,16 @@ class Agent:
         # Nap window: 12:00-13:00
         if 12 <= hour < 13 and not self._sleeping:
             if random.random() < max(0.1, sleepiness):
-                self._sleeping = True
+                self._sleeping = True; self._save_sleep_state()
+                logger.info(f"[sleep] nap trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
                 return True, "我去午睡一会儿...困了[困]"
 
-        # Night sleep: 23:30-0:30
-        if 23.5 <= hour or hour < 0.5:
+        # Night sleep: 23:00-01:00
+        if 23 <= hour or hour < 1:
             if not self._sleeping:
                 if random.random() < max(0.3, sleepiness + 0.3):
-                    self._sleeping = True
+                    self._sleeping = True; self._save_sleep_state()
+                    logger.info(f"[sleep] night trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
                     return True, "夜深了...我睡了，晚安[月亮]"
 
         # Wake from nap: 13:10-16:00
@@ -558,8 +599,9 @@ class Agent:
             wake_chance += max(0, e.arousal - 0.3) * 0.2  # high arousal wakes earlier
             wake_chance -= r * 0.1  # resentment makes you sleep longer
             if random.random() < min(0.9, wake_chance):
-                self._sleeping = False
+                self._sleeping = False; self._save_sleep_state()
                 dream = self._generate_dream()
+                logger.info(f"[sleep] nap wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
                 return False, f"睡醒了...{'做了个梦：' + dream if dream else '没做梦，睡得挺香'}"
 
         # Wake from night: 7:00-10:00
@@ -568,8 +610,9 @@ class Agent:
             wake_chance += max(0, e.arousal - 0.3) * 0.15
             wake_chance -= r * 0.1
             if random.random() < min(0.9, wake_chance):
-                self._sleeping = False
+                self._sleeping = False; self._save_sleep_state()
                 dream = self._generate_dream()
+                logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
                 return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"
 
         return False, None
@@ -593,8 +636,10 @@ class Agent:
                 trigger=f"梦: {dream.strip()[:100]}",
                 context=dream.strip()[:200],
             )
+            logger.info(f"[dream] generated: {dream.strip()[:60]}")
             return dream.strip()
         except Exception:
+            logger.debug("[dream] generation failed")
             return ""
 
     def _check_rate_limit(self, action: str) -> bool:
@@ -602,17 +647,21 @@ class Agent:
         now = time.time()
         if action == "explore":
             if now - self._last_explore_time < 3600:
+                logger.debug(f"[rate] explore blocked: {now - self._last_explore_time:.0f}s since last")
                 return False
             self._last_explore_time = now
+            logger.info("[rate] explore allowed")
             return True
         elif action == "chat":
             if self._last_chat_time == 0:
                 self._last_chat_time = now
+                logger.info("[rate] chat allowed (first)")
                 return True
-            # 2 per hour = at least 30min apart
             if now - self._last_chat_time < 1800:
+                logger.debug(f"[rate] chat blocked: {now - self._last_chat_time:.0f}s since last")
                 return False
             self._last_chat_time = now
+            logger.info("[rate] chat allowed")
             return True
         return True
 
@@ -655,7 +704,12 @@ class Agent:
         goodbye = sum(1 for t in self.short_term.get_recent(6) if any(kw in t.content for kw in ["拜拜", "再见", "bye", "下次", "睡了", "晚安"]))
         short_c = sum(1 for t in user_turns if len(t.content) < 8)
         score = base + time_mod + emotion_mod + intimacy_mod + sentiment_mod - min(goodbye * 0.15, 0.3) - min(short_c * 0.08, 0.2)
-        return max(0.0, min(0.8, score))
+        score = max(0.0, min(0.8, score))
+        logger.debug(f"[proactive] score={score:.3f} idle={idle_duration:.0f}s emo={e.dominant_emotion} "
+                     f"base={base:.3f} time={time_mod:.2f} emo={emotion_mod:+.2f} "
+                     f"intimacy={intimacy_mod:+.2f} sentiment={sentiment_mod:+.2f} "
+                     f"goodbye={min(goodbye*0.15,0.3):.2f} short={min(short_c*0.08,0.2):.2f}")
+        return score
 
     def _pick_proactive_topic(self) -> str:
         exps = self.ltm.get_recent_experiences(limit=3)

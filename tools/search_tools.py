@@ -59,6 +59,7 @@ class GlobTool(Tool):
         if not pattern:
             return ToolResult.fail("请提供 glob 模式")
 
+        logger.info(f"[tool] glob pattern={pattern} root={search_root}")
         root = _resolve_search_path(search_root)
         if root is None:
             return ToolResult.fail(f"路径不在可访问范围内: {search_root}")
@@ -149,6 +150,7 @@ class GrepTool(Tool):
         if not pattern:
             return ToolResult.fail("请提供搜索模式")
 
+        logger.info(f"[tool] grep pattern={pattern[:60]} path={search_path} glob={file_glob}")
         target = _resolve_search_path(search_path)
         if target is None:
             return ToolResult.fail(f"路径不在可访问范围内: {search_path}")

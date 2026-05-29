@@ -41,8 +41,10 @@ async def chat_api(body: dict):
     message = body.get("message", "")
     if not message.strip():
         return {"error": "empty message"}
+    logger.info(f"[rest] chat session={session_id} len={len(message)}")
     _, agent = session_manager.get_or_create(session_id)
     response = agent.process_message(message)
+    logger.info(f"[rest] chat_done session={session_id} turn={agent.turn_count} emotion={agent.emotion} resp_len={len(response)}")
     return {
         "response": response,
         "emotion": agent.emotion,
@@ -136,6 +138,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
             if sleep_cooldown == 0:
                 should_sleep, msg = ag._get_sleep_state()
                 if msg:
+                    logger.info(f"Sleep/wake message: sleeping={ag._sleeping} msg={msg[:50]}")
                     ag.last_activity_time = time.time()
                     cooldown = 60
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
@@ -180,6 +183,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    logger.info(f"[ws] accepted: {websocket.client.host}:{websocket.client.port}")
     session_id = None
     proactive_task = None
 
@@ -192,6 +196,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type == "init":
                 sid = data.get("session_id")
                 session_id, agent = session_manager.get_or_create(sid)
+                logger.info(f"[ws] init session={session_id} sid_param={sid}")
                 if proactive_task:
                     proactive_task.cancel()
                 proactive_task = asyncio.create_task(
@@ -206,6 +211,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 content = data.get("content", "").strip()
                 if not content:
                     continue
+                logger.info(f"[ws] message session={session_id} len={len(content)}")
                 if not session_id:
                     session_id = "default"
                 _, agent = session_manager.get_or_create(session_id)

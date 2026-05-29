@@ -1,6 +1,9 @@
-from dataclasses import dataclass, field
 import json
+import logging
 import os
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -47,8 +50,11 @@ def load_config(path: str = CONFIG_PATH) -> Config:
             for k, v in data.items():
                 if hasattr(cfg, k):
                     setattr(cfg, k, v)
+            logger.info(f"[config] loaded from: {path}")
         except (json.JSONDecodeError, OSError):
-            pass
+            logger.warning(f"[config] failed to parse: {path}, using defaults")
+    else:
+        logger.info(f"[config] no file at: {path}, using defaults")
 
     # Environment variable overrides
     env_map = {
@@ -61,6 +67,8 @@ def load_config(path: str = CONFIG_PATH) -> Config:
     for env_var, attr in env_map.items():
         val = os.environ.get(env_var, "")
         if val:
+            masked = "***" if "KEY" in env_var else val
+            logger.info(f"[config] env override: {env_var}={masked}")
             setattr(cfg, attr, val)
 
     return cfg

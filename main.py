@@ -2,12 +2,12 @@
 """AI Friend — 一个有记忆和人格的 AI 朋友控制台应用。"""
 
 import logging
-import sys
 
 from config import load_config
 from core.agent import Agent
 from core.personality import Personality
 from core.provider import KimiProvider
+from core.logging_setup import setup_logging
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
 from memory.retrieval import MemoryRetriever
@@ -24,19 +24,11 @@ from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
 
-def setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stderr,
-    )
-
-
 def main():
     config = load_config()
     setup_logging(config.log_level)
     logger = logging.getLogger(__name__)
+    logger.info(f"Starting AI Friend CLI: model={config.api_model} personality={config.personality_file} log_level={config.log_level}")
 
     # Initialize storage
     db = Database(config.db_path)
@@ -44,7 +36,6 @@ def main():
 
     # Initialize personality
     personality = Personality.load(config.personality_file)
-    logger.info(f"Loaded personality: {personality.config.name}")
 
     # Initialize memory systems
     ltm = LongTermMemory(repo)

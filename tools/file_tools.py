@@ -172,6 +172,8 @@ class ReadFileTool(Tool):
         if not filepath_raw:
             return ToolResult.fail("请提供文件路径")
 
+        logger.info(f"[tool] read_file path={filepath_raw[:80]} limit={limit} offset={offset}")
+
         paths = [p.strip() for p in filepath_raw.split(",") if p.strip()]
         if len(paths) > 5:
             return ToolResult.fail("最多同时读取 5 个文件")

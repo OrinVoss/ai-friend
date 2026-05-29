@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 from typing import Optional
 
 from models.personality import PersonalityConfig, EmotionalState
+
+logger = logging.getLogger(__name__)
 
 
 class Personality:
@@ -59,6 +62,7 @@ class Personality:
         return dv, da, primary_deltas
 
     def decay_emotion(self) -> None:
+        logger.debug(f"[emotion] decay: v={self.emotion.valence:+.3f} a={self.emotion.arousal:.3f}")
         self.emotion.decay()
 
     def apply_emotional_shift(self, user_sentiment: float,
@@ -67,6 +71,7 @@ class Personality:
         dv, da, primary_deltas = self.estimate_emotional_impact(
             user_sentiment, personal_sharing, topic_energy
         )
+        logger.debug(f"[emotion] shift dv={dv:+.3f} da={da:+.3f} primaries={list(primary_deltas.keys())}")
         self.emotion.shift(dv, da, primary_deltas)
         self.emotion.decay()
 
@@ -101,8 +106,10 @@ class Personality:
                 baseline_arousal=config.emotional_baseline.get("arousal", 0.3),
                 decay_rate=config.emotional_decay_rate,
             )
+        logger.info(f"[personality] loaded from: {path} name={config.name}")
         return cls(config, emotion)
 
     def save(self, path: str) -> None:
+        logger.info(f"[personality] saved to: {path}")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)

@@ -1,10 +1,13 @@
 import json
+import logging
 import sqlite3
 from datetime import datetime
 from typing import Optional
 
 from models.memory import UserFact, Experience, Reflection
 from storage.database import Database
+
+logger = logging.getLogger(__name__)
 
 
 class Repository:
@@ -16,6 +19,7 @@ class Repository:
     def upsert_fact(self, category: str, key: str, value: str,
                     confidence: float = 1.0, source_turn: Optional[int] = None,
                     importance: float = 0.5) -> int:
+        logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance, source_turn, updated_at)
@@ -31,6 +35,7 @@ class Repository:
             return c.lastrowid
 
     def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
+        logger.debug(f"[db] search_facts: query='{query[:40]}' limit={limit}")
         with self.db.cursor() as c:
             if query:
                 c.execute("""
@@ -50,6 +55,7 @@ class Repository:
             return [self._row_to_fact(r) for r in c.fetchall()]
 
     def get_active_facts(self, limit: int = 50) -> list[UserFact]:
+        logger.debug(f"[db] get_active_facts: limit={limit}")
         with self.db.cursor() as c:
             c.execute("""
                 SELECT * FROM user_facts
@@ -75,6 +81,7 @@ class Repository:
                           tags: list[str], turn_start: Optional[int] = None,
                           turn_end: Optional[int] = None,
                           importance: float = 0.5) -> int:
+        logger.info(f"[db] insert_exp: {summary[:60]} tone={tone} sig={significance:.2f} imp={importance:.2f}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO experiences (summary, emotional_tone, significance, importance, tags,
@@ -128,6 +135,7 @@ class Repository:
 
     def insert_reflection(self, content: str, insight_type: str,
                           related_ids: list[int], significance: float) -> int:
+        logger.info(f"[db] insert_ref: type={insight_type} sig={significance:.2f} content={content[:60]}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO reflections (content, insight_type, related_experience_ids, significance)
@@ -152,6 +160,7 @@ class Repository:
             return {r["dimension"]: r["value"] for r in c.fetchall()}
 
     def upsert_relationship(self, dimension: str, value: float) -> None:
+        logger.info(f"[db] upsert_rel: {dimension}={value:.2f}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO relationship_metrics (dimension, value, updated_at)
@@ -164,6 +173,7 @@ class Repository:
 
     def insert_turn(self, turn_number: int, role: str, content: str,
                     emotional_state: Optional[str] = None) -> int:
+        logger.info(f"[db] insert_turn: turn={turn_number} role={role} len={len(content)}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO conversation_turns (turn_number, role, content, emotional_state)
@@ -192,6 +202,7 @@ class Repository:
             if count <= max_count:
                 return 0
             excess = count - max_count
+            logger.info(f"[db] prune_facts: pruning {excess} of {count}")
             c.execute("""
                 UPDATE user_facts SET is_active = 0, composite_score = 0
                 WHERE id IN (
@@ -209,6 +220,7 @@ class Repository:
             if count <= max_count:
                 return 0
             excess = count - max_count
+            logger.info(f"[db] prune_exps: pruning {excess} of {count}")
             c.execute("""
                 UPDATE experiences SET is_archived = 1
                 WHERE id IN (
@@ -226,6 +238,7 @@ class Repository:
             if count <= max_count:
                 return 0
             excess = count - max_count
+            logger.info(f"[db] prune_refl: pruning {excess} of {count}")
             c.execute("""
                 UPDATE reflections SET is_active = 0 WHERE id IN (
                     SELECT id FROM reflections WHERE is_active = 1

@@ -22,6 +22,8 @@ class MemoryRetriever:
 
     def retrieve_for_query(self, query: str) -> MemoryContext:
         """Layer 1 + Layer 2: build context for a user message."""
+        logger.info(f"[retrieval] query_len={len(query)}")
+
         # Layer 1: hot memory (always included)
         hot_facts = self.ltm.get_all_active_facts(limit=50)
         recent_experiences = self.ltm.get_recent_experiences(limit=5)

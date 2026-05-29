@@ -18,6 +18,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.initialize()
+        logger.info(f"[db] opened: {db_path}")
 
     @contextmanager
     def cursor(self) -> Generator[sqlite3.Cursor, None, None]:
@@ -116,4 +117,5 @@ class Database:
                     logger.info(f"Schema migration: added {table}.{column}")
 
     def close(self) -> None:
+        logger.info(f"[db] closed: {self.db_path}")
         self.conn.close()

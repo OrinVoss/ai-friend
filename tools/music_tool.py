@@ -46,6 +46,7 @@ class MusicListTool(Tool):
     def execute(self, args: dict[str, Any]) -> ToolResult:
         subpath = args.get("path", "").strip()
         search = args.get("search", "").strip().lower()
+        logger.info(f"[tool] music_list path={subpath or '.'} search={search or 'none'}")
 
         target = os.path.join(MUSIC_DIR, subpath) if subpath else MUSIC_DIR
         target = os.path.abspath(target)
@@ -117,6 +118,8 @@ class MusicPlayTool(Tool):
         song = args.get("song", "").strip()
         if not song:
             return ToolResult.fail("请提供歌曲名称")
+
+        logger.info(f"[tool] music_play song={song[:60]}")
 
         # Try exact path first
         exact = os.path.join(MUSIC_DIR, song)

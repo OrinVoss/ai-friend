@@ -109,8 +109,10 @@ class SessionManager:
         with self._lock:
             sid = session_id or uuid.uuid4().hex[:12]
             if sid not in self._sessions:
-                logger.info(f"Creating new session: {sid}")
+                logger.info(f"[session] create: {sid}")
                 self._sessions[sid] = WebAgent(self.config, self.db, self.repo)
+            else:
+                logger.debug(f"[session] restore: {sid}")
             return sid, self._sessions[sid]
 
     def remove(self, session_id: str) -> None:

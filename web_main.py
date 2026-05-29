@@ -2,20 +2,11 @@
 """AI Friend — Web 端启动入口。"""
 
 import logging
-import sys
 
 import uvicorn
 
 from config import load_config
-
-
-def setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stderr,
-    )
+from core.logging_setup import setup_logging
 
 
 def main():
@@ -24,6 +15,9 @@ def main():
 
     host = getattr(config, 'web_host', '0.0.0.0')
     port = getattr(config, 'web_port', 8000)
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting AI Friend Web: model={config.api_model} host={host}:{port} log_level={config.log_level}")
 
     print(f"  AI Friend - {config.api_model}")
     print(f"  Web: http://localhost:{port}")
