@@ -215,8 +215,7 @@ class Agent:
                                           max_facts=self.config.max_facts,
                                           max_experiences=self.config.max_experiences,
                                           max_reflections=self.config.max_reflections)
-        if self.turn_count > 0 and self.turn_count % 10 == 0:
-            self.personality.save(self.config.personality_file)
+        # Personality save handled by _on_reflect (CLI) or WebAgent (Web)
         return final_text
 
     # ── CLI run loop ──
