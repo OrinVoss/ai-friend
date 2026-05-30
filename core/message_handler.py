@@ -21,16 +21,20 @@ class MessageHandler:
 
     def __init__(self, agent):
         self._agent = agent
-        # Phase 1 tool agent (external tools only, no personality)
-        from core.tool_agent import ToolAgent
-        self._tool_agent = ToolAgent(
-            provider=agent.provider,
-            tool_registry=agent._tool_registry,
-        )
+        self._tool_agent = None  # lazy init after tool registry is populated
 
     @property
     def a(self):
         return self._agent
+
+    def _ensure_tool_agent(self):
+        """Lazy-init ToolAgent after tool_registry is populated."""
+        if self._tool_agent is None:
+            from core.tool_agent import ToolAgent
+            self._tool_agent = ToolAgent(
+                provider=self.a.provider,
+                tool_registry=self.a._tool_registry,
+            )
 
     def handle_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -48,6 +52,7 @@ class MessageHandler:
         a.short_term.add_turn("user", user_input)
 
         # ── Phase 1: Run tool agent for external tool execution ──
+        self._ensure_tool_agent()
         tool_result = self._tool_agent.run(user_input)
         tool_records = self._tool_agent.format_for_phase2(tool_result)
         if tool_result.has_results:
@@ -101,6 +106,7 @@ class MessageHandler:
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
 
         # Phase 1: Let tool agent explore freely
+        self._ensure_tool_agent()
         explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容，或者浏览网页。你可以用 web_search 和 web_fetch。"
         tool_result = self._tool_agent.run(explore_prompt)
         tool_records = self._tool_agent.format_for_phase2(tool_result)

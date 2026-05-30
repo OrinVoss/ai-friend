@@ -18,12 +18,16 @@ class CliController:
 
     def __init__(self, agent):
         self._agent = agent  # Agent instance, used to access all shared state
-        from core.tool_agent import ToolAgent
-        self._tool_agent = ToolAgent(
-            provider=agent.provider,
-            tool_registry=agent._tool_registry,
-        )
+        self._tool_agent = None  # lazy init after tool registry is populated
         self._tool_records = ""  # Phase 1 results for current turn
+
+    def _ensure_tool_agent(self):
+        if self._tool_agent is None:
+            from core.tool_agent import ToolAgent
+            self._tool_agent = ToolAgent(
+                provider=self.a.provider,
+                tool_registry=self.a._tool_registry,
+            )
 
     # ── Property shortcuts ──
     @property
@@ -104,6 +108,7 @@ class CliController:
         a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
 
         # Phase 1: Run tool agent for external tool execution
+        self._ensure_tool_agent()
         self._tool_records = ""
         tool_result = self._tool_agent.run(user_input)
         if tool_result.has_results:
