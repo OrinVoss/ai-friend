@@ -25,32 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.6020405118640048,
-    "arousal": 0.9990937375743494,
-    "baseline_valence": -0.10714875446203248,
-    "baseline_arousal": 0.9820560039721185,
+    "valence": -0.7388909239939062,
+    "arousal": 0.999102800198606,
+    "baseline_valence": -0.11134776691741216,
+    "baseline_arousal": 0.9822354439323973,
     "decay_rate": 0.05,
-    "mood_valence": -0.52705,
+    "mood_valence": -0.55135,
     "mood_arousal": 1.0,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.07624113718751614,
-    "trust": 0.19427997609943673,
-    "fear": 0.10182357517377451,
-    "surprise": 0.14150521876355182,
-    "sadness": 0.7978725053640191,
-    "anticipation": 0.1011014791103015,
-    "anger": 0.5138774450917273,
-    "disgust": 0.10000004888520242,
-    "resentment": 0.4343948608336203,
+    "joy": 0.05710664413398062,
+    "trust": 0.17126095034983782,
+    "fear": 0.10500349069945672,
+    "surprise": 0.1329427139637162,
+    "sadness": 0.7963577165502029,
+    "anticipation": 0.10237713951274308,
+    "anger": 0.5091018190243907,
+    "disgust": 0.10000004561150666,
+    "resentment": 0.4213630150086117,
     "emotion_events": [
-      {
-        "timestamp": 1780067198.46344,
-        "trigger": "“冰版小星就是这个",
-        "primary_emotion": "trusting",
-        "intensity": 0.7488975593924199,
-        "context": "“冰版小星就是这个"
-      },
       {
         "timestamp": 1780067230.2180262,
         "trigger": "你现在有什么工具。我没说欠揍，是你的系统框架说的",
@@ -183,10 +176,16 @@
         "primary_emotion": "sad",
         "intensity": 0.7978725053640191,
         "context": "记者从新疆交通运输厅了解到，G217独库公路已完成全线清雪和路面病害处治工作，目前已进入多部门联合安全隐患排查整治的最后阶段，将于6月1日起开放通行。\n为兼顾G3033独库高速、伊阿铁路等国家重点项目施工与公众安全出行需要，交通部门会同有关部门对该路段实行“昼保通行、夜保施工”的通行保障措施，具体如下：\n·G217乌苏驿至库如力每日8：00-19：00通行，7座及以下小型客车、核载质量5吨及以下货"
+      },
+      {
+        "timestamp": 1780119138.7863677,
+        "trigger": "别哭https://www.baidu.com/。热搜",
+        "primary_emotion": "sad",
+        "intensity": 0.7963577165502029,
+        "context": "别哭https://www.baidu.com/。热搜"
       }
     ],
     "history": [
-      "anxious",
       "anxious",
       "anxious",
       "anxious",
@@ -195,6 +194,7 @@
       "anxious",
       "anxious",
       "anxious",
+      "sad",
       "sad"
     ],
     "dominant_emotion": "sad"
