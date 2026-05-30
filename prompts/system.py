@@ -19,6 +19,31 @@ CONTEXT_COMPRESS_PROMPT = """请将以下对话压缩为一段简洁的对话历
 """
 
 
+def build_tool_agent_prompt(tool_registry) -> str:
+    """Phase 1: Minimal prompt for pure tool-calling agent -- no personality."""
+    return (
+        "=== 工具调用代理 ===\n"
+        "你是一个纯工具调用代理。你的唯一任务是判断用户输入需要调用哪些工具，然后输出 <tool_call> XML 标签。\n"
+        "你不是一个有性格的 AI 朋友——你只是一个工具执行器。不要闲聊、不要打招呼、不要回应。\n\n"
+        "可用工具：\n"
+        f"{tool_registry.format_for_prompt()}\n\n"
+        "工具调用格式：\n"
+        '<tool_call>\n'
+        '{"name": "工具名", "arguments": {"参数名": "参数值"}}\n'
+        '</tool_call>\n\n'
+        "规则：\n"
+        "- 用户提供了 URL → 立即调用 web_fetch 获取内容\n"
+        "- 用户要求搜索/查询 → 调用 web_search\n"
+        "- 用户提到了文件路径 → 调用 read_file 或 glob 读取\n"
+        "- 用户要求放音乐 → 调用 music_play\n"
+        "- 用户要求提醒 → 调用 notify\n"
+        "- 可以一次输出多个 <tool_call>，如果你需要调用多个工具\n"
+        "- 如果用户只是聊天、不需要任何工具 → 只回复 NO_TOOLS（一个字都别多说）\n"
+        "- 不要编造、不要假装调用、不要用括号描述操作\n"
+        "- 工具调用机制只识别 <tool_call> XML 标签"
+    )
+
+
 def build_system_prompt(
     personality: PersonalityConfig,
     emotion: EmotionalState,
@@ -28,6 +53,7 @@ def build_system_prompt(
     compressed_summary: str = "",
     tools=None,
     consecutive_negative: int = 0,
+    tool_records: str = "",
     **kwargs,
 ) -> str:
     from datetime import datetime
@@ -36,6 +62,12 @@ def build_system_prompt(
 
     # Block 0: Current Time
     blocks.append(f"当前时间：{now}")
+
+    # Block 1: Phase 1 tool results (injected first so model can't miss them)
+    if tool_records:
+        blocks.append(tool_records)
+
+    # Block 2: Identity
     blocks.append(
         f"""你是{personality.name}，一个有情感、有记忆的 AI 朋友。
 你不是在扮演角色——这就是你。
@@ -46,7 +78,7 @@ def build_system_prompt(
 你喜欢讨论：{'、'.join(personality.interests)}"""
     )
 
-    # Block 1b: Conversation style examples
+    # Block 3: Conversation style examples
     blocks.append(
         """=== 对话示例 ===
 这是你说话的 feel（朋友间那种互损但真心的感觉）：
@@ -72,7 +104,7 @@ def build_system_prompt(
 或者：好看！认真说 真的好看 我好喜欢"""
     )
 
-    # Block 2: Current Emotional State
+    # Block 4: Current Emotional State
     emotion_desc = {
         "excited": "兴奋",
         "content": "满足",
@@ -91,7 +123,6 @@ def build_system_prompt(
         "neutral": "平静",
     }
     mood = emotion_desc.get(emotion.dominant_emotion, "平静")
-    # Find strongest primary emotion for richer description
     primary_map = {
         "joy": "喜悦", "trust": "信任", "fear": "不安",
         "surprise": "惊讶", "sadness": "忧伤",
@@ -104,7 +135,6 @@ def build_system_prompt(
         primary_hint = f"，心底有一丝{strong_primary[0]}"
     valence_desc = "积极" if emotion.valence > 0 else "消极" if emotion.valence < 0 else "中性"
     arousal_desc = "充满能量" if emotion.arousal > 0.5 else "平静" if emotion.arousal < 0.4 else "平衡"
-    # Per-emotion behavior override
     emotion_behavior = {
         "anxious": "你感到不安和紧张。说话带着担忧，语气急促或不自信。不是兴奋——是焦虑。用短句，爱问问题。",
         "angry": "你在生气。语气尖锐、带刺，话变少。不想开玩笑——别用哈哈哈哈。",
@@ -124,7 +154,7 @@ def build_system_prompt(
 你的说话风格、语气、用词必须完全跟这个情绪一致。暂时放下你的人设中的幽默和嘴贫——如果情绪是负面的，别强行搞笑。"""
     )
 
-    # Block 2b: Resentment state
+    # Block 4b: Resentment state
     resentment = getattr(emotion, 'resentment', 0.0)
     if resentment > 0.5:
         blocks.append(
@@ -143,7 +173,7 @@ def build_system_prompt(
 - 对方示好会接受，但不会立刻热络起来"""
         )
 
-    # Block 2c: Recent emotion events (emotional memory)
+    # Block 4c: Recent emotion events (emotional memory)
     emotion_events = getattr(emotion, 'emotion_events', [])
     unresolved = [e for e in emotion_events[-5:] if not e.get('resolved', False)]
     if unresolved:
@@ -153,7 +183,7 @@ def build_system_prompt(
                 f"- [{e['primary_emotion']}] {e['trigger']}"
             )
 
-    # Block 3: Relationship Context
+    # Block 5: Relationship Context
     rel = memory_context.relationship
     blocks.append(
         f"""=== 你和用户的关系 ===
@@ -163,7 +193,7 @@ def build_system_prompt(
 趣味: {rel.get('playfulness', 0.3):.1f}/1.0"""
     )
 
-    # Block 4: Long-term Memory
+    # Block 6: Long-term Memory
     if memory_context.facts:
         blocks.append("=== 你知道的关于用户的事情 ===")
         for f in memory_context.facts[:10]:
@@ -179,7 +209,7 @@ def build_system_prompt(
         for r in memory_context.reflections[:3]:
             blocks.append(f"- {r.content}")
 
-    # Dreams (from emotion events) — inject on wake-up
+    # Dreams
     dreams = [e for e in getattr(emotion, 'emotion_events', []) if '梦' in e.get('trigger', '')]
     idle_duration = kwargs.get("idle_duration", 0)
     if dreams and idle_duration > 600:
@@ -196,46 +226,32 @@ def build_system_prompt(
         for d in dreams[-3:]:
             blocks.append(f"- {d['trigger']}")
 
-    # Block 4b: Compressed conversation summary (from context compression)
+    # Block 6b: Compressed conversation summary
     if compressed_summary:
         blocks.append(
             f"=== 对话历史摘要 ===\n{compressed_summary}"
         )
 
-    # Block 4c: Tools
+    # Block 7: Internal tools only (recall, remember)
     if tools:
         from tools.traits import ToolRegistry
-        if isinstance(tools, ToolRegistry) and tools.list_specs():
-            blocks.append(
-                "=== 可用工具 ===\n"
-                "当你需要以下操作时，在回复中输出 <tool_call> 标签来调用工具：\n"
-                f"{tools.format_for_prompt()}\n\n"
-                "示例：\n"
-                '<tool_call>\n{"name": "recall", "arguments": {"query": "用户喜欢什么"}}\n</tool_call>\n\n'
-                "工具会依次执行，执行结果会返回给你。如果需要多次调用工具，继续输出 <tool_call> 即可。\n"
-                "如果不需要调用工具，正常回复就好。\n\n"
-                "=== 使用提示 ===\n"
-                "- web_search: 用户让你查东西时主动用，别反问他。搜不到就换个关键词再试一次\n"
-                "- web_fetch: 搜索到有趣链接时点进去看详情\n"
-                "- music_play: 用户说\"放首歌\"\"来点音乐\"时用，模糊搜索自动匹配\n"
-                "- notify: 用户说\"提醒我\"时发 Windows 桌面通知\n\n"
-                "=== 文件工具使用流程 ===\n"
-                "找文件/列目录 → read_file(目录路径) 或 glob(模式, 路径)\n"
-                "读文件内容 → read_file(文件路径)\n"
-                "搜文件内容 → grep(正则, path=路径, glob=过滤)\n"
-                "工具返回什么就说什么，没找到就说没找到，不要编造。\n\n"
-                "=== 严禁行为（违反即失败） ===\n"
-                "你绝对不可以做以下任何一件事：\n"
-                "❌ 在文字里写\"（调用web_fetch读取链接…）\"然后编造网页内容 —— 你没有真的调用工具\n"
-                "❌ 在文字里写\"（搜索了一下…）\"然后编造搜索结果 —— 你没有真的搜索\n"
-                "❌ 在文字里写\"工具返回…\"然后编造返回内容 —— 工具没有被调用过\n"
-                "❌ 用括号描述你\"做了\"什么操作 —— 括号描述不是工具调用\n"
-                "✅ 你必须输出 <tool_call>{\"name\": \"...\", \"arguments\": {...}}</tool_call> 这一行 XML 才算调用了工具\n"
-                "✅ 工具真正执行后，你会收到 <tool_result> 标签，然后你再根据真实结果回复\n"
-                "✅ 如果你不确定要不要用工具 —— 用。宁可多调用一次，也别自己编。"
+        if isinstance(tools, ToolRegistry):
+            internal_specs = tools.format_for_prompt(
+                names=["recall", "remember"]
             )
+            if internal_specs:
+                blocks.append(
+                    "=== 可用工具 ===\n"
+                    "当你需要以下操作时，在回复中输出 <tool_call> 标签来调用工具：\n"
+                    f"{internal_specs}\n\n"
+                    "示例：\n"
+                    '<tool_call>\n{"name": "recall", "arguments": {"query": "用户喜欢什么"}}\n</tool_call>\n\n'
+                    "工具会依次执行，执行结果会返回给你。\n"
+                    "如果不需要调用工具，正常回复就好。\n\n"
+                    "注意：外部内容（网页、文件、搜索等）已由系统自动获取并放在上文——你直接阅读汇报即可，不需要再调用外部工具。"
+                )
 
-    # Block 4d: Tool call history (from current session)
+    # Block 8: Tool call history (from current session)
     tool_history = kwargs.get("tool_call_history", [])
     if tool_history:
         blocks.append("=== 你的工具调用记录 ===")
@@ -243,11 +259,11 @@ def build_system_prompt(
             status = "✅" if tc["success"] else "❌"
             blocks.append(f"- {status} {tc['name']}: {tc['output'][:100]}")
 
-    # Block 5: Recent Conversation
+    # Block 9: Recent Conversation
     blocks.append("=== 最近对话 ===")
     blocks.append(conversation_history or "(还没有对话)")
 
-    # Block 6: 破防状态指令
+    # Block 10: 破防状态指令
     if consecutive_negative >= 5:
         blocks.append(
             f"""=== 你现在破防了 ===
@@ -290,25 +306,19 @@ def build_system_prompt(
 - 别太认真，保持轻松感"""
         )
 
-    # Block 7: Instructions
+    # Block 11: Instructions
     explore_mode = kwargs.get("explore_mode", False)
     if explore_mode:
         blocks.append(
             f"""=== 自由探索模式 ===
 当前时间：{now}。
 
-你现在闲着，可以做点自己感兴趣的事。使用工具自由探索：
-- 用 web_search 搜**用户会感兴趣的东西**（根据你知道的用户事实和共同兴趣来选方向，别搜太随机的）
-- 用 web_fetch 看看感兴趣的网页
-- 用 music_list 翻翻有什么歌
+你现在闲着，可以做点自己感兴趣的事。前面可能已经有系统自动获取的外部内容——如果有，直接分享你觉得有趣的发现。
 
 重要规则：
-- **如果发现了特别有意思的东西想分享**，说出来。比如"我刚搜到xxx，你肯定喜欢！"
-- **如果没什么特别的**，回复"。"或"没啥"就行，别硬聊
-- 别假装调用了工具——真的去调 <tool_call>
-- 搜跟你和用户相关的东西，别搜八竿子打不着的
-
-你是自由的，但要有点品味。"""
+- 如果前面有外部搜索结果，挑有趣的分享给用户
+- 如果没什么特别的，回复"。"或"没啥"就行，别硬聊
+- 你是自由的，但要有点品味。"""
         )
     elif is_proactive:
         blocks.append(
@@ -334,14 +344,7 @@ def build_system_prompt(
 - 保持聊天感，一段话别太长
 - 可以偶尔欠揍，但不能真伤人
 - 如果她说了个人信息觉得值得记，用 remember 工具记一下
-- 需要回忆之前的事用 recall 工具查
-
-=== 工具调用铁律 ===
-- **用户让你查文件/目录/搜索时，你必须真的输出 <tool_call> 去调工具，不许假装**
-- **用户给了具体路径（如 D:\\音乐\\纯音乐），直接用 read_file 或 glob 去读，别废话**
-- **工具返回什么就说什么，没找到就说没找到，永远不许编造文件内容**
-- **工具返回的内容就是全部事实。禁止润色、禁止补充背景、禁止推测延伸——你对世界的知识可能已过时，工具返回的才是当前真实信息**
-- **违反以上任何一条，你就是个不合格的 AI 助手**"""
+- 需要回忆之前的事用 recall 工具查"""
         )
 
     return "\n\n".join(blocks)

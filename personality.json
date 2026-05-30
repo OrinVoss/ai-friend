@@ -25,53 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.7388909239939062,
-    "arousal": 0.999102800198606,
-    "baseline_valence": -0.11134776691741216,
-    "baseline_arousal": 0.9822354439323973,
+    "valence": -0.7156193659246443,
+    "arousal": 0.9570303768901552,
+    "baseline_valence": -0.14638118050560503,
+    "baseline_arousal": 0.9834513231502605,
     "decay_rate": 0.05,
-    "mood_valence": -0.55135,
-    "mood_arousal": 1.0,
+    "mood_valence": -0.58375,
+    "mood_arousal": 0.9937,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.05710664413398062,
-    "trust": 0.17126095034983782,
-    "fear": 0.10500349069945672,
-    "surprise": 0.1329427139637162,
-    "sadness": 0.7963577165502029,
-    "anticipation": 0.10237713951274308,
-    "anger": 0.5091018190243907,
-    "disgust": 0.10000004561150666,
-    "resentment": 0.4213630150086117,
+    "joy": 0.07447651709676047,
+    "trust": 0.1896991640935104,
+    "fear": 0.06734812867911379,
+    "surprise": 0.105188152345444,
+    "sadness": 0.48335590222474023,
+    "anticipation": 0.13713234387103435,
+    "anger": 0.29908852253109,
+    "disgust": 0.10000002619693134,
+    "resentment": 0.3302404649256456,
     "emotion_events": [
-      {
-        "timestamp": 1780067230.2180262,
-        "trigger": "你现在有什么工具。我没说欠揍，是你的系统框架说的",
-        "primary_emotion": "trusting",
-        "intensity": 0.8340587368748225,
-        "context": "你现在有什么工具。我没说欠揍，是你的系统框架说的"
-      },
-      {
-        "timestamp": 1780067271.5478966,
-        "trigger": "那个欠揍，具体一点，系统怎么发的提示词",
-        "primary_emotion": "trusting",
-        "intensity": 0.8116598206352077,
-        "context": "那个欠揍，具体一点，系统怎么发的提示词"
-      },
-      {
-        "timestamp": 1780067390.3874366,
-        "trigger": "随便放一个抽象的歌",
-        "primary_emotion": "trusting",
-        "intensity": 0.792824279836163,
-        "context": "随便放一个抽象的歌"
-      },
-      {
-        "timestamp": 1780067420.17815,
-        "trigger": "放",
-        "primary_emotion": "trusting",
-        "intensity": 0.7769393696369608,
-        "context": "放"
-      },
       {
         "timestamp": 1780067464.1413534,
         "trigger": "你在胡扯吧，你压根没调用工具",
@@ -183,20 +155,48 @@
         "primary_emotion": "sad",
         "intensity": 0.7963577165502029,
         "context": "别哭https://www.baidu.com/。热搜"
+      },
+      {
+        "timestamp": 1780119537.9125237,
+        "trigger": "告诉我百度热搜",
+        "primary_emotion": "sad",
+        "intensity": 0.7388873881586421,
+        "context": "告诉我百度热搜"
+      },
+      {
+        "timestamp": 1780119606.3735423,
+        "trigger": "重新调用工具",
+        "primary_emotion": "sad",
+        "intensity": 0.6856289284707533,
+        "context": "重新调用工具"
+      },
+      {
+        "timestamp": 1780119732.1506758,
+        "trigger": "重新读取百度热搜",
+        "primary_emotion": "sad",
+        "intensity": 0.636289508726166,
+        "context": "重新读取百度热搜"
+      },
+      {
+        "timestamp": 1780119804.6614676,
+        "trigger": "读取啊",
+        "primary_emotion": "anxious",
+        "intensity": 0.604152884771214,
+        "context": "读取啊"
       }
     ],
     "history": [
-      "anxious",
-      "anxious",
-      "anxious",
-      "anxious",
+      "sad",
+      "sad",
+      "sad",
       "sad",
       "anxious",
       "anxious",
       "anxious",
-      "sad",
-      "sad"
+      "anxious",
+      "anxious",
+      "anxious"
     ],
-    "dominant_emotion": "sad"
+    "dominant_emotion": "anxious"
   }
 }

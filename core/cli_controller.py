@@ -1,6 +1,7 @@
 """CLI state machine: run loop + _on_* handlers + command processing.
 
-Only used by main.py (CLI path). Web path (web/server.py) bypasses this entirely."""
+Only used by main.py (CLI path). Web path (web/server.py) bypasses this entirely.
+Two-phase architecture: Phase 1 (ToolAgent) runs in _on_perceive, results injected in _on_think."""
 
 import logging
 import random
@@ -17,6 +18,12 @@ class CliController:
 
     def __init__(self, agent):
         self._agent = agent  # Agent instance, used to access all shared state
+        from core.tool_agent import ToolAgent
+        self._tool_agent = ToolAgent(
+            provider=agent.provider,
+            tool_registry=agent._tool_registry,
+        )
+        self._tool_records = ""  # Phase 1 results for current turn
 
     # ── Property shortcuts ──
     @property
@@ -95,6 +102,13 @@ class CliController:
         a.short_term.add_turn("user", user_input)
         a.current_memory_context = a.retriever.retrieve_for_query(user_input)
         a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
+
+        # Phase 1: Run tool agent for external tool execution
+        self._tool_records = ""
+        tool_result = self._tool_agent.run(user_input)
+        if tool_result.has_results:
+            self._tool_records = self._tool_agent.format_for_phase2(tool_result)
+
         a.state = AgentState.THINK
 
     def _on_think(self) -> None:
@@ -115,6 +129,7 @@ class CliController:
                 is_proactive=is_proactive, compressed_summary=a._context.compressed_summary,
                 tools=a._tool_registry,
                 consecutive_negative=a._consecutive_negative,
+                tool_records=self._tool_records,
             )
             messages = [{"role": "system", "content": sys_prompt}]
             a._context.reset_estimate(estimate_tokens(sys_prompt))
@@ -215,6 +230,7 @@ class CliController:
             a.turn_count += 1
             a.last_activity_time = time.time()
         a._reset_react()
+        self._tool_records = ""
         a.state = AgentState.REFLECT
 
     def _on_reflect(self) -> None:

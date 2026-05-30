@@ -53,3 +53,29 @@ def mock_retriever():
         relationship={"trust": 0.5, "familiarity": 0.5, "intimacy": 0.5, "playfulness": 0.5},
     )
     return m
+
+
+def mock_tool_registry():
+    """Mock ToolRegistry with proper specs for format_for_prompt() and get()."""
+    m = MagicMock()
+    from tools.traits import ToolSpec, ToolResult
+
+    specs = []
+    for name in ["web_fetch", "web_search", "read_file", "glob", "grep",
+                  "music_play", "notify", "recall", "remember"]:
+        specs.append(ToolSpec(
+            name=name,
+            description=f"Mock {name} tool",
+            parameters={"type": "object", "properties": {}},
+        ))
+    m.list_specs.return_value = specs
+
+    def _make_mock_tool(tool_name):
+        t = MagicMock()
+        t.execute.return_value = ToolResult(success=True, output="mock tool output")
+        t.spec.return_value = ToolSpec(name=tool_name, description="mock", parameters={})
+        t.name.return_value = tool_name
+        return t
+
+    m.get.side_effect = lambda name: _make_mock_tool(name)
+    return m

@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from core.message_handler import MessageHandler
+from tests.mocks import mock_tool_registry
 
 
 class TestMessageHandler(unittest.TestCase):
@@ -12,7 +13,7 @@ class TestMessageHandler(unittest.TestCase):
         self.agent.turn_count = 0
         self.agent._consecutive_negative = 0
         self.agent._tool_call_history = []
-        self.agent._tool_registry = MagicMock()
+        self.agent._tool_registry = mock_tool_registry()
         self.agent._context = MagicMock()
         self.agent._context.compressed_summary = ""
         self.agent._context.compress = MagicMock()
@@ -22,6 +23,7 @@ class TestMessageHandler(unittest.TestCase):
         self.agent.ltm.repo.insert_turn = MagicMock()
         self.agent.personality.config.name = "TestBot"
         self.agent.personality.config.interests = ["music", "art"]
+        self.agent.provider.generate.return_value = "NO_TOOLS"
         self.agent._react_loop.return_value = "Hello!"
         self.agent._pick_proactive_topic.return_value = "聊聊天气"
 

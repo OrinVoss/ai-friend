@@ -62,10 +62,16 @@ class ToolRegistry:
     def list_specs(self) -> list[ToolSpec]:
         return [t.spec() for t in self._tools.values()]
 
-    def format_for_prompt(self) -> str:
-        """Render tools as markdown for system prompt injection."""
+    def format_for_prompt(self, names: list[str] | None = None) -> str:
+        """Render tools as markdown for system prompt injection.
+
+        Args:
+            names: Optional list of tool names to include. If None, all tools.
+        """
         parts = []
         for spec in self.list_specs():
+            if names is not None and spec.name not in names:
+                continue
             params_str = json.dumps(spec.parameters, indent=2, ensure_ascii=False)
             parts.append(
                 f"- **{spec.name}**: {spec.description}\n"

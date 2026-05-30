@@ -1,7 +1,11 @@
 """Message entry points: process_message, process_proactive, process_explore.
 
-Used by both Web path (web/server.py → WebAgent) and CLI path (main.py → Agent.run).
-Each method builds a system prompt, assembles messages, and delegates to Agent._react_loop."""
+Two-phase architecture:
+  Phase 1 (ToolAgent) -- pure tool calling, no personality
+  Phase 2 (Roleplay)   -- personality + emotion + memory + tool results
+
+Used by both Web path (web/server.py -> WebAgent) and CLI path (main.py -> Agent.run).
+"""
 
 import logging
 import random
@@ -13,10 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 class MessageHandler:
-    """Handles incoming messages: prompt building, message assembly, react delegation."""
+    """Handles incoming messages with two-phase tool-then-roleplay pipeline."""
 
     def __init__(self, agent):
         self._agent = agent
+        # Phase 1 tool agent (external tools only, no personality)
+        from core.tool_agent import ToolAgent
+        self._tool_agent = ToolAgent(
+            provider=agent.provider,
+            tool_registry=agent._tool_registry,
+        )
 
     @property
     def a(self):
@@ -36,6 +46,12 @@ class MessageHandler:
         a.current_input = user_input
         a.last_activity_time = time.time()
         a.short_term.add_turn("user", user_input)
+
+        # ── Phase 1: Run tool agent for external tool execution ──
+        tool_result = self._tool_agent.run(user_input)
+        tool_records = self._tool_agent.format_for_phase2(tool_result)
+
+        # ── Phase 2: Build roleplay prompt with tool results ──
         mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx
         a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
@@ -43,10 +59,12 @@ class MessageHandler:
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary, tools=a._tool_registry,
+            compressed_summary=a._context.compressed_summary,
+            tools=a._tool_registry,
             consecutive_negative=a._consecutive_negative,
             tool_call_history=a._tool_call_history,
             idle_duration=idle,
+            tool_records=tool_records,
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         return a._react_loop(messages, on_token, add_to_history=True)
@@ -60,8 +78,10 @@ class MessageHandler:
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary, tools=a._tool_registry,
-            is_proactive=True, consecutive_negative=a._consecutive_negative,
+            compressed_summary=a._context.compressed_summary,
+            tools=a._tool_registry,
+            is_proactive=True,
+            consecutive_negative=a._consecutive_negative,
         )
         messages = self._build_messages(sys_prompt, user_input=f"[主动开启对话] 主题方向：{topic}")
         logger.info(f"[proactive] chat: topic={topic}")
@@ -73,20 +93,35 @@ class MessageHandler:
         mem_ctx = a.retriever.retrieve_for_query("")
         topic = a._pick_proactive_topic()
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
+
+        # Phase 1: Let tool agent explore freely
+        explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容，或者浏览网页。你可以用 web_search 和 web_fetch。"
+        tool_result = self._tool_agent.run(explore_prompt)
+        tool_records = self._tool_agent.format_for_phase2(tool_result)
+
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary, tools=a._tool_registry,
-            is_proactive=True, consecutive_negative=a._consecutive_negative,
+            compressed_summary=a._context.compressed_summary,
+            tools=a._tool_registry,
+            is_proactive=True,
+            consecutive_negative=a._consecutive_negative,
             explore_mode=True,
+            tool_records=tool_records,
         )
         messages = self._build_messages(sys_prompt, user_input=None)
         interests = getattr(a.personality.config, 'interests', [])
         interest_hint = ""
         if interests:
             picked = random.sample(interests, min(2, len(interests)))
-            interest_hint = f"可以搜搜关于{'/'.join(picked)}的内容，或者看看最近有什么相关新闻。"
-        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。**你必须真的调用工具去搜一下**——别直接说没啥。搜完了如果发现有特别有意思的，分享出来；实在没意思才说没啥。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
+            interest_hint = f"可以看看关于{'/'.join(picked)}的内容。"
+        messages.append({
+            "role": "user",
+            "content": (
+                f"[自由探索] 系统已自动获取了一些内容（见上文）。{interest_hint}"
+                "如果发现特别有意思的，分享出来；实在没意思就说没啥。"
+            )
+        })
         logger.info(f"[explore] start: topic={topic}")
         result = a._react_loop(messages, on_token=None, add_to_history=False)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
