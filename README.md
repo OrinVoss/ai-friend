@@ -2,6 +2,8 @@
 
 具有人格、情绪和长短期记忆的 AI 朋友。基于 DeepSeek API，采用 ReAct Agent 架构，支持 CLI 和 Web 双端。
 
+核心 Agent 从 784 行 God Class 拆分为 6 个功能类聚模块（#30）。
+
 ---
 
 ## 功能
@@ -112,7 +114,7 @@ AI 回复 = 人格底色 × 当前情绪 × 对话上下文
 |------|---------|---------|
 | 午睡 | 12:00-13:00 | 情绪驱动（sad +40%，excited -20%，resentment +20%） |
 | 午醒 | 13:10-16:00 | 随机（arousal 高→早醒，resentment 高→晚醒），分享梦境 |
-| 夜睡 | 23:30-次日 0:30 | 情绪驱动（baseline 30% + sleepiness） |
+| 夜睡 | 23:00-次日 01:00 | 情绪驱动（baseline 30% + sleepiness） |
 | 晨醒 | 7:00-10:00 | 随机（情绪影响），分享梦境 |
 
 睡前发一条消息（"困了去睡了…" / "晚安"），醒来分享 LLM 生成的碎片化梦境。
@@ -248,17 +250,31 @@ ai-friend/
 ├── personality.json           人格定义 + 情绪状态
 ├── CLAUDE.md                  AI 协作规则
 ├── data/                      SQLite 数据库（WAL 模式）
-├── changes/                   修改记录（按日期，18+ 条）
+├── logs/                      运行日志（YYYY-MM-DD.log，含 API/情绪/睡眠/工具追踪）
+├── changes/                   修改记录（按日期，20+ 条）
 ├── doc/                       文档
 │   ├── architecture.md        架构总览 + 使用指南
 │   ├── technical.md           技术细节（全模块）
 │   ├── message-flow.md        消息流转流程
 │   └── milestones-and-issues.md 里程碑 + 90 issue
 │
-├── core/                      核心引擎
-│   ├── agent.py               ReAct Agent（CLI 状态机 + Web process_message 双路径）
+├── tests/                     单元测试（33 用例）
+│   ├── mocks.py                Mock 工厂
+│   ├── test_context_manager.py 上下文管理测试（12 用例）
+│   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
+│   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
+│   └── test_message_handler.py 消息处理测试（7 用例）
+│
+├── core/                      核心引擎（6 模块，按功能类聚）
+│   ├── agent.py               核心引擎（223 行）：模块组装 + ReAct 循环
+│   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
+│   ├── sleep_manager.py       睡眠系统：窗口判断 + 梦境生成 + 状态持久化
+│   ├── proactivity.py         主动行为：评分 + 话题选择 + 频率限制
+│   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
+│   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
 │   ├── provider.py             LLM API 客户端（OpenAI 兼容，trust_env=False）
+│   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
 │   └── dispatcher.py           tool_call XML 解析 + 执行 + 别名归一化
 │
 ├── memory/                    记忆系统
@@ -267,13 +283,14 @@ ai-friend/
 │   ├── retrieval.py            三层检索（评分 + LLM 重排 + 按需回溯）
 │   └── consolidation.py        记忆合并（事实/体验/反思）+ 情感分析
 │
-├── tools/                     工具系统（8 个）
+├── tools/                     工具系统（9 个）
 │   ├── traits.py               Tool 基类 + ToolResult + ToolRegistry
 │   ├── memory_tools.py         recall + remember
-│   ├── file_tools.py           read_file（路径限制 + 大小限制）
+│   ├── file_tools.py           read_file（路径限制 + 大小限制 + 目录列举）
+│   ├── search_tools.py         glob（模式匹配）+ grep（正则内容搜索）
 │   ├── notify_tool.py          notify（PowerShell toast + 独立线程）
 │   ├── web_tools.py            web_search + web_fetch（AnySearch API）
-│   └── music_tool.py           music_list + music_play（D:\音乐）
+│   └── music_tool.py           music_play（模糊搜索 + 默认播放器）
 │
 ├── storage/                    SQLite（WAL + 版本化 Schema 迁移 + 软删除）
 ├── prompts/                    提示词模板（破防/怨恨/梦境/工具记录注入）
