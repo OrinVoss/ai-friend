@@ -21,6 +21,8 @@ from config import Config
 from core.context_manager import ContextManager, estimate_tokens, COMPRESS_THRESHOLD
 from core.sleep_manager import SleepManager
 from core.proactivity import ProactivityManager
+from core.cli_controller import CliController
+from core.message_handler import MessageHandler
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,10 @@ class Agent:
         self._react_messages: list[dict] | None = None
         self._max_tool_iterations: int = 10
         self._tool_registry: ToolRegistry = ToolRegistry()
+        self._tool_calls_pending: list = []
+
+        self._cli = CliController(self)
+        self._messages = MessageHandler(self)
 
     def _max_tokens_for_emotion(self) -> int:
         base = self.config.max_tokens
@@ -93,109 +99,16 @@ class Agent:
         }
         return mapping.get(self.personality.emotion.dominant_emotion, base)
 
+    # ── Message entry points (delegate to MessageHandler) ──
+
     def process_message(self, user_input: str, on_token=None) -> str:
-        from prompts.system import build_system_prompt
-
-        # Sleep check: auto-reply if sleeping
-        if self._sleeping:
-            self.last_activity_time = time.time()
-            zzz = random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
-            return zzz
-
-        logger.info(f"[msg] turn={self.turn_count} len={len(user_input)}")
-
-        idle = time.time() - self.last_activity_time
-        self.current_input = user_input
-        self.last_activity_time = time.time()
-        self.short_term.add_turn("user", user_input)
-        mem_ctx = self.retriever.retrieve_for_query(user_input)
-        self.current_memory_context = mem_ctx
-        self.ltm.repo.insert_turn(self.turn_count, "user", user_input, str(self.personality.emotion.to_dict()))
-        conv_hist = self.short_term.format_for_prompt(max_chars=3000)
-        sys_prompt = build_system_prompt(
-            personality=self.personality.config, emotion=self.personality.emotion,
-            memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
-            consecutive_negative=self._consecutive_negative,
-            tool_call_history=self._tool_call_history,
-            idle_duration=idle,
-        )
-        messages = [{"role": "system", "content": sys_prompt}]
-        overflow = False
-        for t in self.short_term.get_all_reversed():
-            role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
-                overflow = True
-                break
-            messages.insert(1, {"role": role, "content": t.content})
-        if overflow and self._context.compressed_summary:
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._context.compressed_summary}"})
-        user_msg = f"用户输入：{user_input}"
-        msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
-        if msg_tokens + estimate_tokens(user_msg) > COMPRESS_THRESHOLD:
-            self._context.compress(messages)
-        messages.append({"role": "user", "content": user_msg})
-        return self._react_loop(messages, on_token, add_to_history=True)
+        return self._messages.handle_message(user_input, on_token)
 
     def process_proactive(self, on_token=None) -> str:
-        from prompts.system import build_system_prompt
-        mem_ctx = self.retriever.retrieve_for_query("")
-        topic = self._pick_proactive_topic()
-        conv_hist = self.short_term.format_for_prompt(max_chars=3000)
-        sys_prompt = build_system_prompt(
-            personality=self.personality.config, emotion=self.personality.emotion,
-            memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
-            is_proactive=True, consecutive_negative=self._consecutive_negative,
-        )
-        messages = [{"role": "system", "content": sys_prompt}]
-        overflow = False
-        for t in self.short_term.get_all_reversed():
-            role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
-                overflow = True
-                break
-            messages.insert(1, {"role": role, "content": t.content})
-        if overflow and self._context.compressed_summary:
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._context.compressed_summary}"})
-        messages.append({"role": "user", "content": f"[主动开启对话] 主题方向：{topic}"})
-        logger.info(f"[proactive] chat: topic={topic}")
-        return self._react_loop(messages, on_token, add_to_history=False)
+        return self._messages.handle_proactive(on_token)
 
     def process_explore(self) -> str | None:
-        """Autonomous exploration: freely use tools, optionally share findings.
-        Returns message if something worth sharing, None if nothing."""
-        from prompts.system import build_system_prompt
-        mem_ctx = self.retriever.retrieve_for_query("")
-        topic = self._pick_proactive_topic()
-        conv_hist = self.short_term.format_for_prompt(max_chars=3000)
-        sys_prompt = build_system_prompt(
-            personality=self.personality.config, emotion=self.personality.emotion,
-            memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
-            is_proactive=True, consecutive_negative=self._consecutive_negative,
-            explore_mode=True,
-        )
-        messages = [{"role": "system", "content": sys_prompt}]
-        for t in self.short_term.get_all_reversed():
-            role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
-                break
-            messages.insert(1, {"role": role, "content": t.content})
-        interests = getattr(self.personality.config, 'interests', [])
-        interest_hint = ""
-        if interests:
-            picked = random.sample(interests, min(2, len(interests)))
-            interest_hint = f"可以搜搜关于{'/'.join(picked)}的内容，或者看看最近有什么相关新闻。"
-        messages.append({"role": "user", "content": f"[自由探索] 你现在闲着。{interest_hint}也可以翻翻文件、听听歌。**你必须真的调用工具去搜一下**——别直接说没啥。搜完了如果发现有特别有意思的，分享出来；实在没意思才说没啥。别搜太随机的东西——搜你真正感兴趣、觉得用户也会喜欢的。"})
-        logger.info(f"[explore] start: topic={topic}")
-        result = self._react_loop(messages, on_token=None, add_to_history=False)
-        # Only share if result is substantial (not just "ok" or tool output)
-        if result and len(result.strip()) > 30 and not result.startswith("搜索"):
-            logger.info(f"[explore] shared: {len(result)} chars")
-            return result
-        logger.debug(f"[explore] silent: result={result[:80] if result else 'None'}")
-        return None
+        return self._messages.handle_explore()
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
@@ -275,246 +188,15 @@ class Agent:
         # Personality save handled by _on_reflect (CLI) or WebAgent (Web)
         return final_text
 
-    # ── CLI run loop ──
+    # ── CLI run loop (delegate to CliController) ──
 
     def run(self) -> None:
-        if self.ui:
-            self.ui.start()
-            self.ui.display_banner(self.personality.config.name)
-        self.state = AgentState.BOOT
-        self._on_boot()
-        while self._running and self.state != AgentState.SHUTDOWN:
-            try:
-                handler = {
-                    AgentState.IDLE: self._on_idle,
-                    AgentState.PERCEIVE: self._on_perceive,
-                    AgentState.THINK: self._on_think,
-                    AgentState.ACT: self._on_act,
-                    AgentState.REFLECT: self._on_reflect,
-                }.get(self.state)
-                if handler:
-                    handler()
-            except KeyboardInterrupt:
-                self.state = AgentState.SHUTDOWN
-            except Exception as e:
-                logger.error(f"Error in state {self.state}: {e}", exc_info=True)
-                if self.ui:
-                    self.ui.display.print_error(str(e))
-                time.sleep(1)
-                self.state = AgentState.IDLE
-        self._on_shutdown()
-
-    def _on_boot(self) -> None:
-        greeting = self.personality.config.first_run_greeting
-        if not greeting:
-            greeting = f"你好呀！我是{self.personality.config.name}，很高兴认识你~"
-        if self.ui:
-            self.ui.display.respond(greeting, prefix=self.personality.config.name)
-        self.state = AgentState.IDLE
-
-    def _on_idle(self) -> None:
-        if not self._prompt_shown:
-            print("\033[33m用户输入: \033[0m", end="", flush=True)
-            self._prompt_shown = True
-        user_input = self.ui.reader.read_line() if self.ui else None
-        if user_input is not None:
-            self.current_input = user_input
-            self.state = AgentState.PERCEIVE
-            return
-        idle_duration = time.time() - self.last_activity_time
-        if idle_duration > self.config.proactive_min_idle:
-            if random.random() < self._calculate_proactivity(idle_duration):
-                self.current_input = None
-                self.state = AgentState.THINK
-                return
-        time.sleep(0.1)
-
-    def _on_perceive(self) -> None:
-        user_input = self.current_input or ""
-        if user_input.startswith("/"):
-            self._handle_command(user_input)
-            self.current_input = None
-            self.state = AgentState.IDLE if self._running else AgentState.SHUTDOWN
-            return
-        self.short_term.add_turn("user", user_input)
-        self.current_memory_context = self.retriever.retrieve_for_query(user_input)
-        self.ltm.repo.insert_turn(self.turn_count, "user", user_input, str(self.personality.emotion.to_dict()))
-        self.state = AgentState.THINK
-
-    def _on_think(self) -> None:
-        from prompts.system import build_system_prompt
-        is_proactive = self.current_input is None
-        if self._react_messages is None:
-            if is_proactive:
-                self.current_memory_context = self.retriever.retrieve_for_query("")
-                user_message = f"[主动开启对话] 主题方向：{self._pick_proactive_topic()}"
-            else:
-                user_message = f"用户输入：{self.current_input or ''}"
-            sys_prompt = build_system_prompt(
-                personality=self.personality.config, emotion=self.personality.emotion,
-                memory_context=self.current_memory_context,
-                conversation_history=self.short_term.format_for_prompt(max_chars=3000),
-                is_proactive=is_proactive, compressed_summary=self._context.compressed_summary,
-                tools=self._tool_registry,
-                consecutive_negative=self._consecutive_negative,
-            )
-            messages = [{"role": "system", "content": sys_prompt}]
-            self._context.reset_estimate(estimate_tokens(sys_prompt))
-            for t in self.short_term.get_all_reversed():
-                role = "assistant" if t.role == "assistant" else "user"
-                msg_tokens = estimate_tokens(t.content)
-                if self._context.estimated_tokens + msg_tokens > COMPRESS_THRESHOLD:
-                    break
-                messages.append({"role": role, "content": t.content})
-                self._context.add_estimate(msg_tokens)
-            messages = [messages[0]] + list(reversed(messages[1:]))
-            if not is_proactive:
-                user_msg = {"role": "user", "content": user_message}
-                if self._context.estimated_tokens + estimate_tokens(user_message) <= COMPRESS_THRESHOLD:
-                    messages.append(user_msg)
-                    self._context.add_estimate(estimate_tokens(user_message))
-                else:
-                    self._context.compress(messages)
-            self._react_messages = messages
-            self._react_iteration = 0
-        else:
-            messages = self._react_messages
-        self._prompt_shown = False
-        max_tok = self._max_tokens_for_emotion()
-        if self._react_iteration > 0:
-            if self.ui:
-                self.ui.display.print_system(f"思考中... (第{self._react_iteration}轮)")
-            try:
-                full_response = self.provider.generate(messages, stream=False, max_tokens=384)
-            except ConnectionError as e:
-                if self.ui:
-                    self.ui.display.print_error(f"网络连接失败：{e}")
-                self._reset_react()
-                self.state = AgentState.REFLECT
-                return
-        else:
-            if self.ui:
-                self.ui.display.show_thinking()
-            accumulated = []
-            stream_done = False
-            def on_token(tok: str) -> None:
-                if tok and not stream_done:
-                    if not accumulated and self.ui:
-                        print("\r", end="", flush=True)
-                        print(f"\033[1;36m{self.personality.config.name}:\033[0m ", end="", flush=True)
-                    accumulated.append(tok)
-                    if self.ui:
-                        print(tok, end="", flush=True)
-            try:
-                full_response = self.provider.generate(messages, stream=True, on_token=on_token, max_tokens=max_tok)
-            except ConnectionError as e:
-                if self.ui:
-                    self.ui.display.print_error(f"网络连接失败：{e}")
-                self._reset_react()
-                self.state = AgentState.REFLECT
-                return
-            stream_done = True
-            if self.ui:
-                print()
-        cleaned_text, tool_calls = parse_tool_calls(full_response)
-        self.current_response = cleaned_text
-        self._tool_calls_pending = tool_calls
-        self._react_iteration += 1
-        if self._react_messages is not None:
-            self._react_messages.append({"role": "assistant", "content": full_response})
-        self.state = AgentState.ACT
-
-    def _on_act(self) -> None:
-        tool_calls = getattr(self, '_tool_calls_pending', []) or []
-        if tool_calls:
-            if self._react_iteration > self._max_tool_iterations:
-                if self.ui:
-                    self.ui.display.print_system("工具调用次数已达上限")
-                self._finish_react_response()
-                return
-            if self.ui:
-                self.ui.display.print_system(f"执行 {len(tool_calls)} 个工具...")
-            results = execute_tool_calls(self._tool_registry, tool_calls)
-            result_text = format_tool_results(results)
-            if self._react_messages is not None:
-                self._react_messages.append({"role": "user", "content": result_text})
-            if all(not r["success"] for r in results) and contains_fake_action(self.current_response):
-                self._react_messages.append({"role": "user", "content": "你刚才说自己已经执行了操作，但没有成功调用任何工具。如果需要执行操作，请使用 <tool_call> 调用对应的工具。如果不需要工具，直接回复用户即可。"})
-            self.state = AgentState.THINK
-            return
-        self._finish_react_response()
-
-    def _finish_react_response(self) -> None:
-        if self.current_response:
-            if self._react_iteration > 1 and self.ui:
-                self.ui.display.respond(self.current_response, prefix=self.personality.config.name)
-            self.short_term.add_turn("assistant", self.current_response)
-            self.ltm.repo.insert_turn(self.turn_count, "assistant", self.current_response, str(self.personality.emotion.to_dict()))
-            self.turn_count += 1
-            self.last_activity_time = time.time()
-        self._reset_react()
-        self.state = AgentState.REFLECT
+        self._cli.run()
 
     def _reset_react(self) -> None:
         self._react_messages = None
         self._react_iteration = 0
         self._tool_calls_pending = []
-
-    def _on_reflect(self) -> None:
-        # Sentiment analysis + emotional shift already done in _react_loop
-        # (shared by both CLI and Web paths). _on_reflect handles only
-        # consolidation, pending turns, and periodic save.
-        ei = abs(self.personality.emotion.valence)
-        idle = time.time() - self.last_activity_time
-        if self.consolidator.should_consolidate(self.turn_count, ei, idle, self.config):
-            self.consolidator.consolidate(self.short_term, self.personality,
-                                          max_facts=self.config.max_facts,
-                                          max_experiences=self.config.max_experiences,
-                                          max_reflections=self.config.max_reflections)
-        for t in list(self.short_term.get_all())[-2:]:
-            self.consolidator.add_pending(t)
-        if self.turn_count % 10 == 0:
-            self.personality.save(self.config.personality_file)
-        self.current_response = ""
-        self.state = AgentState.IDLE
-
-    def _on_shutdown(self) -> None:
-        self.consolidator.consolidate(self.short_term, self.personality,
-                                      max_facts=self.config.max_facts,
-                                      max_experiences=self.config.max_experiences,
-                                      max_reflections=self.config.max_reflections)
-        self.personality.save(self.config.personality_file)
-        if self.ui:
-            self.ui.stop()
-        print(f"\n\033[1;36m{self.personality.config.name} 记下了你们的对话。下次见~\033[0m")
-
-    def _handle_command(self, cmd: str) -> None:
-        if cmd in ("/exit", "/quit"):
-            self._running = False
-        elif cmd == "/save":
-            self.consolidator.consolidate(self.short_term, self.personality,
-                                          max_facts=self.config.max_facts,
-                                          max_experiences=self.config.max_experiences,
-                                          max_reflections=self.config.max_reflections)
-            self.personality.save(self.config.personality_file)
-            if self.ui:
-                self.ui.display.print_system("记忆已保存")
-        elif cmd == "/mood" and self.ui:
-            e = self.personality.emotion
-            self.ui.display.print_mood(f"{e.dominant_emotion} (v={e.valence:.2f} a={e.arousal:.2f})")
-        elif cmd == "/status" and self.ui:
-            rel = self.ltm.get_relationship()
-            self.ui.display.print_system(f"轮次: {self.turn_count} | 事实: {len(self.ltm.get_all_active_facts())}")
-            for k, v in rel.items():
-                self.ui.display.print_system(f"  {k}: {v:.2f}")
-        elif cmd == "/forget":
-            self.short_term.clear()
-            if self.ui:
-                self.ui.display.print_system("短期记忆已清除")
-        elif cmd == "/help" and self.ui:
-            self.ui.display_help()
-        elif self.ui:
-            self.ui.display.print_system(f"未知命令: {cmd}")
 
     # ── Sleep/wake forwarding ──
 
