@@ -69,6 +69,7 @@ class ToolAgent:
         if not self._registry.list_specs():
             return result
 
+        logger.info(f"[tool_agent] start len={len(user_input)}")
         sys_prompt = build_tool_agent_prompt(self._registry)
         messages = [
             {"role": "system", "content": sys_prompt},
@@ -76,6 +77,7 @@ class ToolAgent:
         ]
 
         for _idx in range(self._max_iterations):
+            logger.debug(f"[tool_agent] iter={_idx+1}/{self._max_iterations}")
             resp = self._provider.generate(
                 messages,
                 stream=False,
@@ -106,11 +108,13 @@ class ToolAgent:
         result.elapsed_ms = (time.time() - t0) * 1000
         if result.has_results:
             logger.info(
-                f"[tool_agent] {result.total_calls} calls, "
+                f"[tool_agent] done: {result.total_calls} calls, "
                 f"{result.success_count} ok, "
                 f"{len(result.records) - result.success_count} failed, "
                 f"{result.elapsed_ms:.0f}ms"
             )
+        else:
+            logger.debug(f"[tool_agent] no tools needed ({result.elapsed_ms:.0f}ms)")
         return result
 
     def format_for_phase2(self, result: ToolAgentResult) -> str:

@@ -50,6 +50,12 @@ class MessageHandler:
         # ── Phase 1: Run tool agent for external tool execution ──
         tool_result = self._tool_agent.run(user_input)
         tool_records = self._tool_agent.format_for_phase2(tool_result)
+        if tool_result.has_results:
+            logger.info(
+                f"[msg] phase1: {tool_result.total_calls} tools, "
+                f"{tool_result.success_count} ok, "
+                f"{tool_result.total_calls - tool_result.success_count} failed"
+            )
 
         # ── Phase 2: Build roleplay prompt with tool results ──
         mem_ctx = a.retriever.retrieve_for_query(user_input)
