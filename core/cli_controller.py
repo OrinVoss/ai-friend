@@ -29,6 +29,15 @@ class CliController:
                 tool_registry=self.a._tool_registry,
             )
 
+    def _make_internal_registry(self):
+        from tools.traits import ToolRegistry
+        r = ToolRegistry()
+        for name in ("recall", "remember"):
+            tool = self.a._tool_registry.get(name)
+            if tool:
+                r.register(tool)
+        return r
+
     # ── Property shortcuts ──
     @property
     def a(self):
@@ -214,7 +223,11 @@ class CliController:
                 return
             if a.ui:
                 a.ui.display.print_system(f"执行 {len(tool_calls)} 个工具...")
-            results = execute_tool_calls(a._tool_registry, tool_calls)
+            # Phase 2: use filtered registry if Phase 1 already ran external tools
+            active_registry = a._tool_registry
+            if self._tool_records:
+                active_registry = self._make_internal_registry()
+            results = execute_tool_calls(active_registry, tool_calls)
             result_text = format_tool_results(results)
             if a._react_messages is not None:
                 a._react_messages.append({"role": "user", "content": result_text})

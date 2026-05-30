@@ -25,24 +25,24 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.7156193659246443,
-    "arousal": 0.9570303768901552,
-    "baseline_valence": -0.14638118050560503,
-    "baseline_arousal": 0.9834513231502605,
+    "valence": 0.09138907384971687,
+    "arousal": 0.9845168078888862,
+    "baseline_valence": -0.1820565362972474,
+    "baseline_arousal": 0.9846599990917262,
     "decay_rate": 0.05,
-    "mood_valence": -0.58375,
-    "mood_arousal": 0.9937,
+    "mood_valence": -0.48249999999999993,
+    "mood_arousal": 0.9979,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.07447651709676047,
-    "trust": 0.1896991640935104,
-    "fear": 0.06734812867911379,
-    "surprise": 0.105188152345444,
-    "sadness": 0.48335590222474023,
-    "anticipation": 0.13713234387103435,
-    "anger": 0.29908852253109,
-    "disgust": 0.10000002619693134,
-    "resentment": 0.3302404649256456,
+    "joy": 0.1628721120688875,
+    "trust": 0.43147280074492883,
+    "fear": 0.034471361154298615,
+    "surprise": 0.1006485190431805,
+    "sadness": 0.2529879392476106,
+    "anticipation": 0.19608163035259749,
+    "anger": 0.15719514079330366,
+    "disgust": 0.10000001403858791,
+    "resentment": 0.25105905826099933,
     "emotion_events": [
       {
         "timestamp": 1780067464.1413534,
@@ -186,17 +186,17 @@
       }
     ],
     "history": [
-      "sad",
-      "sad",
-      "sad",
-      "sad",
       "anxious",
       "anxious",
       "anxious",
       "anxious",
       "anxious",
-      "anxious"
+      "anxious",
+      "anxious",
+      "anxious",
+      "neutral",
+      "neutral"
     ],
-    "dominant_emotion": "anxious"
+    "dominant_emotion": "neutral"
   }
 }

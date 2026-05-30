@@ -36,6 +36,16 @@ class MessageHandler:
                 tool_registry=self.a._tool_registry,
             )
 
+    def _make_internal_registry(self):
+        """Create a registry with only recall and remember for Phase 2."""
+        from tools.traits import ToolRegistry
+        r = ToolRegistry()
+        for name in ("recall", "remember"):
+            tool = self.a._tool_registry.get(name)
+            if tool:
+                r.register(tool)
+        return r
+
     def handle_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
         a = self.a
@@ -78,7 +88,12 @@ class MessageHandler:
             tool_records=tool_records,
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
-        return a._react_loop(messages, on_token, add_to_history=True)
+        # Phase 2: use filtered registry (recall/remember only) if Phase 1 ran
+        phase2_registry = None
+        if tool_records:
+            phase2_registry = self._make_internal_registry()
+        return a._react_loop(messages, on_token, add_to_history=True,
+                            tool_registry=phase2_registry)
 
     def handle_proactive(self, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -135,7 +150,9 @@ class MessageHandler:
             )
         })
         logger.info(f"[explore] start: topic={topic}")
-        result = a._react_loop(messages, on_token=None, add_to_history=False)
+        phase2_registry = self._make_internal_registry() if tool_records else None
+        result = a._react_loop(messages, on_token=None, add_to_history=False,
+                              tool_registry=phase2_registry)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
             logger.info(f"[explore] shared: {len(result)} chars")
             return result

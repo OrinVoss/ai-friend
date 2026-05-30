@@ -110,8 +110,10 @@ class Agent:
     def process_explore(self) -> str | None:
         return self._messages.handle_explore()
 
-    def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
+    def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
+                    tool_registry=None) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
+        registry = tool_registry if tool_registry is not None else self._tool_registry
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
         fake_action_count = 0
@@ -149,7 +151,7 @@ class Agent:
                 break
             tools_were_called = True
             messages.append({"role": "assistant", "content": resp})
-            results = execute_tool_calls(self._tool_registry, calls)
+            results = execute_tool_calls(registry, calls)
             for r in results:
                 self._tool_call_history.append({
                     "name": r["name"],
