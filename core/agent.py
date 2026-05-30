@@ -7,15 +7,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-import json
-import logging
-import os
-import random
-import time
-from datetime import datetime
-from enum import Enum
-from typing import Optional
-
 from models.conversation import MemoryContext
 from core.personality import Personality
 from core.provider import KimiProvider
@@ -27,32 +18,9 @@ from memory.consolidation import MemoryConsolidator
 from tools.traits import ToolRegistry
 from ui.cli import ConsoleInterface
 from config import Config
-
-_MODEL_CONTEXT = 180_000
-COMPRESS_THRESHOLD = int(_MODEL_CONTEXT * 0.8)
-
-_TOKENIZER = None
-_TOKENIZER_ENCODING = "cl100k_base"
-
-def _get_tokenizer():
-    global _TOKENIZER
-    if _TOKENIZER is None:
-        try:
-            import tiktoken
-            _TOKENIZER = tiktoken.get_encoding(_TOKENIZER_ENCODING)
-        except (ImportError, Exception):
-            _TOKENIZER = False
-    return _TOKENIZER
-
-def estimate_tokens(text: str) -> int:
-    tok = _get_tokenizer()
-    if tok:
-        return len(tok.encode(text, disallowed_special=()))
-    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '　' <= c <= '〿')
-    ascii_chars = sum(1 for c in text if c.isascii() and c.isalpha())
-    digits = sum(1 for c in text if c.isdigit())
-    other = len(text) - cjk - ascii_chars - digits
-    return max(1, int(cjk / 1.5 + ascii_chars / 4 + digits / 3 + other / 8))
+from core.context_manager import ContextManager, estimate_tokens, COMPRESS_THRESHOLD
+from core.sleep_manager import SleepManager
+from core.proactivity import ProactivityManager
 
 logger = logging.getLogger(__name__)
 
@@ -84,18 +52,21 @@ class Agent:
         self.current_input: str | None = None
         self.current_response: str = ""
         self.current_memory_context: MemoryContext | None = None
-        self._proactive_count = 0
         self._tool_call_history: list[dict] = []  # recent tool call records
-        # Persist sleep state across restarts
-        self._sleep_state_file = os.path.join(
-            os.path.dirname(config.personality_file) or ".", ".sleep_state"
+        # Sleep/wake cycle managed by SleepManager
+        sleep_file = os.path.join(
+            os.path.dirname(os.path.abspath(config.personality_file)), ".sleep_state"
         )
-        self._sleeping: bool = self._load_sleep_state()
+        self._sleep = SleepManager(
+            sleep_state_file=sleep_file,
+            personality=personality, ltm=ltm, provider=provider,
+        )
 
-        self._last_explore_time: float = 0  # rate limit: max 1/hr
-        self._last_chat_time: float = 0  # rate limit: max 2/hr
-        self._compressing = False  # recursion guard for _compress_context
         self._running = True
+        self._context = ContextManager(provider=provider, short_term=short_term)
+        self._proactive = ProactivityManager(
+            personality=personality, ltm=ltm, short_term=short_term,
+        )
         e = self.personality.emotion
         neg_score = max(e.anger, e.sadness, e.disgust)
         if neg_score > 0.8:
@@ -104,8 +75,6 @@ class Agent:
             self._consecutive_negative = 2
         else:
             self._consecutive_negative = 0
-        self._compressed_summary: str = ""
-        self._estimated_tokens_used: int = 0
         self._prompt_shown: bool = False
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
@@ -146,7 +115,7 @@ class Agent:
         sys_prompt = build_system_prompt(
             personality=self.personality.config, emotion=self.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._compressed_summary, tools=self._tool_registry,
+            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
             consecutive_negative=self._consecutive_negative,
             tool_call_history=self._tool_call_history,
             idle_duration=idle,
@@ -159,12 +128,12 @@ class Agent:
                 overflow = True
                 break
             messages.insert(1, {"role": role, "content": t.content})
-        if overflow and self._compressed_summary:
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._compressed_summary}"})
+        if overflow and self._context.compressed_summary:
+            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._context.compressed_summary}"})
         user_msg = f"用户输入：{user_input}"
         msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
         if msg_tokens + estimate_tokens(user_msg) > COMPRESS_THRESHOLD:
-            self._compress_context(messages)
+            self._context.compress(messages)
         messages.append({"role": "user", "content": user_msg})
         return self._react_loop(messages, on_token, add_to_history=True)
 
@@ -176,7 +145,7 @@ class Agent:
         sys_prompt = build_system_prompt(
             personality=self.personality.config, emotion=self.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._compressed_summary, tools=self._tool_registry,
+            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
             is_proactive=True, consecutive_negative=self._consecutive_negative,
         )
         messages = [{"role": "system", "content": sys_prompt}]
@@ -187,8 +156,8 @@ class Agent:
                 overflow = True
                 break
             messages.insert(1, {"role": role, "content": t.content})
-        if overflow and self._compressed_summary:
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._compressed_summary}"})
+        if overflow and self._context.compressed_summary:
+            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {self._context.compressed_summary}"})
         messages.append({"role": "user", "content": f"[主动开启对话] 主题方向：{topic}"})
         logger.info(f"[proactive] chat: topic={topic}")
         return self._react_loop(messages, on_token, add_to_history=False)
@@ -203,7 +172,7 @@ class Agent:
         sys_prompt = build_system_prompt(
             personality=self.personality.config, emotion=self.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=self._compressed_summary, tools=self._tool_registry,
+            compressed_summary=self._context.compressed_summary, tools=self._tool_registry,
             is_proactive=True, consecutive_negative=self._consecutive_negative,
             explore_mode=True,
         )
@@ -235,7 +204,7 @@ class Agent:
         for _idx in range(self._max_tool_iterations):
             logger.debug(f"[react] iter={_idx+1}/{self._max_tool_iterations}")
             resp = self.provider.generate(
-                messages, stream=False if _ > 0 else True,
+                messages, stream=False if _idx > 0 else True,
                 on_token=on_token if _idx == 0 else None,
                 max_tokens=max_tok if _idx == 0 else max(384, max_tok * 2 // 3),
             )
@@ -385,27 +354,27 @@ class Agent:
                 personality=self.personality.config, emotion=self.personality.emotion,
                 memory_context=self.current_memory_context,
                 conversation_history=self.short_term.format_for_prompt(max_chars=3000),
-                is_proactive=is_proactive, compressed_summary=self._compressed_summary,
+                is_proactive=is_proactive, compressed_summary=self._context.compressed_summary,
                 tools=self._tool_registry,
                 consecutive_negative=self._consecutive_negative,
             )
             messages = [{"role": "system", "content": sys_prompt}]
-            self._estimated_tokens_used = estimate_tokens(sys_prompt)
+            self._context.reset_estimate(estimate_tokens(sys_prompt))
             for t in self.short_term.get_all_reversed():
                 role = "assistant" if t.role == "assistant" else "user"
                 msg_tokens = estimate_tokens(t.content)
-                if self._estimated_tokens_used + msg_tokens > COMPRESS_THRESHOLD:
+                if self._context.estimated_tokens + msg_tokens > COMPRESS_THRESHOLD:
                     break
                 messages.append({"role": role, "content": t.content})
-                self._estimated_tokens_used += msg_tokens
+                self._context.add_estimate(msg_tokens)
             messages = [messages[0]] + list(reversed(messages[1:]))
             if not is_proactive:
                 user_msg = {"role": "user", "content": user_message}
-                if self._estimated_tokens_used + estimate_tokens(user_message) <= COMPRESS_THRESHOLD:
+                if self._context.estimated_tokens + estimate_tokens(user_message) <= COMPRESS_THRESHOLD:
                     messages.append(user_msg)
-                    self._estimated_tokens_used += estimate_tokens(user_message)
+                    self._context.add_estimate(estimate_tokens(user_message))
                 else:
-                    self._compress_context(messages)
+                    self._context.compress(messages)
             self._react_messages = messages
             self._react_iteration = 0
         else:
@@ -547,237 +516,26 @@ class Agent:
         elif self.ui:
             self.ui.display.print_system(f"未知命令: {cmd}")
 
-    def _load_sleep_state(self) -> bool:
-        try:
-            with open(self._sleep_state_file) as f:
-                return f.read().strip() == "1"
-        except Exception:
-            return False
+    # ── Sleep/wake forwarding ──
 
-    def _save_sleep_state(self) -> None:
-        try:
-            with open(self._sleep_state_file, "w") as f:
-                f.write("1" if self._sleeping else "0")
-        except Exception:
-            pass
+    @property
+    def _sleeping(self) -> bool:
+        return self._sleep.is_sleeping
 
     def _get_sleep_state(self) -> tuple[bool, str | None]:
-        """Check if AI should sleep/wake. Returns (should_sleep, wake_message_or_None)."""
-        now = datetime.now()
-        hour = now.hour + now.minute / 60.0
-        e = self.personality.emotion
-        r = getattr(e, 'resentment', 0.0)
-
-        # Emotion-driven sleepiness (0-1)
-        sleepiness = 0.0
-        if e.dominant_emotion in ("sad", "melancholy"):
-            sleepiness += 0.4
-        if e.arousal < 0.3:
-            sleepiness += 0.3
-        if e.dominant_emotion in ("excited", "joyful"):
-            sleepiness -= 0.2
-        sleepiness += r * 0.2  # resentment makes you tired
-
-        # Nap window: 12:00-13:00
-        if 12 <= hour < 13 and not self._sleeping:
-            if random.random() < max(0.1, sleepiness):
-                self._sleeping = True; self._save_sleep_state()
-                logger.info(f"[sleep] nap trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
-                return True, "我去午睡一会儿...困了[困]"
-
-        # Night sleep: 23:00-01:00
-        if 23 <= hour or hour < 1:
-            if not self._sleeping:
-                if random.random() < max(0.3, sleepiness + 0.3):
-                    self._sleeping = True; self._save_sleep_state()
-                    logger.info(f"[sleep] night trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
-                    return True, "夜深了...我睡了，晚安[月亮]"
-
-        # Wake from nap: 13:10-16:00
-        if 13.16 <= hour < 16 and self._sleeping:
-            wake_chance = 0.3 + (hour - 13.16) / 3.0  # increases over time
-            wake_chance += max(0, e.arousal - 0.3) * 0.2  # high arousal wakes earlier
-            wake_chance -= r * 0.1  # resentment makes you sleep longer
-            if random.random() < min(0.9, wake_chance):
-                self._sleeping = False; self._save_sleep_state()
-                dream = self._generate_dream()
-                logger.info(f"[sleep] nap wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
-                return False, f"睡醒了...{'做了个梦：' + dream if dream else '没做梦，睡得挺香'}"
-
-        # Wake from night: 7:00-10:00
-        if 7 <= hour < 10 and self._sleeping:
-            wake_chance = 0.2 + (hour - 7) / 3.0
-            wake_chance += max(0, e.arousal - 0.3) * 0.15
-            wake_chance -= r * 0.1
-            if random.random() < min(0.9, wake_chance):
-                self._sleeping = False; self._save_sleep_state()
-                dream = self._generate_dream()
-                logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
-                return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"
-
-        return False, None
+        return self._sleep.get_sleep_state()
 
     def _generate_dream(self) -> str:
-        """Generate a quick dream during sleep."""
-        try:
-            facts = self.ltm.get_all_active_facts(limit=5)
-            exps = self.ltm.get_recent_experiences(limit=3)
-            fact_str = " ".join(f"{f.fact_key}:{f.fact_value}" for f in facts)[:300]
-            exp_str = " ".join(f"[{e.emotional_tone}]{e.summary}" for e in exps)[:300]
-            prompt = (
-                f"基于这些记忆碎片生成一段简短的梦境（1-2句话，第一人称，碎片化诗意）：\n"
-                f"事实:{fact_str}\n经历:{exp_str}\n情绪:{self.personality.emotion.dominant_emotion}"
-            )
-            dream = self.provider.generate(
-                [{"role": "user", "content": prompt}],
-                stream=False, max_tokens=100,
-            )
-            self.personality.emotion.record_emotion_event(
-                trigger=f"梦: {dream.strip()[:100]}",
-                context=dream.strip()[:200],
-            )
-            logger.info(f"[dream] generated: {dream.strip()[:60]}")
-            return dream.strip()
-        except Exception:
-            logger.debug("[dream] generation failed")
-            return ""
+        return self._sleep.generate_dream()
+
+    # ── Proactivity forwarding ──
 
     def _check_rate_limit(self, action: str) -> bool:
-        """Check if action respects rate limits. explore: 1/hr, chat: 2/hr"""
-        now = time.time()
-        if action == "explore":
-            if now - self._last_explore_time < 3600:
-                logger.debug(f"[rate] explore blocked: {now - self._last_explore_time:.0f}s since last")
-                return False
-            self._last_explore_time = now
-            logger.info("[rate] explore allowed")
-            return True
-        elif action == "chat":
-            if self._last_chat_time == 0:
-                self._last_chat_time = now
-                logger.info("[rate] chat allowed (first)")
-                return True
-            if now - self._last_chat_time < 1800:
-                logger.debug(f"[rate] chat blocked: {now - self._last_chat_time:.0f}s since last")
-                return False
-            self._last_chat_time = now
-            logger.info("[rate] chat allowed")
-            return True
-        return True
+        return self._proactive.check_rate_limit(action)
 
     def _calculate_proactivity(self, idle_duration: float) -> float:
-        e = self.personality.emotion
-
-        # Emotion-driven idle threshold (seconds)
-        r = getattr(e, 'resentment', 0.0)
-        idle_thresholds = {
-            "excited": 60, "joyful": 90, "surprised": 120,
-            "engaged": 180, "content": 300, "trusting": 240, "anticipating": 150,
-            "neutral": 360,
-            "anxious": 90, "afraid": 180,
-            "melancholy": 600, "sad": 900,
-            "frustrated": 300, "angry": 480, "disgusted": 600,
-        }
-        min_idle = idle_thresholds.get(e.dominant_emotion, 300)
-        # Resentment increases idle time (still upset, needs space)
-        min_idle += int(r * 300)
-
-        if idle_duration < min_idle:
-            return 0.0
-
-        base = min(0.3, (idle_duration - min_idle) / 900.0)
-        hour = datetime.now().hour
-        time_mod = 0.2 if 10 <= hour <= 21 else 0.1 if 7 <= hour <= 22 else 0.0
-        emotion_mod = e.arousal * 0.2
-        if e.dominant_emotion in ("melancholy", "sad", "frustrated", "afraid"):
-            emotion_mod -= 0.15
-        rel = self.ltm.get_relationship()
-        intimacy_mod = rel.get("intimacy", 0.3) * 0.15 + min(rel.get("familiarity", 0.3) * 0.1, 0.1)
-        user_turns = [t for t in self.short_term.get_recent(6) if t.role == "user"][-3:]
-        sentiment_mod = 0.0
-        if user_turns:
-            last = user_turns[-1].content
-            if any(kw in last for kw in ["烦", "滚", "生气", "讨厌", "别烦", "不想", "别吵"]):
-                sentiment_mod = -0.3
-            elif any(kw in last for kw in ["哈哈", "开心", "好看", "棒", "不错", "喜欢", "好"]):
-                sentiment_mod = 0.1
-        goodbye = sum(1 for t in self.short_term.get_recent(6) if any(kw in t.content for kw in ["拜拜", "再见", "bye", "下次", "睡了", "晚安"]))
-        short_c = sum(1 for t in user_turns if len(t.content) < 8)
-        score = base + time_mod + emotion_mod + intimacy_mod + sentiment_mod - min(goodbye * 0.15, 0.3) - min(short_c * 0.08, 0.2)
-        score = max(0.0, min(0.8, score))
-        logger.debug(f"[proactive] score={score:.3f} idle={idle_duration:.0f}s emo={e.dominant_emotion} "
-                     f"base={base:.3f} time={time_mod:.2f} emo={emotion_mod:+.2f} "
-                     f"intimacy={intimacy_mod:+.2f} sentiment={sentiment_mod:+.2f} "
-                     f"goodbye={min(goodbye*0.15,0.3):.2f} short={min(short_c*0.08,0.2):.2f}")
-        return score
+        return self._proactive.calculate_proactivity(idle_duration)
 
     def _pick_proactive_topic(self) -> str:
-        exps = self.ltm.get_recent_experiences(limit=3)
-        facts = self.ltm.get_all_active_facts(limit=5)
-        interests = getattr(self.personality.config, 'interests', [])
-        topics = []
+        return self._proactive.pick_proactive_topic()
 
-        # 最近聊过的话题（最有上下文）
-        if exps:
-            topics.append(f"上次聊的: {exps[0].summary}")
-
-        # 用户相关的事实
-        if facts:
-            f = random.choice(facts)
-            topics.append(f"关于用户的: {f.fact_key} = {f.fact_value}")
-
-        # 从兴趣标签出发
-        if interests:
-            topic = random.choice(interests)
-            topics.append(f"聊点关于「{topic}」的")
-
-        # 最后才兜底——但给具体方向而不是"随便"
-        if not topics:
-            hour = datetime.now().hour
-            if 6 <= hour < 9:
-                topics.append("早上好，聊聊今天的计划")
-            elif 12 <= hour < 14:
-                topics.append("午饭时间，聊聊吃了什么")
-            elif 21 <= hour < 24:
-                topics.append("夜深了，聊聊今天过得怎么样")
-            else:
-                topics.append("聊聊最近有什么新鲜事")
-
-        return random.choice(topics)
-
-    def _proactive_flag(self) -> bool:
-        return self._proactive_count > 0 and self.current_input is None
-
-    def _compress_context(self, messages: list[dict]) -> None:
-        if self._compressing:
-            return  # prevent recursive compression
-        self._compressing = True
-        try:
-            self._do_compress(messages)
-        finally:
-            self._compressing = False
-
-    def _do_compress(self, messages: list[dict]) -> None:
-        from prompts.system import CONTEXT_COMPRESS_PROMPT
-        parts = []
-        for m in messages:
-            if m["role"] == "system":
-                continue
-            content = m["content"]
-            if len(content) > 500:
-                content = content[:500] + "..."
-            parts.append(f"{'用户' if m['role'] == 'user' else '你'}: {content}")
-        text = "\n".join(parts)
-        if not text.strip():
-            return
-        if len(text) > 8000:
-            text = text[-8000:]
-        try:
-            result = self.provider.generate([{"role": "user", "content": CONTEXT_COMPRESS_PROMPT.format(conversation=text)}], stream=False)
-            if result.strip():
-                self._compressed_summary = result.strip()
-                self._estimated_tokens_used = 0
-                self.short_term.clear()
-                logger.info(f"Context compressed: {self._compressed_summary[:80]}")
-        except Exception as e:
-            logger.warning(f"Compression failed: {e}")

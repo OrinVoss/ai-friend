@@ -22,8 +22,11 @@ image_cache/
 Thumbs.db
 .DS_Store
 
+# Runtime
+.sleep_state
+
 # Logs
 *.log
 
-# Test files
-test_*.py
+# Test files (keep tests/ directory)
+/test_*.py

@@ -88,6 +88,11 @@ class WebAgent:
         self.personality.save(self.config.personality_file)
         return result
 
+    def process_explore(self) -> str | None:
+        result = self.agent.process_explore()
+        self.personality.save(self.config.personality_file)
+        return result
+
     @property
     def emotion(self):
         return self.personality.emotion.dominant_emotion
