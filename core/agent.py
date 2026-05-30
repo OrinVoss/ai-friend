@@ -111,9 +111,10 @@ class Agent:
         return self._messages.handle_explore()
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True) -> str:
-        from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results
+        from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
+        fake_action_count = 0
         for _idx in range(self._max_tool_iterations):
             logger.debug(f"[react] iter={_idx+1}/{self._max_tool_iterations}")
             resp = self.provider.generate(
@@ -123,6 +124,24 @@ class Agent:
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
+                # Model produced no tool_call XML -- check if it's faking tool usage in prose
+                if contains_fake_action(resp) and fake_action_count < 3:
+                    fake_action_count += 1
+                    logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/3)")
+                    messages.append({"role": "assistant", "content": resp})
+                    messages.append({"role": "user", "content":
+                        "YOU DID NOT ACTUALLY CALL ANY TOOLS! "
+                        "You only described using tools in your text (like "
+                        '"calling web_fetch", "reading the link"), but you '
+                        "never output <tool_call> XML tags.\n\n"
+                        "If you need web content, search results, or file "
+                        "contents, you MUST output:\n"
+                        '<tool_call>\n{"name": "tool_name", "arguments": {...}}\n</tool_call>\n\n'
+                        "Tools will execute and return results to you. "
+                        "Answer again -- this time REALLY call the tools, "
+                        "do NOT describe calling them."
+                    })
+                    continue
                 final_text = cleaned
                 break
             messages.append({"role": "assistant", "content": resp})
@@ -220,4 +239,3 @@ class Agent:
 
     def _pick_proactive_topic(self) -> str:
         return self._proactive.pick_proactive_topic()
-

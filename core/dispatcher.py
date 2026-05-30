@@ -133,9 +133,28 @@ def format_tool_results(results: list[dict]) -> str:
 
 
 def contains_fake_action(text: str) -> bool:
-    """Detect if LLM claims to have done something without tool call."""
-    keywords = ["已发送", "已通知", "已经为你", "已经为您", "已为您", "已记住", "已回忆"]
-    return any(kw in text for kw in keywords)
+    """Detect if LLM claims to have done something without tool call.
+
+    Catches two patterns:
+    1. Simple completion claims: "已发送", "已通知" etc.
+    2. Narrative tool descriptions: "（调用web_fetch...", "读取了链接" etc.
+    """
+    completion_keywords = ["已发送", "已通知", "已经为你", "已经为您", "已为您", "已记住", "已回忆"]
+    if any(kw in text for kw in completion_keywords):
+        return True
+
+    narrative_patterns = [
+        "调用web_fetch", "调用read_file", "调用grep", "调用glob",
+        "调用web_search", "调用recall", "调用remember", "调用notify",
+        "调用了web_fetch", "调用了read_file", "调用了grep", "调用了glob",
+        "调用web_", "调用了web_",
+        "读取你给的链接", "读取了那个网页", "读取了链接",
+        "搜索了一下", "搜了一下", "搜索了",
+        "调了工具", "调用了工具", "我用了工具",
+        "工具返回", "工具返回的原始内容",
+        "用web_fetch", "用read_file", "用grep",
+    ]
+    return any(p in text for p in narrative_patterns)
 
 
 def _normalize_args(args: dict) -> dict:
