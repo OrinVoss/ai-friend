@@ -115,6 +115,7 @@ class Agent:
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
         fake_action_count = 0
+        tools_were_called = False  # once real tools execute, "工具返回" in response is legitimate
         for _idx in range(self._max_tool_iterations):
             logger.debug(f"[react] iter={_idx+1}/{self._max_tool_iterations}")
             resp = self.provider.generate(
@@ -124,8 +125,10 @@ class Agent:
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
-                # Model produced no tool_call XML -- check if it's faking tool usage in prose
-                if contains_fake_action(resp) and fake_action_count < 3:
+                # Model produced no tool_call XML -- check if it's faking tool usage in prose.
+                # Only flag if no real tools were called yet in this loop; after real tool
+                # execution, phrases like "工具返回" are legitimate reporting, not fake.
+                if contains_fake_action(resp) and fake_action_count < 3 and not tools_were_called:
                     fake_action_count += 1
                     logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/3)")
                     messages.append({"role": "assistant", "content": resp})
@@ -144,6 +147,7 @@ class Agent:
                     continue
                 final_text = cleaned
                 break
+            tools_were_called = True
             messages.append({"role": "assistant", "content": resp})
             results = execute_tool_calls(self._tool_registry, calls)
             for r in results:
