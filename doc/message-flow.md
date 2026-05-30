@@ -4,7 +4,33 @@
 
 ---
 
-## 状态机总览
+## 两阶段流水线总览
+
+```
+用户输入
+    │
+    ▼
+┌──────────────────────────────────────────────┐
+│  Phase 1: ToolAgent (core/tool_agent.py)      │
+│  temp=0.3, 精简 prompt, 无人格/情绪/记忆        │
+│  执行外部工具: web_fetch/web_search/read_file   │
+│             glob/grep/music_play/notify          │
+│  结果作为 <tool_result> 注入 Phase 2 上下文       │
+└──────────────────┬───────────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────────┐
+│  Phase 2: Roleplay Agent (core/agent.py)      │
+│  temp=0.8, 完整人格 + 情绪 + 记忆              │
+│  内部工具: recall / remember                    │
+│  ReAct 循环: THINK → ACT → THINK → ...        │
+└──────────────────┬───────────────────────────┘
+                   │
+                   ▼
+              后处理: Emotion → Memory → Reflection
+```
+
+## 状态机总览（Phase 2 内部）
 
 ```
 BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ REFLECT ──▶ IDLE
@@ -14,7 +40,7 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
                                     ┌─────┴──────┐
                                     │ 有 tool_call│
                                     └─────┬──────┘
-                                          └──▶ THINK (多轮 ReAct 迭代)
+                                          └──▶ THINK (多轮 ReAct 迭代, 仅 recall/remember)
 ```
 
 ## CLI 模式 vs Web 模式
@@ -175,7 +201,32 @@ self._tool_call_history.append({
 
 ---
 
-### 3. THINK — 调用 LLM
+### 3. THINK — 调用 LLM（两阶段）
+
+先执行 Phase 1 ToolAgent，再执行 Phase 2 Roleplay Agent。
+
+#### Phase 1: ToolAgent（纯工具调用）
+
+```
+用户输入 + 工具上下文
+    │
+    ▼
+ToolAgent._build_prompt()  ── 精简 prompt, 仅含工具列表 + 当前时间
+    │ 无人格描述, 无情绪状态, 无对话历史, 无工具调用记录
+    │ temperature=0.3
+    ▼
+POST DeepSeek API  ── 模型决策是否使用工具
+    │
+    ├── 无 <tool_call> → 结果为空 → 直接进入 Phase 2
+    │
+    └── 有 <tool_call> → dispatcher 执行工具
+        │  ≥ 1 轮 tool call results
+        │  作为 <tool_result> 注入 Phase 2 上下文
+        ▼
+进入 Phase 2
+```
+
+#### Phase 2: Roleplay Agent（人格驱动回复）
 
 THINK 可能执行多次（ReAct 循环），每次的流程相同：
 
@@ -236,7 +287,7 @@ THINK 可能执行多次（ReAct 循环），每次的流程相同：
     └──────────────────────────────────────────┘
 ```
 
-**ReAct 多轮迭代**：
+**ReAct 多轮迭代（Phase 2，仅 recall/remember）**：
 
 ```
 THINK ─── 解析出 <tool_call> {"name": "recall", "arguments": {...}}
@@ -389,11 +440,21 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  THINK / _react_loop                                         │
-│  ① 组装 system prompt                                        │
+│  Phase 1: ToolAgent (core/tool_agent.py)                     │
+│  temp=0.3, 精简 prompt, 仅工具列表                            │
+│  ① POST DeepSeek API → 模型决策是否使用外部工具                 │
+│  ② 无 <tool_call> → 直接进入 Phase 2                          │
+│  ③ 有 <tool_call> → 执行工具 → 结果注入 Phase 2 上下文          │
+└──────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Phase 2: THINK / _react_loop (core/agent.py)                │
+│  temp=0.8, 完整人格 + 情绪 + 记忆                              │
+│  ① 组装 system prompt（含 Phase 1 工具结果）                   │
 │  ② 估算 token，动态塞对话到 80%                               │
 │  ③ POST DeepSeek API（max_tokens 随情绪调整）                  │
-│  ④ 解析 SS，检查 <tool_call>                                  │
+│  ④ 解析 SS，检查 <tool_call>（仅 recall/remember）              │
 │  ⑤ 有 tool_call → 执行 → 结果喂回 → 继续 THINK               │
 └──────────────────────────────────────────────────────────────┘
     │

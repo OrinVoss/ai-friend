@@ -2,7 +2,7 @@
 
 具有人格、情绪和长短期记忆的 AI 朋友。基于 DeepSeek API，采用 ReAct Agent 架构，支持 CLI 和 Web 双端。
 
-核心 Agent 从 784 行 God Class 拆分为 6 个功能类聚模块（#30）。
+核心引擎采用两阶段 Agent 架构：Phase 1 ToolAgent 纯工具调用 + Phase 2 Roleplay Agent 人格驱动回复，从根本上解决模型虚构工具调用内容的问题。
 
 ---
 
@@ -53,40 +53,58 @@
 
 三层检索：Hot Memory → Query-Guided（评分 + LLM重排）→ On-Demand（recall 工具）
 
-### 工具系统（9 个）
+### 工具系统（9 个，两阶段分工）
 
-| 工具 | 功能 | 参数 | 后端 |
-|------|------|------|------|
-| `recall` | 回忆用户信息或共同经历 | query | SQLite |
-| `remember` | 记住用户重要信息 | category, key, value, importance | SQLite |
-| `read_file` | 读取本地文件（≤500KB，行号+行偏移+多文件） | path, limit, offset | 本地 IO |
-| `glob` | glob 模式搜索文件（`**/*.py` 等） | pattern, path | 本地遍历 |
-| `grep` | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 |
-| `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT |
-| `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API |
-| `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API |
-| `music_play` | 播放音乐（模糊搜索） | song | 默认播放器 |
+**Phase 1 — ToolAgent 纯工具调用（7 个外部工具）**：web_fetch / web_search / read_file / glob / grep / music_play / notify
 
-LLM 通过 `<tool_call>` XML 标签自主调用。每次调用自动记录到 `_tool_call_history`（最多 20 条），注入 prompt。
+Phase 1 无人格、无情绪、无记忆，仅负责执行外部工具，将结果注入 Phase 2 上下文。使用独立精简 prompt，temperature=0.3。
+
+**Phase 2 — Roleplay Agent 内部工具（2 个）**：recall / remember
+
+Phase 2 保留 recall 和 remember（均为本地 SQLite 操作），外部工具指令已完全移除。
+
+| 工具 | 功能 | 参数 | 后端 | 阶段 |
+|------|------|------|------|------|
+| `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API | Phase 1 |
+| `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API | Phase 1 |
+| `read_file` | 读取本地文件（≤500KB，行号+行偏移+多文件） | path, limit, offset | 本地 IO | Phase 1 |
+| `glob` | glob 模式搜索文件（`**/*.py` 等） | pattern, path | 本地遍历 | Phase 1 |
+| `grep` | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Phase 1 |
+| `music_play` | 播放音乐（模糊搜索） | song | 默认播放器 | Phase 1 |
+| `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT | Phase 1 |
+| `recall` | 回忆用户信息或共同经历 | query | SQLite | Phase 2 |
+| `remember` | 记住用户重要信息 | category, key, value, importance | SQLite | Phase 2 |
+
+Phase 1 通过 `<tool_call>` XML 标签自主调用，结果作为 `<tool_result>` 注入 Phase 2 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
+
+### 两阶段响应流程
+
+```
+用户输入
+    │
+    ▼
+Phase 1: ToolAgent (core/tool_agent.py)
+    │  temp=0.3, 无人格/情绪/记忆
+    │  纯工具调用: web_fetch/web_search/read_file/glob/grep/music_play/notify
+    │  结果作为 <tool_result> 注入 Phase 2 上下文
+    ▼
+Phase 2: Roleplay Agent (core/agent.py)
+    │  temp=0.8, 完整人格 + 情绪 + 记忆
+    │  personality.json → PersonalityConfig + EmotionalState
+    │  analyze_sentiment(user_input) → sentiment 值
+    │  estimate_emotional_impact(sentiment) → trait 调制 → shift()
+    │  _cross_modulate() → 情绪互相制约
+    │  decay() → 分速衰减
+    │  build_system_prompt() → LLM 看到人格 + 情绪 + 怨恨
+    │  可用工具: recall / remember（内部 SQLite 操作）
+    ▼
+AI 回复 = 人格底色 × 当前情绪 × Phase 1 工具结果 × 对话上下文
+    │
+    ▼
+Emotion → Memory consolidation → Reflection（后处理，不变）
+```
 
 ### 人格实现
-
-```
-personality.json → PersonalityConfig + EmotionalState
-    │
-    ▼
-每次对话:
-  analyze_sentiment(user_input) → sentiment 值
-  estimate_emotional_impact(sentiment) → trait 调制 → shift()
-  _cross_modulate() → 情绪互相制约
-  decay() → 分速衰减
-    │
-    ▼
-build_system_prompt() → LLM 看到 "我是{name}，{speaking_style}…" + 情绪 + 怨恨
-    │
-    ▼
-AI 回复 = 人格底色 × 当前情绪 × 对话上下文
-```
 
 四层实现：
 1. `personality.json` — 名字、特质、说话风格、背景故事、兴趣
@@ -265,8 +283,9 @@ ai-friend/
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
 │   └── test_message_handler.py 消息处理测试（7 用例）
 │
-├── core/                      核心引擎（6 模块，按功能类聚）
-│   ├── agent.py               核心引擎（223 行）：模块组装 + ReAct 循环
+├── core/                      核心引擎（7 模块，两阶段架构）
+│   ├── tool_agent.py           Phase 1 ToolAgent：纯工具调用（7 外部工具，temp=0.3）
+│   ├── agent.py                核心引擎（223 行）：Phase 2 Roleplay Agent + ReAct 循环
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
 │   ├── sleep_manager.py       睡眠系统：窗口判断 + 梦境生成 + 状态持久化
 │   ├── proactivity.py         主动行为：评分 + 话题选择 + 频率限制
@@ -283,7 +302,7 @@ ai-friend/
 │   ├── retrieval.py            三层检索（评分 + LLM 重排 + 按需回溯）
 │   └── consolidation.py        记忆合并（事实/体验/反思）+ 情感分析
 │
-├── tools/                     工具系统（9 个）
+├── tools/                     工具系统（Phase 1: 7 外部 / Phase 2: 2 内部）
 │   ├── traits.py               Tool 基类 + ToolResult + ToolRegistry
 │   ├── memory_tools.py         recall + remember
 │   ├── file_tools.py           read_file（路径限制 + 大小限制 + 目录列举）

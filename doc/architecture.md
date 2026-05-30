@@ -68,7 +68,11 @@ python web_main.py
               └── web/static/    (HTML + CSS + JS)
     │
     ▼
-core/agent.py  (核心引擎, 223行)
+Phase 1: core/tool_agent.py  (ToolAgent, temp=0.3, 纯工具调用)
+    │  7 个外部工具: web_fetch, web_search, read_file, glob, grep, music_play, notify
+    │  无人格/无情绪/无记忆, 只执行工具 → 结果注入 Phase 2
+    ▼
+Phase 2: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │
     ├── core/context_manager.py  (上下文窗口管理)
     ├── core/sleep_manager.py    (睡眠/唤醒)
@@ -85,10 +89,13 @@ core/agent.py  (核心引擎, 223行)
     │   ├── retrieval.py     (三层检索)
     │   └── consolidation.py (记忆合并 + 情感分析)
     │
-    ├── tools/               (9 个工具)
+    ├── tools/               (Phase 1: 7 外部工具 / Phase 2: 2 内部工具)
     ├── storage/             (SQLite WAL, 版本化迁移)
     ├── prompts/             (提示词模板, 破防/怨恨/梦境注入)
     └── models/              (EmotionalState, EmotionEvent)
+
+Phase 2 后处理（不变）:
+    Emotion → Memory consolidation → Reflection
 ```
 
 ---
@@ -146,20 +153,22 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 ---
 
-## 工具系统（9 个）
+## 工具系统（9 个，两阶段分工）
 
-| 工具 | 功能 | 后端 |
-|------|------|------|
-| recall | 回忆用户信息 | SQLite |
-| remember | 记住用户信息 | SQLite |
-| read_file | 读取本地文件 | 本地文件系统 |
-| notify | Windows toast 通知 | PowerShell WinRT |
-| web_search | 网络搜索 | AnySearch API |
-| web_fetch | 网页内容提取 | AnySearch extract |
-| music_list | 浏览音乐目录 | D:\音乐 |
-| music_play | 播放音乐 | 默认播放器 |
+| 阶段 | 工具 | 功能 | 后端 |
+|------|------|------|------|
+| Phase 1 | web_fetch | 网页内容提取 | AnySearch extract |
+| Phase 1 | web_search | 网络搜索 | AnySearch API |
+| Phase 1 | read_file | 读取本地文件 | 本地文件系统 |
+| Phase 1 | glob | 文件名模式搜索 | 本地遍历 |
+| Phase 1 | grep | 正则内容搜索 | 本地搜索 |
+| Phase 1 | music_play | 播放音乐 | 默认播放器 |
+| Phase 1 | notify | Windows toast 通知 | PowerShell WinRT |
+| Phase 2 | recall | 回忆用户信息 | SQLite |
+| Phase 2 | remember | 记住用户信息 | SQLite |
 
-LLM 通过 `<tool_call>` XML 标签调用，参数别名自动归一化。
+Phase 1 ToolAgent 通过 `<tool_call>` XML 标签调用外部工具，temperature=0.3，无人格/情绪/记忆。
+Phase 2 Roleplay Agent 仅保留内部工具（recall/remember），外部工具指令已完全移除。
 
 ---
 
@@ -240,13 +249,14 @@ LLM 通过 `<tool_call>` XML 标签调用，参数别名自动归一化。
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎
-│   ├── agent.py             ReAct Agent（双路径）
+├── core/                    核心引擎（两阶段架构）
+│   ├── tool_agent.py        Phase 1 ToolAgent（纯工具调用, temp=0.3）
+│   ├── agent.py             Phase 2 Roleplay Agent（人格驱动, temp=0.8）
 │   ├── personality.py       情绪引擎（四层）
 │   ├── provider.py          LLM API 客户端
 │   └── dispatcher.py        tool_call 解析
 ├── memory/                  记忆系统
-├── tools/                   8 个工具
+├── tools/                   Phase 1: 7 外部 / Phase 2: 2 内部
 ├── storage/                 SQLite（WAL + 迁移）
 ├── prompts/                 提示词模板
 ├── models/                  数据模型
