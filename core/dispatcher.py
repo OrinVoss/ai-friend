@@ -129,6 +129,11 @@ def format_tool_results(results: list[dict]) -> str:
             f"{r['output']}\n"
             f"</tool_result>"
         )
+    parts.append(
+        "=== 铁律 ===\n"
+        "以上是工具返回的真实内容。你必须逐字如实汇报，不得编造、不得润色、不得添加原文没有的信息。\n"
+        "工具说没找到就说没找到，工具返回什么就说什么。你添加的每一个字都必须是工具确实返回了的。"
+    )
     return "\n".join(parts)
 
 
