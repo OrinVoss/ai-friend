@@ -26,10 +26,15 @@ main.py / web_main.py
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
     ├── core/
-    │   ├── agent.py ──────── 状态机 + ReAct 循环（核心调度器）
-    │   ├── personality.py ── 人格加载 + 情绪动力学（VAD + Plutchik + 特质调制）
-    │   ├── provider.py ───── LLM API 客户端（OpenAI 兼容，流式）
-    │   └── dispatcher.py ─── tool_call XML 解析 + 工具调度
+    │   ├── agent.py ──────────── 核心引擎：模块组装 + ReAct 循环
+    │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
+    │   ├── sleep_manager.py ──── 睡眠/唤醒系统（窗口判断+梦境）
+    │   ├── proactivity.py ────── 主动行为引擎（评分+话题+限速）
+    │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
+    │   ├── message_handler.py ── 消息入口（process_* 三方法）
+    │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
+    │   ├── provider.py ───────── LLM API 客户端（OpenAI 兼容，流式）
+    │   └── dispatcher.py ─────── tool_call XML 解析 + 工具调度
     │
     ├── memory/
     │   ├── short_term.py ─── ConversationBuffer（内存 deque）
@@ -38,10 +43,15 @@ main.py / web_main.py
     │   └── consolidation.py ─ 记忆合并（短→长转移 + 修剪）
     │
     ├── tools/
-    │   ├── traits.py ─────── Tool 基类 + ToolRegistry
-    │   ├── memory_tools.py ─ recall / remember
-    │   ├── file_tools.py ─── read_file（限 100KB）
-    │   └── notify_tool.py ── notify（Windows 通知）
+    │   ├── traits.py ──────── Tool 基类 + ToolRegistry
+    │   ├── memory_tools.py ── recall / remember
+    │   ├── file_tools.py ──── read_file（目录列举 + 多文件）
+    │   ├── search_tools.py ── glob + grep（白名单限制）
+    │   ├── notify_tool.py ─── notify（PowerShell toast）
+    │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
+    │   └── music_tool.py ──── music_play（模糊搜索）
+    │
+    ├── tests/ ───────────────── 单元测试（33 用例）
     │
     ├── storage/
     │   ├── database.py ───── SQLite 连接 + Schema + WAL 模式
@@ -131,7 +141,7 @@ Web 模式： web_main.py → uvicorn
 
 ### 2.2 ReAct 循环
 
-每次用户输入可能触发多轮 ReAct 迭代（最多 5 次）：
+每次用户输入可能触发多轮 ReAct 迭代（最多 10 次）：
 
 ```
 第 1 轮：THINK → LLM 返回 "<tool_call>..."
@@ -458,17 +468,18 @@ LLM 输出格式：
 3. JSON 解析，参数别名归一化（search → query, text → content）
 4. 回退：尝试将整个响应作为 JSON 解析
 
-### 5.4 内置工具（8 个）
+### 5.4 内置工具（9 个）
 
 | 工具 | 功能 | 参数 | 后端 |
 |------|------|------|------|
 | recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 |
 | remember | 记住用户重要信息 | category, key, value, importance | SQLite upsert |
-| read_file | 读取本地文本文件（限 100KB，路径限项目目录） | path, max_chars | 本地文件系统 |
+| read_file | 读取本地文件（≤500KB，目录列举，多文件，行号） | path, limit, offset | 本地文件系统 |
+| glob | glob 模式搜索文件（**/*.py 等） | pattern, path | 本地遍历 |
+| grep | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 |
 | notify | Windows toast 桌面通知（独立线程，不阻塞） | title, message, duration | PowerShell WinRT |
 | web_search | 网络搜索，支持中文 + freshness(day/week/month/year) | query, max_results, freshness | AnySearch API (JSON-RPC 2.0) |
 | web_fetch | 提取网页正文内容（自动去 HTML） | url | AnySearch extract |
-| music_list | 浏览 D:\音乐 目录，列出子目录和歌曲，支持搜索 | path, search | 本地文件系统 |
 | music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile |
 
 #### 工具别名归一化
@@ -495,7 +506,7 @@ _proactive_loop (15s tick)
     │    │ 检查当前时间是否在睡眠/醒来窗口
     │    │
     │    ├── 入睡窗口命中:
-    │    │   │ 午睡 12:00-13:00, 夜睡 23:30-0:30
+    │    │   │ 午睡 12:00-13:00, 夜睡 23:00-01:00
     │    │   │
     │    │   │ sleepiness 计算:
     │    │   │   base = 0.0
@@ -601,9 +612,9 @@ _proactive_loop (15s tick)
 #### 状态追踪
 
 ```python
-self._sleeping: bool = False          # 当前是否在睡眠
-self._last_explore_time: float = 0    # 上次探索时间戳
-self._last_chat_time: float = 0       # 上次聊天时间戳
+self._sleep.is_sleeping: bool       # 当前是否在睡眠 (SleepManager)
+self._proactive._last_explore_time: float  # 上次探索时间戳 (ProactivityManager)
+self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityManager)
 ```
 
 ### 5.6 虚假操作检测

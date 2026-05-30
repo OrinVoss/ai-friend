@@ -66,7 +66,7 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 ┌─ _proactive_loop 后台协程 ─────────────┐
 │  15s tick:                               │
 │    ├─ _get_sleep_state()                │
-│    │   午睡 12-13 / 夜睡 23:30-0:30     │
+│    │   午睡 12-13 / 夜睡 23:00-01:00     │
 │    │   醒来自动分享梦境                  │
 │    ├─ idle > 情绪阈值?                   │
 │    │   excited 60s / sad 900s           │
@@ -85,7 +85,7 @@ _proactive_loop (15s tick)
     │
     ├──▶ _get_sleep_state()
     │    │ 检查是否在睡眠时间窗口
-    │    │ 午睡: 12:00-13:00, 夜睡: 23:30-0:30
+    │    │ 午睡: 12:00-13:00, 夜睡: 23:00-01:00
     │    │ 情绪驱动 sleepiness:
     │    │   sad/melancholy +0.4, low arousal +0.3
     │    │   excited/joyful -0.2, resentment +0.2
@@ -249,7 +249,7 @@ ACT: execute_tool_calls(registry, calls)
 结果格式化为 <tool_result name="recall">
     │  \n找到 2 条：\n- 名字: 小陈\n- 摄影: 街拍\n
     ▼
-追加到 messages → THINK（下一轮，最多 5 次）
+追加到 messages → THINK（下一轮，最多 10 次）
     │
     ▼
 无 tool_call → 结束迭代

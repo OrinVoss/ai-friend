@@ -68,8 +68,13 @@ python web_main.py
               └── web/static/    (HTML + CSS + JS)
     │
     ▼
-core/agent.py  (ReAct 状态机 + event-driven 双路径)
+core/agent.py  (核心引擎, 223行)
     │
+    ├── core/context_manager.py  (上下文窗口管理)
+    ├── core/sleep_manager.py    (睡眠/唤醒)
+    ├── core/proactivity.py      (主动行为引擎)
+    ├── core/cli_controller.py   (CLI 状态机)
+    ├── core/message_handler.py  (消息入口)
     ├── core/personality.py  (四层情绪引擎)
     ├── core/provider.py     (LLM API 客户端)
     ├── core/dispatcher.py   (tool_call 解析执行)
@@ -80,7 +85,7 @@ core/agent.py  (ReAct 状态机 + event-driven 双路径)
     │   ├── retrieval.py     (三层检索)
     │   └── consolidation.py (记忆合并 + 情感分析)
     │
-    ├── tools/               (8 个工具)
+    ├── tools/               (9 个工具)
     ├── storage/             (SQLite WAL, 版本化迁移)
     ├── prompts/             (提示词模板, 破防/怨恨/梦境注入)
     └── models/              (EmotionalState, EmotionEvent)
@@ -141,7 +146,7 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 ---
 
-## 工具系统（8 个）
+## 工具系统（9 个）
 
 | 工具 | 功能 | 后端 |
 |------|------|------|
@@ -178,7 +183,7 @@ LLM 通过 `<tool_call>` XML 标签调用，参数别名自动归一化。
 |------|------|------|
 | 午睡 | 12:00-13:00 | 情绪驱动 |
 | 午醒 | 13:10-16:00 | 随机（arousal 高→早醒） |
-| 夜睡 | 23:30-0:30 | 情绪驱动 |
+| 夜睡 | 23:00-01:00 | 情绪驱动 |
 | 晨醒 | 7:00-10:00 | 随机 |
 
 睡前发消息，醒来分享 LLM 生成的梦境。
