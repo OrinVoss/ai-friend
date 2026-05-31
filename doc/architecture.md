@@ -100,7 +100,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   └── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
-    ├── storage/             (SQLite WAL, 版本化迁移)
+    ├── storage/             (aiosqlite 异步, WAL, 版本化迁移)
     ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
     └── models/              (EmotionalState, EmotionEvent)
 
@@ -268,8 +268,8 @@ Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部�
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）
 │   ├── personality.py       情绪引擎（四层）
-│   ├── provider.py          LLM API 客户端
-│   └── dispatcher.py        tool_call 解析
+│   ├── provider.py          LLM API 客户端（支持 response_format JSON mode）
+│   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）
 ├── memory/                  记忆系统
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（WAL + 迁移）

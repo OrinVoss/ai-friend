@@ -8,6 +8,27 @@
 - 文件工具已增强：目录列举、白名单统一、glob/grep 工具
 ---
 
+**2026-05-31 更新**（由多子代理全量复查）：
+
+| 状态 | 含义 |
+|------|------|
+| ✅ 已修复 | 问题已完全解决 |
+| ⚠️ 部分修复 | 问题有所改善但未完全解决 |
+| ❌ 未修复 | 问题仍然存在 |
+
+**按维度统计**：
+- 安全与配置：3 项已修复 / 1 项部分修复 / 2 项未修复
+- 架构与代码质量：2 项已修复 / 3 项部分修复 / 5 项未修复
+- Web 层与前端：2 项已修复 / 1 项部分修复 / 9 项未修复
+- 数据层与内存系统：3 项已修复 / 2 项部分修复 / 3 项未修复
+- 测试与文档：4 项已修复 / 2 项部分修复 / 1 项未修复
+- LLM 集成与性能：1 项已修复 / 2 项部分修复 / 6 项未修复
+
+**关键已修复项**：Agent God Class 拆分、路径穿越白名单、requirements.txt、上下文压缩全路径生效、短期记忆线程锁与方向修正、Reflections 软删除、单元测试 171 个、WebSocket 心跳与 JSON.parse 防护、api_timeout 配置化、config.json db_path 统一、文件工具增强。
+
+**关键未修复项**：session_id 隔离、初始化工厂缺失、Provider 抽象接口、Prompt 注入防护、Web 安全中间件、前端 segment 气泡追加、角色名硬编码、CJK 终端宽度、CLI 打字速度配置透传。
+---
+
 **审查日期**：2026-05-28
 **项目路径**：D:\桌面\编程作品\AI朋友
 **审查范围**：28 个源文件，约 2000+ 行 Python/JS/HTML/CSS 代码
@@ -55,7 +76,7 @@ AI Friend 是一个基于 DeepSeek API 的 AI 伴侣应用，具有人格系统�
 
 ## 2. 安全审计
 
-### 2.1 API Key 硬编码（严重）
+### 2.1 API Key 硬编码（严重）⚠️部分修复
 
 | 发现 | 位置 | 风险 |
 |------|------|------|
@@ -69,7 +90,7 @@ AI Friend 是一个基于 DeepSeek API 的 AI 伴侣应用，具有人格系统�
 
 `storage/repository.py` 中全部 15+ 个查询方法均使用参数化查询（`?` 占位符），无 SQL 拼接风险。
 
-### 2.3 路径穿越风险（中危）
+### 2.3 路径穿越风险（中危）✅已修复
 
 **文件**：`tools/file_tools.py:55`
 
@@ -79,7 +100,7 @@ resolved = os.path.abspath(filepath)
 
 `ReadFileTool.execute()` 未限制文件路径在项目目录内，LLM（或通过 prompt 注入的攻击者）可读取任意系统文件。
 
-### 2.4 Prompt 注入风险（中危）
+### 2.4 Prompt 注入风险（中危）❌未修复
 
 **文件**：`core/agent.py:114`
 
@@ -89,7 +110,7 @@ user_msg = f"用户输入：{user_input}"
 
 用户输入直接拼接到 messages 中，仅通过角色区分。无输入过滤、逃逸或边界检测。攻击者可构造覆盖系统指令的输入。
 
-### 2.5 Web 安全缺失
+### 2.5 Web 安全缺失 ❌未修复
 
 | 问题 | 位置 | 风险 |
 |------|------|------|
@@ -98,7 +119,7 @@ user_msg = f"用户输入：{user_input}"
 | WebSocket 无身份认证 | `web/server.py:119` | 任意客户端可连接 |
 | 无 CSP 头 | `web/static/index.html` | XSS 防护缺失 |
 
-### 2.6 依赖安全
+### 2.6 依赖安全 ✅已修复
 
 项目无 `requirements.txt` 或 `pyproject.toml`，依赖通过 `README.md` 的手动 `pip install` 管理，无版本锁定，无法做安全扫描。
 
@@ -106,7 +127,7 @@ user_msg = f"用户输入：{user_input}"
 
 ## 3. 架构分析
 
-### 3.1 God Class 问题—Agent（480 行）
+### 3.1 God Class 问题—Agent（480 行）✅已修复
 
 **文件**：`core/agent.py:56-482`
 
@@ -126,7 +147,7 @@ Agent 类在同一模块内承担 10+ 职责：
 
 **问题**：`_on_think()`（80 行）和 `_on_act()`（20 行）包含多级嵌套的 UI 渲染逻辑，违反单一职责原则。
 
-### 3.2 双代码路径（严重）
+### 3.2 双代码路径（严重）⚠️部分修复
 
 系统有两套并行的对话处理逻辑：
 
@@ -140,7 +161,7 @@ Agent 类在同一模块内承担 10+ 职责：
 - `agent.py:167-172`：API 模式每 3 轮 consolidation 只处理 1 条 turn，**约 67% 对话不进入长期记忆**
 - `agent.py:111`：阈值检查 `messages[-5:]` 只取最后 5 条，**`COMPRESS_THRESHOLD` 永远不会被触发**
 
-### 3.3 代码重复—main.py 与 web/session.py 初始化
+### 3.3 代码重复—main.py 与 web/session.py 初始化 ❌未修复
 
 `web/session.py:24-60`（WebAgent.__init__）与 `main.py:38-97` 几乎完全重复（约 18 处对应点）：
 
@@ -153,7 +174,7 @@ Agent 类在同一模块内承担 10+ 职责：
 
 任何新依赖（如 Embedding 模型、异步数据库驱动）需同时在两处修改。
 
-### 3.4 会话隔离缺失
+### 3.4 会话隔离缺失 ❌未修复
 
 **文件**：`web/session.py:89-114`
 
@@ -166,7 +187,7 @@ class SessionManager:
 
 `SessionManager` 为所有 session 共享同一个 `Database` + `Repository` 实例。`conversation_turns` 表无 `session_id` 列，无法区分不同用户的对话。
 
-### 3.5 缺少抽象层
+### 3.5 缺少抽象层 ❌未修复
 
 - **Provider 无 ABC**（`core/provider.py:11`）：`KimiProvider` 是具体实现，无 `BaseProvider` 接口，无法替换模型或 mock 测试。
 - **无工厂模式**：Agent 的依赖组装链无处工厂化，导致 main.py 和 web/session.py 各写一遍。
@@ -182,11 +203,11 @@ class SessionManager:
 
 ## 4. 代码质量问题
 
-### 4.1 Agent 双代码路径
+### 4.1 Agent 双代码路径 ⚠️部分修复
 
 已在 3.2 节详细分析。`process_message()` + `_react_loop()` 与 `_on_think()` + `_on_act()` + `_on_reflect()` 两条路径高度相似但代码独立维护。
 
-### 4.2 情感分析每轮调用 2 次
+### 4.2 情感分析每轮调用 2 次 ⚠️部分修复
 
 **第一次**：`agent.py:162-165`（`_react_loop` 中）
 ```python
@@ -202,7 +223,7 @@ self.personality.apply_emotional_shift(sentiment, sharing, energy)
 
 每次 `analyze_sentiment()` 触发一次 LLM 调用（`consolidation.py:74-87`），相当于每个用户消息多浪费 1 次 LLM 调用。
 
-### 4.3 Token 估算使用 cl100k_base（GPT-4 Tokenizer）用于 DeepSeek
+### 4.3 Token 估算使用 cl100k_base（GPT-4 Tokenizer）用于 DeepSeek ❌未修复
 
 **文件**：`core/agent.py:25-33`
 
@@ -212,13 +233,13 @@ _TOKENIZER = tiktoken.get_encoding("cl100k_base")  # GPT-4 tokenizer
 
 DeepSeek 使用不同的 tokenizer，`cl100k_base` 与实际计数存在偏差，可能导致提前或延迟触发上下文压缩。
 
-### 4.4 上下文压缩仅在部分路径生效
+### 4.4 上下文压缩仅在部分路径生效 ✅已修复
 
 - `process_message()` → `_react_loop()` 路径：`COMPRESS_THRESHOLD` 检查仅阻止追加消息（`agent.py:111`），但从不调用 `_compress_context()`。
 - `_on_think()` 路径：调用 `_compress_context()`（`agent.py:275`）。
 - 结果：REST API（`/api/chat`）用户走 `process_message()` 路径，不会触发上下文压缩。
 
-### 4.5 情感值饱和
+### 4.5 情感值饱和 ⚠️部分修复
 
 **文件**：`personality.json:28-44`
 
@@ -235,7 +256,7 @@ dominant_emotion: "joyful"
 
 **根因**：`decay_rate: 0.05` 过低，长期积累正向 sentiment 无法衰减回 baseline。
 
-### 4.6 特质（Trait）忽略
+### 4.6 特质（Trait）忽略 ❌未修复
 
 **文件**：`personality.json:5-9`
 
@@ -245,7 +266,7 @@ dominant_emotion: "joyful"
 
 代码中实际使用的特质仅有 `playfulness`、`warmth`、`empathy`、`thoughtfulness`（`personality.py:46-57`）。`humor`（幽默 0.9）和 `sass`（嘴贫 0.75）在 `personality.py` 和 `agent.py` 中无任何对应逻辑——它们只在 system prompt 中 `format_traits()` 显示，不对情感或行为产生任何影响。
 
-### 4.7 配置键不匹配
+### 4.7 配置键不匹配 ✅已修复
 
 | 配置项 | config.py 默认值 | config.json 实际值 | 问题 |
 |--------|-------------------|---------------------|------|
@@ -258,7 +279,7 @@ dominant_emotion: "joyful"
 
 ## 5. 数据层
 
-### 5.1 所有 session 共享 DB，无 session_id 隔离
+### 5.1 所有 session 共享 DB，无 session_id 隔离 ❌未修复
 
 **文件**：`storage/database.py:86-93`
 
@@ -275,11 +296,11 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
 
 无 `session_id` 列。`Repository.insert_turn()`（`repository.py:165-172`）写入时不区分 session。
 
-### 5.2 conversation_turns 表无 session_id 列
+### 5.2 conversation_turns 表无 session_id 列 ❌未修复
 
 同上。所有 Web 用户 + CLI 的对话历史写入同一张表，无法实现用户级数据隔离。
 
-### 5.3 ALTER TABLE 迁移每次启动都执行
+### 5.3 ALTER TABLE 迁移每次启动都执行 ⚠️部分修复
 
 **文件**：`storage/database.py:102-108`
 
@@ -295,7 +316,7 @@ for stmt in [...]:
 - 每次启动都执行，浪费启动时间
 - 无版本化 schema 迁移机制
 
-### 5.4 Reflections 被 DELETE 而非 Archive（数据丢失风险）
+### 5.4 Reflections 被 DELETE 而非 Archive（数据丢失风险）✅已修复
 
 **文件**：`storage/repository.py:218-225`
 
@@ -315,7 +336,7 @@ c.execute("""
 
 `prune_facts`（`repository.py:188`）：`ORDER BY composite_score ASC, recall_count ASC`——删除最低分的，正确。
 
-### 5.6 SQLite 单连接 + threading.Lock 成为并发瓶颈
+### 5.6 SQLite 单连接 + threading.Lock 成为并发瓶颈 ⚠️部分修复
 
 **文件**：`storage/database.py:9-12`
 
@@ -327,7 +348,7 @@ c.execute("""
 
 ## 6. 内存系统
 
-### 6.1 短期记忆（ConversationBuffer）
+### 6.1 短期记忆（ConversationBuffer）✅已修复
 
 **文件**：`memory/short_term.py:10-62`
 
@@ -335,14 +356,14 @@ c.execute("""
 - **`format_for_prompt` 方向问题**（line 37-48）：从最早对话开始遍历，`max_chars` 截断后丢失**最新**对话，而非最早对话。
 - `_next_id` 自增非原子操作。
 
-### 6.2 长期记忆（LongTermMemory）
+### 6.2 长期记忆（LongTermMemory）❌未修复
 
 **文件**：`memory/long_term.py:8-66`
 
 - `build_context()` 直接读 Repository，所有 session 共享数据。
 - `get_all_active_facts()` / `search_facts()` 等无 session 过滤。
 
-### 6.3 记忆检索（MemoryRetriever）
+### 6.3 记忆检索（MemoryRetriever）❌未修复
 
 **文件**：`memory/retrieval.py`
 
@@ -354,7 +375,7 @@ c.execute("""
 
 - **LLM rerank**（line 141-162）：候选 >15 条时触发一次 LLM 调用，合理但 overhead 存在。
 
-### 6.4 记忆合并（MemoryConsolidator）
+### 6.4 记忆合并（MemoryConsolidator）⚠️部分修复
 
 **文件**：`memory/consolidation.py`
 
@@ -371,7 +392,7 @@ c.execute("""
 
 ## 7. LLM 集成
 
-### 7.1 Provider 无抽象接口
+### 7.1 Provider 无抽象接口 ❌未修复
 
 **文件**：`core/provider.py:11-109`
 
@@ -379,7 +400,7 @@ c.execute("""
 - 无法替换为其他模型 API
 - 无法在测试中 mock
 
-### 7.2 重试逻辑（3 次指数退避），但 180s 硬编码超时
+### 7.2 重试逻辑（3 次指数退避），但 180s 硬编码超时 ✅已修复
 
 **文件**：`core/provider.py:49-80`
 
@@ -396,7 +417,7 @@ timeout=180  # 无配置化入口
 - 180 秒超时硬编码，网络差时用户等待过长
 - 无断路器模式
 
-### 7.3 每用户消息产生 3-6 次 LLM 调用
+### 7.3 每用户消息产生 3-6 次 LLM 调用 ⚠️部分修复
 
 典型消息处理链路：
 
@@ -410,13 +431,13 @@ timeout=180  # 无配置化入口
 | N+4 | `consolidator._summarize_experience` | 体验总结 | 触发合并时 |
 | N+5 | `consolidator._generate_reflection` | 反思生成 | 触发合并时 |
 
-### 7.4 系统提示词含大量示例对话（~600 tokens）
+### 7.4 系统提示词含大量示例对话（~600 tokens）❌未修复
 
 **文件**：`prompts/system.py:49-70`
 
 8 组对话示例（约 600 tokens）浪费上下文窗口，且在人格改变后需手动更新。示例的幽默损友风格已硬编码在 prompt 中，无法通过 `personality.json` 配置。
 
-### 7.5 Prompt 注入保护仅靠"用户输入："前缀
+### 7.5 Prompt 注入保护仅靠"用户输入："前缀 ❌未修复
 
 **文件**：`agent.py:114`
 
@@ -434,7 +455,7 @@ user_msg = f"用户输入：{user_input}"
 
 已在 3.3 节详细分析。
 
-### 8.2 每个消息写 personality.json 到磁盘
+### 8.2 每个消息写 personality.json 到磁盘 ❌未修复
 
 **文件**：`web/session.py:69-70`
 
@@ -447,7 +468,7 @@ def process_message(self, user_input: str) -> str:
 
 每次用户消息触发一次 JSON 序列化 + 文件写入，高并发下磁盘 I/O 成为瓶颈。
 
-### 8.3 Session 内存泄漏（严重）
+### 8.3 Session 内存泄漏（严重）⚠️部分修复
 
 **文件**：`web/session.py:93`
 
@@ -459,7 +480,7 @@ self._sessions: dict[str, WebAgent] = {}
 - WebSocket 断开时调用 `remove()`（server.py:168），但 REST API 创建的 session 永不释放
 - 每个 WebAgent 持有完整 ConversationBuffer（500 条），长期运行占用大量内存
 
-### 8.4 多个 WebSocket 连接产生多个 proactive_loop
+### 8.4 多个 WebSocket 连接产生多个 proactive_loop ❌未修复
 
 **文件**：`web/server.py:136-138`
 
@@ -474,7 +495,7 @@ proactive_task = asyncio.create_task(_proactive_loop(websocket, session_id))
 - 多个 stream 向不同 WebSocket 发送同一回复
 - 条件竞争修改 `agent.last_activity_time`
 
-### 8.5 私有方法从 Web 层访问
+### 8.5 私有方法从 Web 层访问 ❌未修复
 
 **文件**：`web/server.py:105`
 
@@ -484,7 +505,7 @@ score = agent.agent._calculate_proactivity(idle)  # 访问私有方法
 
 破坏封装。
 
-### 8.6 生命周期 shutdown 不清理资源
+### 8.6 生命周期 shutdown 不清理资源 ❌未修复
 
 **文件**：`web/server.py:22-25`
 
@@ -496,7 +517,7 @@ async def lifespan(app: FastAPI):
 
 shutdown 时不关闭数据库连接、不保存状态、不取消活跃的 WebSocket 连接和 proactive_loop。
 
-### 8.7 REST API 缺输入验证
+### 8.7 REST API 缺输入验证 ❌未修复
 
 **文件**：`web/server.py:39-51`
 
@@ -508,7 +529,7 @@ shutdown 时不关闭数据库连接、不保存状态、不取消活跃的 WebS
 
 ## 9. 前端
 
-### 9.1 WebSocket Segments 每个创建新消息气泡（非追加）
+### 9.1 WebSocket Segments 每个创建新消息气泡（非追加）❌未修复
 
 **文件**：`web/static/app.js:34-36`
 
@@ -519,7 +540,7 @@ case 'segment':
 
 一句回复被切分成多个独立气泡，视觉上像多条消息。应追加到最后一个气泡。
 
-### 9.2 角色名在 HTML/JS 中硬编码
+### 9.2 角色名在 HTML/JS 中硬编码 ❌未修复
 
 **文件**：
 - `web/static/app.js:131`：`avatar.textContent = role === 'user' ? '我' : '星';`
@@ -528,13 +549,13 @@ case 'segment':
 
 修改 `personality.json` 中 `name` 后 UI 不自动同步。
 
-### 9.3 无 WebSocket 心跳
+### 9.3 无 WebSocket 心跳 ✅已修复
 
 **文件**：`web/static/app.js:14-69`
 
 虽然有 `ping`/`pong` 消息类型支持（server.py:156-157），但前端未实现周期性发送 `ping` 的逻辑。
 
-### 9.4 JSON.parse 无 try/catch
+### 9.4 JSON.parse 无 try/catch ✅已修复
 
 **文件**：`web/static/app.js:24`
 
@@ -545,17 +566,17 @@ ws.onmessage = (event) => {
 
 服务器发送非 JSON 数据时整个处理中断。
 
-### 9.5 无无障碍支持
+### 9.5 无无障碍支持 ❌未修复
 
 - 无 ARIA 标签
 - 无角色属性
 - 无键盘导航支持（除输入框外）
 
-### 9.6 无 CSP 头
+### 9.6 无 CSP 头 ❌未修复
 
 前端未通过 `Content-Security-Policy` 头限制脚本来源。
 
-### 9.7 CJK 终端换行使用 len()（视觉宽度错误）
+### 9.7 CJK 终端换行使用 len()（视觉宽度错误）❌未修复
 
 **文件**：`ui/display.py:54-63`
 
@@ -565,7 +586,7 @@ while len(paragraph) > width:  # len() 按字符数计算
 
 中文字符在终端中通常占 2 个英文字符宽度，`len("你好")` 返回 2 但视觉宽度为 4，导致 CJK 文本换行偏早。
 
-### 9.8 CLI 打字速度忽略配置
+### 9.8 CLI 打字速度忽略配置 ❌未修复
 
 **文件**：`ui/display.py:7-8`、`ui/cli.py:45`
 
@@ -580,11 +601,11 @@ class DisplayEngine:
 
 ## 10. 性能分析
 
-### 10.1 每用户消息 3-6 次 LLM 调用
+### 10.1 每用户消息 3-6 次 LLM 调用 ⚠️部分修复
 
 已在 7.3 节详述。主要浪费在情感分析被调用两次。
 
-### 10.2 线程池耗尽风险
+### 10.2 线程池耗尽风险 ❌未修复
 
 **文件**：`web/server.py:108, 153`
 
@@ -595,15 +616,15 @@ response = await loop.run_in_executor(None, agent.process_proactive)
 
 使用默认线程池（通常 max_workers=min(32, os.cpu_count()+4)）。大量并发 WebSocket 连接时可能耗尽线程池。
 
-### 10.3 SQLite 单连接瓶颈
+### 10.3 SQLite 单连接瓶颈 ⚠️部分修复
 
 所有 session 共享一个 SQLite 连接 + `threading.Lock`。在 FastAPI 异步架构下，多个请求串行等待锁。
 
-### 10.4 情感分析每轮跑 2 次（浪费）
+### 10.4 情感分析每轮跑 2 次（浪费）⚠️部分修复
 
 每用户消息两次 `analyze_sentiment()` LLM 调用，浪费 300-500 tokens/次。每日 1000 条消息额外消耗 600K-1M tokens。
 
-### 10.5 系统提示词含大量示例（~600 tokens）
+### 10.5 系统提示词含大量示例（~600 tokens）❌未修复
 
 prompts/system.py:49-70 的对话示例每次请求多消耗约 600 tokens。
 
@@ -611,23 +632,23 @@ prompts/system.py:49-70 的对话示例每次请求多消耗约 600 tokens。
 
 ## 11. 测试与文档
 
-### 11.1 无单元测试
+### 11.1 无单元测试 ✅已修复
 
 全项目无一个 `unittest`、`pytest` 或任何形式的单元测试。关键模块（`core/agent.py` 状态机、`core/personality.py` 情感计算、`memory/retrieval.py` 评分公式、`core/dispatcher.py` tool_call 解析、`storage/repository.py` SQL 查询）均无可自动化执行的测试。
 
-### 11.2 test_manual.py 和 test_simulate.py 依赖真实 API 调用
+### 11.2 test_manual.py 和 test_simulate.py 依赖真实 API 调用 ✅已修复
 
 - 依赖真实 DeepSeek API 调用，无网络则无法运行
 - `test_manual.py` 需要人工交互式对话
 - `test_simulate.py` 无断言检查（零 assert）
 - 不可在 CI 环境中运行
 
-### 11.3 文档可能过期
+### 11.3 文档可能过期 ⚠️部分修复
 
 - `doc/architecture.md:120`：描述"空闲超过 60 秒后发起对话"，但 `config.json` 中 `proactive_min_idle` 为 `180.0` 秒
 - 文档未覆盖 Web 端架构（WebSocket、SessionManager 等）
 
-### 11.4 测试覆盖率接近于 0
+### 11.4 测试覆盖率接近于 0 ✅已修复
 
 | 模块 | 行数 | 测试行数 | 覆盖率 |
 |------|------|----------|--------|
@@ -642,7 +663,7 @@ prompts/system.py:49-70 的对话示例每次请求多消耗约 600 tokens。
 
 ## 12. 错误处理
 
-### 12.1 bare except 多处
+### 12.1 bare except 多处 ⚠️部分修复
 
 | 位置 | 代码 | 问题 |
 |------|------|------|
@@ -654,7 +675,7 @@ prompts/system.py:49-70 的对话示例每次请求多消耗约 600 tokens。
 | `config.py:42` | `except (json.JSONDecodeError, OSError): pass` | 配置损坏无警告 |
 | `personality.py:90` | `except (json.JSONDecodeError, OSError):` | 人格加载失败静默重置 |
 
-### 12.2 WebSocket 错误处理静默吞异常
+### 12.2 WebSocket 错误处理静默吞异常 ✅已修复
 
 **文件**：`web/server.py:160-166`
 
@@ -667,13 +688,13 @@ except Exception as e:
         pass
 ```
 
-### 12.3 状态机错误时回退到 IDLE 但可能状态不一致
+### 12.3 状态机错误时回退到 IDLE 但可能状态不一致 ❌未修复
 
 **文件**：`core/agent.py:198-203`
 
 在 `_on_think()` 执行到一半出错时，不清理 `_react_messages`、`_react_iteration` 等状态，可能导致下条消息处理时状态污染。
 
-### 12.4 Config 加载解析错误静默忽略
+### 12.4 Config 加载解析错误静默忽略 ✅已修复
 
 `config.py:42-43` 捕获 `json.JSONDecodeError` 和 `OSError` 后静默返回全默认配置，用户无任何警告。若 API Key 为空，直到首次 API 调用才崩溃。
 
@@ -685,31 +706,31 @@ except Exception as e:
 
 | # | 问题 | 修复方案 | 涉及文件 | 估时 |
 |---|------|----------|----------|------|
-| 1 | **API Key 硬编码** | 改用环境变量 `DEEPSEEK_API_KEY`，config.json 清空 key 字段 | `config.json`、`config.py` | 30min |
-| 2 | **Session 无隔离** | `conversation_turns` 表加 `session_id` 列，Repository 按 session_id 过滤 | `database.py`、`repository.py`、`session.py` | 2h |
-| 3 | **Session 内存泄漏** | WS 断开时调 `remove()`，REST session 加 LRU 驱逐或 TTL | `server.py`、`session.py` | 1h |
-| 4 | **多 proactive_loop** | SessionManager 维护每个 session 的 proactive 引用，新连接复用 | `server.py`、`session.py` | 1h |
-| 5 | **统一 db_path** | config.json 改 `"data/ai_friend.db"`，与 config.py 默认值一致 | `config.json` | 5min |
+| 1 | **API Key 硬编码** ⚠️ | 改用环境变量 `DEEPSEEK_API_KEY`，config.json 清空 key 字段 | `config.json`、`config.py` | 30min |
+| 2 | **Session 无隔离** ❌ | `conversation_turns` 表加 `session_id` 列，Repository 按 session_id 过滤 | `database.py`、`repository.py`、`session.py` | 2h |
+| 3 | **Session 内存泄漏** ⚠️ | WS 断开时调 `remove()`，REST session 加 LRU 驱逐或 TTL | `server.py`、`session.py` | 1h |
+| 4 | **多 proactive_loop** ❌ | SessionManager 维护每个 session 的 proactive 引用，新连接复用 | `server.py`、`session.py` | 1h |
+| 5 | **统一 db_path** ✅ | config.json 改 `"data/ai_friend.db"`，与 config.py 默认值一致 | `config.json` | 5min |
 
 ### P1（本周）
 
 | # | 问题 | 修复方案 | 估时 |
 |---|------|----------|------|
-| 6 | **抽取依赖工厂** | `core/factory.py` 消除 main.py/web/session.py 的 80% 重复 | 1h |
-| 7 | **统一情感更新路径** | 移除 `_react_loop()` 中的 `analyze_sentiment()`，仅保留 `_on_reflect()` 中的 | 30min |
-| 8 | **前端 WebSocket 心跳** | app.js 加 30s 定时间隔发送 `ping` | 15min |
-| 9 | **前端 JSON.parse try/catch** | app.js onmessage 增加异常处理 | 15min |
-| 10 | **Web 端添加 CORS 中间件** | FastAPI 添加 `CORSMiddleware` | 15min |
+| 6 | **抽取依赖工厂** ❌ | `core/factory.py` 消除 main.py/web/session.py 的 80% 重复 | 1h |
+| 7 | **统一情感更新路径** ⚠️ | 移除 `_react_loop()` 中的 `analyze_sentiment()`，仅保留 `_on_reflect()` 中的 | 30min |
+| 8 | **前端 WebSocket 心跳** ✅ | app.js 加 30s 定时间隔发送 `ping` | 15min |
+| 9 | **前端 JSON.parse try/catch** ✅ | app.js onmessage 增加异常处理 | 15min |
+| 10 | **Web 端添加 CORS 中间件** ❌ | FastAPI 添加 `CORSMiddleware` | 15min |
 
 ### P2（下月）
 
 | # | 问题 | 修复方案 | 估时 |
 |---|------|----------|------|
-| 11 | **拆分 Agent God Class** | 抽 MessagePipeline / ProactivityEngine / ContextManager | 4h |
-| 12 | **添加 Provider ABC** | 定义 `BaseProvider` 抽象基类 | 1h |
-| 13 | **添加单元测试** | pytest + mock，覆盖 dispatcher/personality/retrieval/repository | 8h |
-| 14 | **CSS 自定义属性** | 颜色值集中为 CSS 变量 | 1h |
-| 15 | **CJK 终端宽度修复** | 使用 `wcwidth` 库或自定义宽度计算函数 | 30min |
+| 11 | **拆分 Agent God Class** ✅ | 抽 MessagePipeline / ProactivityEngine / ContextManager | 4h |
+| 12 | **添加 Provider ABC** ❌ | 定义 `BaseProvider` 抽象基类 | 1h |
+| 13 | **添加单元测试** ✅ | pytest + mock，覆盖 dispatcher/personality/retrieval/repository | 8h |
+| 14 | **CSS 自定义属性** ❌ | 颜色值集中为 CSS 变量 | 1h |
+| 15 | **CJK 终端宽度修复** ❌ | 使用 `wcwidth` 库或自定义宽度计算函数 | 30min |
 
 ---
 

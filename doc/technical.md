@@ -27,7 +27,7 @@ main.py / web_main.py
     │
     ├── core/
     │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
-    │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
+    │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker + response_format JSON mode
     │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
     │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
     │   ├── sleep_manager.py ──── 睡眠/唤醒系统（窗口判断+梦境）
@@ -35,18 +35,18 @@ main.py / web_main.py
     │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
     │   ├── message_handler.py ── 消息入口（process_* 三方法）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
-    │   ├── provider.py ───────── LLM API 客户端（OpenAI 兼容，流式）
-    │   └── dispatcher.py ─────── tool_call XML 解析 + 工具调度
+    │   ├── provider.py ───────── LLM API 客户端（OpenAI 兼容，流式，response_format JSON mode）
+    │   └── dispatcher.py ─────── tool_call 三层解析（JSON 数组 / XML / 裸 JSON）+ 工具调度
     │
     ├── memory/
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
-    │   ├── long_term.py ────── LongTermMemory（SQLite CRUD 封装）
+    │   ├── long_term.py ────── LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
     │   ├── embeddings.py ───── EmbeddingEngine（llama-server API）+ EmbeddingCache（LRU）
     │   ├── retrieval.py ────── 三层检索 + 混合评分（语义 0.6 + 关键词 0.4）+ LLM 重排序
     │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + 自动嵌入编码）
     │
     ├── tools/
-    │   ├── traits.py ──────── Tool 基类 + ToolRegistry
+    │   ├── traits.py ──────── Tool 基类（含 to_json_schema()）+ ToolRegistry
     │   ├── memory_tools.py ── recall / remember (Agent 1,3)
     │   ├── file_tools.py ──── read_file（目录列举 + 多文件）
     │   ├── search_tools.py ── glob + grep（白名单限制）
@@ -57,11 +57,11 @@ main.py / web_main.py
     ├── tests/ ───────────────── 单元测试（171 用例）
     │
     ├── storage/
-    │   ├── database.py ───── SQLite 连接 + Schema + WAL 模式
-    │   └── repository.py ─── 数据访问层（CRUD + 修剪）
+    │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ Schema + WAL 模式
+    │   └── repository.py ─── 异步数据访问层（CRUD + 修剪）
     │
     ├── prompts/
-    │   ├── system.py ─────── System prompt 动态组装（7 区块）
+    │   ├── system.py ─────── System prompt 动态组装（7 区块，含 JSON 格式工具指令）
     │   └── templates.py ──── 抽取/总结/反思 prompt 模板
     │
     ├── models/
@@ -148,14 +148,20 @@ Web 模式： web_main.py → uvicorn
 每次用户输入可能触发多轮 ReAct 迭代（最多 10 次）：
 
 ```
-第 1 轮：THINK → LLM 返回 "<tool_call>..."
+第 1 轮：THINK → LLM 返回 JSON 工具调用数组（或 XML 回退）
         ACT → execute_tool_calls() → 结果喂回
 第 2 轮：THINK → LLM 基于工具结果继续
         ACT → 无 tool_call → 最终回复 → REFLECT
 ```
 
-**工具调用解析**：
+**工具调用解析（三层）**：
 
+Tier 1 — JSON mode 结构化输出：
+```json
+[{"name": "recall", "arguments": {"query": "用户喜欢什么"}}]
+```
+
+Tier 2 — XML 标签兼容回退：
 ```xml
 <tool_call>
 {"name": "recall", "arguments": {"query": "用户喜欢什么"}}
@@ -479,8 +485,11 @@ class Tool:
     def name(self) -> str
     def description(self) -> str
     def parameters_schema(self) -> dict  # JSON Schema
+    def to_json_schema(self) -> dict     # OpenAI function-calling JSON Schema
     def execute(self, args: dict) -> ToolResult
 ```
+
+`to_json_schema()` 生成 OpenAI 兼容的 function-calling JSON Schema，供 provider 的 `response_format` 参数使用，实现结构化 JSON 工具调用。
 
 ### 5.2 ToolRegistry
 
@@ -493,7 +502,17 @@ registry.format_for_prompt()
 
 ### 5.3 工具调用协议
 
-LLM 输出格式：
+LLM 输出格式（三层解析，优先级从高到低）：
+
+**Tier 1 — JSON calls 数组（结构化输出 / JSON mode）**：
+
+```json
+[{"name": "recall", "arguments": {"query": "..."}}]
+```
+
+Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM 直接返回结构化 JSON 数组。
+
+**Tier 2 — XML 标签（兼容回退）**：
 
 ```xml
 <tool_call>
@@ -501,13 +520,18 @@ LLM 输出格式：
 </tool_call>
 ```
 
-回退格式：裸 JSON `{"name": "...", "arguments": {...}}`
+**Tier 3 — 裸 JSON（最终回退）**：
+
+```json
+{"name": "recall", "arguments": {"query": "..."}}
+```
 
 解析流程：
-1. 剥离 `<think>...</think>` 块
-2. 正则提取 `<tool_call>...</tool_call>`
-3. JSON 解析，参数别名归一化（search → query, text → content）
-4. 回退：尝试将整个响应作为 JSON 解析
+1. 尝试解析为 JSON 数组 `[{...}]`（JSON mode 输出）
+2. 剥离 `<think>...</think>` 块
+3. 正则提取 `<tool_call>...</tool_call>`
+4. JSON 解析，参数别名归一化（search → query, text → content）
+5. 回退：尝试将整个响应作为单个 JSON 对象解析
 
 ### 5.4 内置工具（9 个，三层分工）
 
@@ -927,19 +951,38 @@ PRAGMA foreign_keys=ON;
 
 ### 9.3 连接管理
 
+采用 `aiosqlite` + `asyncio.Lock` 异步架构，替代原有的 `sqlite3` + `threading.Lock`：
+
 ```python
 class Database:
     def __init__(self, db_path):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
-    @contextmanager
-    def cursor(self):
-        with self._lock:
-            yield c
-            self.conn.commit()
+    async def open(self):
+        self.conn = await aiosqlite.connect(self._db_path)
+        await self.conn.execute("PRAGMA journal_mode=WAL")
+        await self.conn.execute("PRAGMA foreign_keys=ON")
+
+    @asynccontextmanager
+    async def cursor(self):
+        async with self._lock:
+            cursor = await self.conn.cursor()
+            try:
+                yield cursor
+            finally:
+                await cursor.close()
+
+    async def close(self):
+        await self.conn.close()
 ```
+
+关键变更：
+- `sqlite3.connect()` → `aiosqlite.connect()`（异步连接）
+- `threading.Lock` → `asyncio.Lock`（协程安全）
+- `__exit__` context manager → `@asynccontextmanager`（异步上下文管理器）
+- `cursor.fetchall()` → `await cursor.fetchall()`（所有数据库操作异步化）
+- `main.py` 使用 `asyncio.run()` 启动；`web/server.py` 在 lifespan 中 `await db.open()`
 
 ---
 

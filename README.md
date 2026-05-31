@@ -63,7 +63,7 @@ Perceive → 检索记忆 → 识别知识缺口 → 决策。若无需外部工
 
 **Agent 2 — ToolAgent（7 个外部工具）**：web_fetch / web_search / read_file / glob / grep / music_play / notify
 
-接收 Agent 1 的自然语言请求，解析并执行外部工具。ToolAttemptTracker（每轮 3 次重试，最多 3 轮），失败后回报 Agent 1 重新决策。独立精简 prompt，temperature=0.3，无人格/情绪/记忆。
+接收 Agent 1 的自然语言请求，通过 JSON mode（response_format）结构化输出工具调用，三层解析（JSON 数组 / XML 正则 / 裸 JSON）。ToolAttemptTracker（每轮 3 次重试，最多 3 轮），失败后回报 Agent 1 重新决策。独立精简 prompt，temperature=0.3，无人格/情绪/记忆。
 
 **Agent 3 — Roleplay Agent（内部工具）**：recall / remember
 
@@ -81,7 +81,7 @@ Perceive → 检索记忆 → 识别知识缺口 → 决策。若无需外部工
 | `recall` | 回忆用户信息或共同经历 | query | SQLite | Agent 1, 3 |
 | `remember` | 记住用户重要信息 | category, key, value, importance | SQLite | Agent 1, 3 |
 
-Agent 2 通过 `<tool_call>` XML 标签自主调用，结果作为 `<tool_result>` 注入 Agent 3 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
+Agent 2 通过 JSON mode 结构化输出（或 XML `<tool_call>` 标签回退）自主调用，结果作为 `<tool_result>` 注入 Agent 3 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
 
 ### 三层响应流程
 
@@ -283,7 +283,7 @@ ai-friend/
 ├── main.py                    CLI 入口
 ├── web_main.py                Web 入口
 ├── config.py / config.json    配置系统（dataclass + JSON + 环境变量）
-├── requirements.txt           依赖锁定（5 个包）
+├── requirements.txt           依赖锁定（含 aiosqlite 等）
 ├── personality.json           人格定义 + 情绪状态
 ├── CLAUDE.md                  AI 协作规则
 ├── data/                      SQLite 数据库（WAL 模式）
@@ -319,19 +319,19 @@ ai-friend/
 │   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
-│   ├── provider.py             LLM API 客户端（OpenAI 兼容，trust_env=False）
+│   ├── provider.py             LLM API 客户端（OpenAI 兼容，trust_env=False，支持 response_format JSON mode）
 │   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
-│   └── dispatcher.py           tool_call XML 解析 + 执行 + 别名归一化
+│   └── dispatcher.py           tool_call 三层解析（JSON calls 数组 + XML 正则 + 裸 JSON）+ 执行 + 别名归一化
 │
 ├── memory/                    记忆系统
 │   ├── short_term.py           ConversationBuffer（deque, 线程安全, get_all_reversed）
-│   ├── long_term.py            LongTermMemory（SQLite CRUD 封装）
+│   ├── long_term.py            LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
 │   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 512维, LRU cache）
 │   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4）
 │   └── consolidation.py        记忆合并（事实/体验/反思）+ 自动嵌入编码
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
-│   ├── traits.py               Tool 基类 + ToolResult + ToolRegistry
+│   ├── traits.py               Tool 基类 + to_json_schema() + ToolResult + ToolRegistry
 │   ├── memory_tools.py         recall + remember
 │   ├── file_tools.py           read_file（路径限制 + 大小限制 + 目录列举）
 │   ├── search_tools.py         glob（模式匹配）+ grep（正则内容搜索）
@@ -339,7 +339,7 @@ ai-friend/
 │   ├── web_tools.py            web_search + web_fetch（AnySearch API）
 │   └── music_tool.py           music_play（模糊搜索 + 默认播放器）
 │
-├── storage/                    SQLite（WAL + 版本化 Schema 迁移 + 软删除）
+├── storage/                    SQLite（aiosqlite 异步 + WAL + 版本化 Schema 迁移 + 软删除）
 ├── prompts/                    提示词模板（inner_drive / 破防/怨恨/梦境/工具记录注入）
 ├── models/                     数据模型（EmotionalState / EmotionEvent / Turn）
 ├── ui/                         CLI 界面（ConsoleInterface + 打字机效果）
