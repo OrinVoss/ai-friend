@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -9,9 +10,24 @@ from storage.database import Database
 logger = logging.getLogger(__name__)
 
 
+def _run_sync(coro):
+    """Run coroutine in a thread-safe way for sync callers."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 class Repository:
     def __init__(self, db: Database):
         self.db = db
+
+    # ── Sync wrappers ──
+    def insert_turn_sync(self, *a, **kw): return _run_sync(self.insert_turn(*a, **kw))
+    def get_recent_turns_sync(self, *a, **kw): return _run_sync(self.get_recent_turns(*a, **kw))
 
     # ── User Facts ──
 

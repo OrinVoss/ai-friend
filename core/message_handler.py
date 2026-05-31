@@ -217,7 +217,7 @@ class MessageHandler:
 
         mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx
-        a.ltm.repo.insert_turn(a.turn_count, "user", user_input,
+        a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
                                str(a.personality.emotion.to_dict()))
 
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)

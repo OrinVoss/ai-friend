@@ -166,7 +166,7 @@ class Agent:
         if final_text:
             if add_to_history:
                 self.short_term.add_turn("assistant", final_text)
-            self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text,
+            self.ltm.repo.insert_turn_sync(self.turn_count, "assistant", final_text,
                                       str(self.personality.emotion.to_dict()))
             self.turn_count += 1
 

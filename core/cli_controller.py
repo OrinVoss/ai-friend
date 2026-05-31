@@ -126,7 +126,7 @@ class CliController:
             return
         a.short_term.add_turn("user", user_input)
         a.current_memory_context = a.retriever.retrieve_for_query(user_input)
-        a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
+        a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
 
         # Agent 1: Inner drive reasoning
         self._ensure_inner_drive()
@@ -268,7 +268,7 @@ class CliController:
             if a._react_iteration > 1 and a.ui:
                 a.ui.display.respond(a.current_response, prefix=a.personality.config.name)
             a.short_term.add_turn("assistant", a.current_response)
-            a.ltm.repo.insert_turn(a.turn_count, "assistant", a.current_response, str(a.personality.emotion.to_dict()))
+            a.ltm.repo.insert_turn_sync(a.turn_count, "assistant", a.current_response, str(a.personality.emotion.to_dict()))
             a.turn_count += 1
             a.last_activity_time = time.time()
         a._reset_react()
