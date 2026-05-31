@@ -164,7 +164,6 @@ class CliController:
                 is_proactive=is_proactive, compressed_summary=a._context.compressed_summary,
                 tools=a._tool_registry,
                 consecutive_negative=a._consecutive_negative,
-                tool_records=self._tool_records,
                 inner_drive_summary=drive_summary,
             )
             messages = [{"role": "system", "content": sys_prompt}]
@@ -177,6 +176,9 @@ class CliController:
                 messages.append({"role": role, "content": t.content})
                 a._context.add_estimate(msg_tokens)
             messages = [messages[0]] + list(reversed(messages[1:]))
+            # Inject tool results as USER message (LLM respects user messages >> system messages)
+            if self._tool_records:
+                messages.append({"role": "user", "content": self._tool_records})
             if not is_proactive:
                 user_msg = {"role": "user", "content": user_message}
                 if a._context.estimated_tokens + estimate_tokens(user_message) <= COMPRESS_THRESHOLD:

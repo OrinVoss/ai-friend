@@ -188,9 +188,10 @@ class MessageHandler:
             is_proactive=True,
             consecutive_negative=a._consecutive_negative,
             explore_mode=True,
-            tool_records=tool_records,
         )
         messages = self._build_messages(sys_prompt, user_input=None)
+        if tool_records:
+            messages.insert(-1, {"role": "user", "content": tool_records})
         interests = getattr(a.personality.config, 'interests', [])
         if interests:
             picked = random.sample(interests, min(2, len(interests)))
