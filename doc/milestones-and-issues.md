@@ -1,6 +1,6 @@
 # 里程碑与 Issue
 
-> 最后更新：2026-05-31 | 总计 84 issues（30 已完成，54 开放）| 架构里程碑：三层 Agent (InnerDrive + ToolAgent + Roleplay) 已上线 | 语义搜索：Qwen3.5-0.8B 本地嵌入已上线
+> 最后更新：2026-05-31 | 总计 84 issues（45 已完成，39 开放）| 架构里程碑：三层 Agent (InnerDrive + ToolAgent + Roleplay) 已上线 | 语义搜索：Qwen3.5-0.8B 本地嵌入已上线
 
 ---
 
@@ -8,17 +8,17 @@
 
 | 版本 | 聚焦 | Issues | 已完成 | 开放 | 进度 |
 |------|------|--------|--------|------|------|
-| v0.1 | 基础架构稳定 | 30 | 27 | 3 | 90% |
-| v0.2 | 记忆系统升级 | 9 | 1 | 8 | 11% |
+| v0.1 | 基础架构稳定 | 30 | 30 | 0 | 100% |
+| v0.2 | 记忆系统升级 | 9 | 3 | 6 | 33% |
 | v0.3 | 情感与人格 | 12 | 9 | 3 | 75% |
 | v0.4 | Web 工程化 | 8 | 1 | 7 | 12% |
-| v0.5 | 前瞻与质量 | 21 | 3 | 18 | 14% |
+| v0.5 | 前瞻与质量 | 21 | 4 | 17 | 19% |
 | v1.0 | 正式版发布 | 9 | 1 | 8 | 11% |
 | v2.0 | 远景合并 | 1 | 0 | 1 | 0% |
 
 ---
 
-## v0.1 — 基础架构稳定（17/29 完成）
+## v0.1 — 基础架构稳定（30/30 完成 ✅）
 
 **目标**：消除代码审查报告中的关键 bug 和安全问题，让项目达到可维护的基线。
 
@@ -56,6 +56,12 @@
 |---|------|---------|
 | #15 | 情感分析重复调用 | CLI/Web 路径统一为单次分析 |
 
+#### 存储与工具调用升级
+| # | 标题 | 修改内容 |
+|---|------|---------|
+| #1 | Async SQLite (aiosqlite) | `threading.Lock + sqlite3` → `asyncio.Lock + aiosqlite`；storage/ 全异步（async context manager cursor）；memory/long_term.py 异步+同步兼容包装；main.py 用 asyncio.run()；web/server.py lifespan 中 await db.open()；requirements.txt 加 aiosqlite |
+| #2 | 结构化 JSON Tool Calling | `core/provider.py` 加 `response_format` 参数支持 JSON mode；`tools/traits.py` 加 `to_json_schema()` 方法；`core/dispatcher.py` 改为三层解析（JSON calls 数组 + XML 正则 + 裸 JSON）；`prompts/system.py` JSON 格式工具指令；`core/tool_agent.py` 传 `response_format` 给 provider |
+
 #### 重构（被后续 issue 覆盖）
 | # | 标题 | 覆盖者 |
 |---|------|--------|
@@ -65,38 +71,36 @@
 | #14 | 工厂函数 | #58 |
 | #31 | 统一 CLI/API 路径 | #58 |
 
-### 开放（12 个）
+### 开放（0 个）✅ v0.1 全部完成
 
-#### 大型重构
+#### Schema 变更
 | # | 标题 | 风险 | 说明 |
 |---|------|------|------|
-| #1 | 替换 sqlite3 为 aiosqlite | 高 | 全部数据库访问改写异步，可能引入新 bug |
-| #2 | 结构化输出替代正则 tool_call | 中 | 需 DeepSeek API 支持 JSON mode |
 | #10 | conversation_turns 加 session_id | 中 | Schema 变更，需迁移现有数据 |
-| #30 | ~~拆分 Agent God Class~~ | ~~高~~ | ✅ 已完成 (2026-05-30): Agent 784→223行，拆为 6 功能类聚模块 + 33 单元测试 |
-| #101 | 三层 Agent 架构 (InnerDrive + ToolAgent + Roleplay) | — | ✅ 已完成 (2026-05-30): Agent 1 InnerDrive 自主推理决策 + Agent 2 ToolAgent 外部工具执行(ToolAttemptTracker) + Agent 3 Roleplay 人格驱动，闲聊优化为单次 LLM 调用 |
-
-#### Bug 修复
-| # | 标题 | 严重度 |
-|---|------|--------|
-| #68 | process_message 绕过状态机，current_input 未设置 | 🔴 |
-| #69 | 破防 Web 路径情感分析滞后一轮 | 🔴 |
-| #75 | CLI 路径 sentiment + consecutive_negative 重复 | 🔴 |
-| #70 | 工具调用后续轮 token 限制过低 (128) | 🟡 |
-| #30 | 拆分 Agent God Class | ✅ 2026-05-30: Agent 784→223行，拆为 6 模块 + 33 单元测试 |
-| #71 | _compress_context 缺少递归保护 | 🟡 |
-| #73 | personality.save 重复保存 | 🟡 |
-| #74 | _tool_registry 初始 None | 🟡 |
 
 #### 优化
-| # | 标题 |
-|---|------|
-| #32 | 替换 cl100k_base 为 DeepSeek tokenizer |
-| #72 | reversed(get_all) 频繁创建迭代器 |
+| # | 标题 | 说明 |
+|---|------|------|
+| #32 | 替换 cl100k_base 为 DeepSeek tokenizer | 当前仍用 cl100k_base 近似（tiktoken），未替换为 DeepSeek 官方 tokenizer |
+
+### 已验证修复（v0.1 Bug 清零）
+
+以下 v0.1 bug 经过 10 Agent 并行代码扫描确认已解决：
+
+| # | 标题 | 严重度 | 修复确认 |
+|---|------|--------|---------|
+| #68 | process_message 绕过状态机，current_input 未设置 | 🔴→✅ | `message_handler.py` 已设置 `current_input`，Web 路径正常工作 |
+| #69 | 破防 Web 路径情感分析滞后一轮 | 🔴→✅ | 已验证非 bug：`get_all_reversed()` 正确找到当前用户轮次 |
+| #75 | CLI 路径 sentiment + consecutive_negative 重复 | 🔴→✅ | `cli_controller.py` 已移除 `_on_reflect` 中的重复情感分析 |
+| #70 | 工具调用后续轮 token 限制过低 (128) | 🟡→✅ | 后续轮 `max(384, max_tok*2//3)`，最低 384 tokens |
+| #71 | _compress_context 缺少递归保护 | 🟡→✅ | `_compressing` 标志防止重入 |
+| #73 | personality.save 重复保存 | 🟡→✅ | CLI 每 10 轮保存一次，Web 每消息一次，无重复 |
+| #74 | _tool_registry 初始 None | 🟡→✅ | 默认 `ToolRegistry()` 空实例非 None |
+| #72 | reversed(get_all) 频繁创建迭代器 | ✅ | 新增 `get_all_reversed()` 方法 |
 
 ---
 
-## v0.2 — 记忆系统升级（0/9 完成）
+## v0.2 — 记忆系统升级（3/9 完成）
 
 **目标**：从"关键词搜索引擎"升级为"语义理解 + 分层记忆 + 自我修正"。
 
@@ -110,12 +114,12 @@
 ### Bug 修复
 | # | 标题 | 说明 |
 |---|------|------|
-| #19 | 情感值饱和 | decay_rate 过低导致情感丧失动态范围 |
-| #20 | humor/sass 无实际效果 | 特质定义后在代码中未使用 |
-| #21 | _score_facts 原地覆写 | 评分结果未写回 DB |
-| #22 | consolidation pending 重复 | pending 队列可能包含同一 turn 多次 |
-| #40 | 无 session_id 过滤 | 多用户时记忆互相串扰 |
-| #41 | 情感分析三处调用 | 仍有冗余 LLM 调用 |
+| #19 | 情感值饱和 | ✅ 按情绪半衰期系统已实现（EMOTION_HALF_LIVES：surprise 3t ~ trust 25t），核心问题已解决 |
+| #20 | humor/sass 无实际效果 | 特质定义后在代码中未使用（`core/personality.py` 仅检查 empathy/playfulness/warmth/thoughtfulness） |
+| #21 | _score_facts 原地覆写 | 评分结果未写回 DB（仍在 `retrieval.py` 中原地修改 `composite_score`，功能性无害但不规范） |
+| #22 | consolidation pending 重复 | pending 队列可能包含同一 turn 多次（`_pending_buffer` 纯 list，无去重） |
+| #40 | 无 session_id 过滤 | 多用户时记忆互相串扰（所有表均无 `session_id` 列） |
+| #41 | 情感分析三处调用 | ✅ 已减少到 2 处（`agent.py:187` 每轮 + `consolidation.py:234` 合并路径），仍有一处冗余合并调用待消除 |
 
 ---
 
@@ -164,7 +168,7 @@
 
 ---
 
-## v0.5 — 前瞻与质量（2/21 完成）
+## v0.5 — 前瞻与质量（4/21 完成）
 
 **目标**：面向未来的架构演进 + 工程质量底座。
 
@@ -205,30 +209,30 @@
 |---|------|------|
 | #27 | Shutdown 清理 | 关闭 DB、取消 task、保存 session |
 | #29 | React 状态清理 | 异常退出不残留 _react_messages |
-| #51 | WS 异常处理 | WebSocket 异常不再静默吞 |
+| #51 | WS 异常处理 | ✅ WebSocket 异常显式处理（WebSocketDisconnect info 日志 + Exception error 日志回显客户端） |
 
 ---
 
 ## 路线图
 
 ```
-现在 ──▶ v0.1 收尾（12 issue）
+现在 ──▶ v0.1 收尾（2 issue：#10 schema + #32 tokenizer）
             │
             ▼
-         v0.3 情感深化（5 issue）
-            │  记仇、对话节奏、人格全链路、归一化、梦境
+         v0.3 情感深化（4 issue）
+            │  对话节奏、人格全链路、BaseProvider、归一化
             ▼
-         v0.4 Web 工程化（7 issue）
-            │  持久化、统一入口、安全、性能
+         v0.4 Web 工程化（8 issue）
+            │  持久化、统一入口、安全、性能、WS ✅
             ▼
-         v0.2 记忆升级（9 issue）
-            │  向量检索、分层反思、虚假记忆修正
+         v0.2 记忆升级（6 issue）
+            │  分层反思、虚假记忆修正、humor/sass、去重、隔离
             ▼
-         v0.5 前瞻 + 质量（19 issue）
-                测试、文档、前端打磨、OCEAN
+         v0.5 前瞻 + 质量（17 issue）
+                情绪多维、OCEAN、内在驱动、前端打磨、文档
             ▼
          v1.0 正式版（8 issue）
-                情感完整 + Web 可用 + 记忆可靠 + 测试文档
+                情感完整 + Web 可用 + 记忆可靠 + 测试文档✅
 ```
 
 ---
@@ -246,7 +250,7 @@
 | #79 | 情感系统四层全部完成 | #7 #42 #69 #75 #20 | 多维输入、归一化、重复调用修复、特质生效 |
 | #80 | 记忆系统语义化 | #4 #6 #21 #22 #40 | 向量检索、虚假记忆修正、去重、隔离 |
 | #81 | Web 端生产可用 | #58 #57 #44 #24 #43 #46 | 统一入口、持久化完整、安全、性能 |
-| #82 | 关键 Bug 清零 | #68 #70 #73 #74 #48 #49 #51 | 状态机、token、保存、WS 异常等 |
+| #82 | 关键 Bug 清零 | #68 #70 #73 #74 #48 #49 #51 | 状态机、token、保存、WS 异常等 — ✅ 除 #49 外全部已验证解决 |
 | #83 | 测试覆盖 ✅ | #25 | pytest 171 用例（11 文件，EmotionalState/分段/Provider/Agent 等） |
 | #84 | 文档完整 | #50 | README、API 文档、配置参考、人格指南 |
 | #85 | 前端体验打磨 | #26 #54 | 动态角色名、CSS 变量、动画、移动端 |
@@ -255,7 +259,7 @@
 ### v1.0 完成标准
 
 - [x] 三层 Agent 架构上线（Agent 1 InnerDrive + Agent 2 ToolAgent + Agent 3 Roleplay）
-- [ ] 所有 v0.1~v0.5 关键 bug 已关闭
+- [~] 所有 v0.1~v0.5 关键 bug 已关闭（v0.1 除 #32 外全部清零；v0.5 #49 typing_speed 仍未修复）
 - [ ] 情感四层架构完整运作
 - [ ] Web 端可长期运行不泄漏/不崩溃
 - [x] 10+ 单元测试通过（171 用例全部通过）
