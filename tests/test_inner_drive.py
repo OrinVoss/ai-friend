@@ -126,6 +126,38 @@ class TestAssess(unittest.TestCase):
         )
         self.assertTrue(result.needs_external_tools)
 
+    def test_review_sufficient(self):
+        """Agent 1 reviews results and decides no more tools needed."""
+        self.provider.generate.return_value = "决策：不需要外部工具\n理由：结果足够"
+        result = self.agent.review(
+            "搜索AI新闻",
+            "[调用 1] web_search（成功）:\n找到了5条AI新闻...",
+            round_num=1, max_rounds=3,
+        )
+        self.assertFalse(result.needs_external_tools)
+
+    def test_review_needs_more(self):
+        """Agent 1 reviews results and decides more tools needed."""
+        self.provider.generate.return_value = (
+            "决策：需要外部工具\n理由：搜索结果中有链接\n工具请求：需要调用 web_fetch 获取 https://example.com"
+        )
+        result = self.agent.review(
+            "搜索AI新闻",
+            "[调用 1] web_search（成功）:\n找到了链接 https://example.com",
+            round_num=1, max_rounds=3,
+        )
+        self.assertTrue(result.needs_external_tools)
+
+    def test_review_max_rounds(self):
+        """Agent 1 should stop at max rounds."""
+        result = self.agent.review(
+            "搜索AI新闻",
+            "[调用 1] web_search（成功）:\n找到了...",
+            round_num=3, max_rounds=3,
+        )
+        self.assertFalse(result.needs_external_tools)
+        self.assertIn("最大轮次", result.reasoning)
+
 
 class TestExtractToolRequests(unittest.TestCase):
     def setUp(self):

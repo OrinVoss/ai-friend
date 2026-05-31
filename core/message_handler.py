@@ -79,56 +79,73 @@ class MessageHandler:
             return self._run_agent3(user_input, drive_result, tool_result=None,
                                    on_token=on_token)
 
-        # ── Agent 2: Tool execution with retry loop ──
+        # ── Agent 2: Multi-round tool execution ──
+        # Agent 1 can call Agent 2 multiple times (e.g. search → fetch → more search)
+        # Each round: Agent 1 requests → Agent 2 executes (with retries) → Agent 1 reviews
         self._ensure_tool_agent()
         from core.tool_agent import ToolAttemptTracker
 
-        tracker = ToolAttemptTracker()
-        tool_result = None
+        MAX_AGENT2_ROUNDS = 3
+        all_tool_results = []  # accumulate results from all rounds
         tool_records = ""
+        round_num = 0
 
-        while not tracker.is_exhausted:
-            tracker.round_number += 1
-            tracker.retry_count = 0
-
-            # Get the primary tool request (or first if multiple)
+        while round_num < MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
+            round_num += 1
             request_text = drive_result.tool_requests[0].description if drive_result.tool_requests else user_input
-            logger.info(f"[msg] agent2: round {tracker.round_number}, request={request_text[:80]}")
+            logger.info(f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, request={request_text[:80]}")
 
-            # Agent 2 executes
+            # Execute with retry
+            tracker = ToolAttemptTracker()
             tool_result = self._tool_agent.run_with_request(request_text)
             tracker.total_attempts += 1
             track_failures(tracker, tool_result)
 
-            if tool_result.any_success:
-                break
-
-            # In-round retries
+            # In-round retries on failure
             while tracker.can_retry_in_round and not tool_result.any_success:
                 tracker.retry_count += 1
-                logger.info(f"[msg] agent2: retry {tracker.retry_count}/3 in round {tracker.round_number}")
+                logger.info(f"[msg] agent2: retry {tracker.retry_count}/3")
                 tool_result = self._tool_agent.run_with_request(request_text)
                 tracker.total_attempts += 1
                 track_failures(tracker, tool_result)
 
-            if tool_result.any_success:
+            if tool_result and tool_result.has_results:
+                all_tool_results.append(tool_result)
+
+            # Build accumulated results for Agent 1 review
+            combined_records = ""
+            for i, r in enumerate(all_tool_results):
+                combined_records += self._tool_agent.format_for_phase2(r) + "\n"
+
+            if tool_result and tool_result.any_success and round_num < MAX_AGENT2_ROUNDS:
+                # Success -- let Agent 1 review and possibly request more
+                drive_result = self._inner_drive.review(
+                    user_input, combined_records,
+                    round_num=round_num, max_rounds=MAX_AGENT2_ROUNDS,
+                )
+                if drive_result.needs_external_tools:
+                    logger.info(f"[msg] agent1: needs more tools after round {round_num}")
+            elif tool_result and not tool_result.any_success:
+                # All retries failed -- Agent 1 re-decide
+                if tracker.can_start_new_round:
+                    logger.info(f"[msg] agent1: re-decide after failures")
+                    drive_result = self._inner_drive.re_decide(user_input, tracker.failure_log)
+                else:
+                    break
+            else:
                 break
 
-            # Round exhausted -- ask Agent 1 to re-decide
-            if tracker.can_start_new_round:
-                logger.info(f"[msg] agent1: re-decide after {len(tracker.failure_log)} failures")
-                drive_result = self._inner_drive.re_decide(user_input, tracker.failure_log)
-                if not drive_result.needs_external_tools:
-                    logger.info("[msg] agent1: gave up after failures")
-                    break
-
-        tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
+        # Build final combined tool records for Agent 3
+        parts = []
+        for r in all_tool_results:
+            part = self._tool_agent.format_for_phase2(r)
+            if part:
+                parts.append(part)
+        tool_records = "\n".join(parts)
         if tool_records:
-            logger.info(
-                f"[msg] agent2: complete -- {tool_result.total_calls} calls, "
-                f"{tool_result.success_count} ok, "
-                f"{tool_result.total_calls - tool_result.success_count} failed"
-            )
+            total = sum(r.total_calls for r in all_tool_results)
+            ok = sum(r.success_count for r in all_tool_results)
+            logger.info(f"[msg] agent2: {len(all_tool_results)} rounds, {total} calls, {ok} ok")
 
         # ── Agent 3: Emotional expression ──
         return self._run_agent3(user_input, drive_result, tool_result, on_token=on_token)
