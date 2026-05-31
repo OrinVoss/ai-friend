@@ -73,21 +73,24 @@ class InnerDriveAgent:
         logger.info(f"[inner_drive] start len={len(user_input)}")
 
         for _idx in range(self._max_iterations):
+            logger.debug(f"[inner_drive] iter={_idx+1}/{self._max_iterations}")
             resp = self._provider.generate(messages, stream=False, max_tokens=512)
             cleaned, calls = parse_tool_calls(resp)
 
             if not calls:
-                # No more tool calls -- parse the decision from cleaned text
                 result = self._parse_decision(cleaned)
                 logger.info(
                     f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
-                    f"reason={result.reasoning[:80]}"
+                    f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
                 )
                 return result
 
-            # Agent 1 called internal tools (recall/remember) -- execute and continue
+            # Internal tools called (recall/remember)
+            logger.info(f"[inner_drive] internal tools: {[c['name'] for c in calls]}")
             messages.append({"role": "assistant", "content": resp})
             results = execute_tool_calls(self._full_registry, calls)
+            success_count = sum(1 for r in results if r["success"])
+            logger.info(f"[inner_drive] internal done: {success_count}/{len(results)} ok")
             result_text = self._format_internal_results(results)
             messages.append({"role": "user", "content": result_text})
 

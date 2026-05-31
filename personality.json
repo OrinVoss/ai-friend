@@ -25,39 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.02324387867687171,
-    "arousal": 0.8514425295150023,
-    "baseline_valence": -0.2312895183325978,
-    "baseline_arousal": 0.9851133907062909,
+    "valence": 0.19813063755917926,
+    "arousal": 0.8934672849080717,
+    "baseline_valence": -0.2372751393486013,
+    "baseline_arousal": 0.9846688877889233,
     "decay_rate": 0.05,
-    "mood_valence": -0.45099999999999996,
-    "mood_arousal": 0.9698999999999999,
+    "mood_valence": -0.4105,
+    "mood_arousal": 0.9733999999999999,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.23000688961913976,
-    "trust": 0.4910459844278609,
-    "fear": 0.03171066497870211,
-    "surprise": 0.10000638345932625,
-    "sadness": 0.08007984877640953,
-    "anticipation": 0.3244709128637751,
-    "anger": 0.062485877431012284,
-    "disgust": 0.10000000350964698,
-    "resentment": 0.136524495622848,
+    "joy": 0.3331363582272847,
+    "trust": 0.6486377419835961,
+    "fear": 0.02740140163951558,
+    "surprise": 0.16614904684914397,
+    "sadness": 0.06564599708593613,
+    "anticipation": 0.3948926610154309,
+    "anger": 0.05111498652985545,
+    "disgust": 0.10000000285071917,
+    "resentment": 0.12460222099359153,
     "emotion_events": [
-      {
-        "timestamp": 1780067464.1413534,
-        "trigger": "你在胡扯吧，你压根没调用工具",
-        "primary_emotion": "trusting",
-        "intensity": 0.7345798349808377,
-        "context": "你在胡扯吧，你压根没调用工具"
-      },
-      {
-        "timestamp": 1780067494.8254418,
-        "trigger": "我不是有诡异的文件夹吗",
-        "primary_emotion": "trusting",
-        "intensity": 0.7894992377540404,
-        "context": "我不是有诡异的文件夹吗"
-      },
       {
         "timestamp": 1780067536.1061058,
         "trigger": "额，你又在胡扯了",
@@ -183,6 +169,20 @@
         "primary_emotion": "anxious",
         "intensity": 0.604152884771214,
         "context": "读取啊"
+      },
+      {
+        "timestamp": 1780197400.3082418,
+        "trigger": "你猜哈哈哈哈",
+        "primary_emotion": "neutral",
+        "intensity": 0.6568987030826853,
+        "context": "你猜哈哈哈哈"
+      },
+      {
+        "timestamp": 1780197437.2149172,
+        "trigger": "你没有放歌",
+        "primary_emotion": "neutral",
+        "intensity": 0.6486377419835961,
+        "context": "你没有放歌"
       }
     ],
     "history": [
@@ -191,12 +191,12 @@
       "neutral",
       "neutral",
       "neutral",
-      "neutral",
-      "neutral",
-      "neutral",
       "anxious",
-      "anxious"
+      "anxious",
+      "anxious",
+      "neutral",
+      "neutral"
     ],
-    "dominant_emotion": "anxious"
+    "dominant_emotion": "neutral"
   }
 }
