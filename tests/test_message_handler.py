@@ -6,6 +6,16 @@ from core.message_handler import MessageHandler
 from tests.mocks import mock_tool_registry
 
 
+def _make_memory_mock():
+    """Create a mock MemoryContext with proper numeric relationship values."""
+    m = MagicMock()
+    m.facts = []
+    m.experiences = []
+    m.reflections = []
+    m.relationship = {"trust": 0.5, "familiarity": 0.5, "intimacy": 0.5, "playfulness": 0.5}
+    return m
+
+
 class TestMessageHandler(unittest.TestCase):
     def setUp(self):
         self.agent = MagicMock()
@@ -19,10 +29,18 @@ class TestMessageHandler(unittest.TestCase):
         self.agent._context.compress = MagicMock()
         self.agent.short_term.get_all_reversed.return_value = []
         self.agent.short_term.format_for_prompt.return_value = ""
-        self.agent.retriever.retrieve_for_query.return_value = MagicMock()
+        self.agent.short_term.get_all.return_value = []
+        self.agent.retriever.retrieve_for_query.return_value = _make_memory_mock()
         self.agent.ltm.repo.insert_turn = MagicMock()
         self.agent.personality.config.name = "TestBot"
         self.agent.personality.config.interests = ["music", "art"]
+        self.agent.personality.emotion.dominant_emotion = "neutral"
+        self.agent.personality.emotion.valence = 0.4
+        self.agent.personality.emotion.arousal = 0.5
+        self.agent.personality.emotion.resentment = 0.0
+        self.agent.personality.emotion.emotion_events = []
+        self.agent.personality.emotion.record_emotion_event = MagicMock()
+        self.agent.personality.config.traits = []
         self.agent.provider.generate.return_value = "NO_TOOLS"
         self.agent._react_loop.return_value = "Hello!"
         self.agent._pick_proactive_topic.return_value = "聊聊天气"

@@ -111,7 +111,7 @@ class Agent:
         return self._messages.handle_explore()
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
-                    tool_registry=None) -> str:
+                    tool_registry=None, skip_post_process: bool = False) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
         registry = tool_registry if tool_registry is not None else self._tool_registry
         max_tok = self._max_tokens_for_emotion()
@@ -166,13 +166,20 @@ class Agent:
         if final_text:
             if add_to_history:
                 self.short_term.add_turn("assistant", final_text)
-            self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text, str(self.personality.emotion.to_dict()))
+            self.ltm.repo.insert_turn(self.turn_count, "assistant", final_text,
+                                      str(self.personality.emotion.to_dict()))
             self.turn_count += 1
-        # Analyze USER input sentiment (not AI response), track consecutive hurt
+
+        if not skip_post_process:
+            self._process_emotion()
+        return final_text
+
+    def _process_emotion(self) -> None:
+        """Run sentiment analysis and emotional shift after a response."""
         sentiment, sharing, energy = 0.1, False, 0.5
+        last_user_turn = ""
         try:
             all_turns = self.short_term.get_all()
-            last_user_turn = ""
             for t in reversed(all_turns):
                 if t.role == "user":
                     last_user_turn = t.content
@@ -181,14 +188,11 @@ class Agent:
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning(f"Sentiment analysis parse error: {e}")
 
-        # Track consecutive insults for 破防 mechanism
         if sentiment < -0.5:
             self._consecutive_negative += 1
         elif sentiment > 0.1:
             self._consecutive_negative = max(0, self._consecutive_negative - 1)
-        # neutral: keep current count
 
-        # Amplify emotional damage based on consecutive attacks
         hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
         sentiment *= hurt_multiplier
         old_dom = self.personality.emotion.dominant_emotion
@@ -199,7 +203,6 @@ class Agent:
                         f"arousal={self.personality.emotion.arousal:.2f} sentiment={sentiment:+.2f} "
                         f"consec_neg={self._consecutive_negative}")
 
-        # Record significant emotion events
         self.personality.emotion.record_emotion_event(
             trigger=last_user_turn[:100] if last_user_turn else "",
             context=last_user_turn[:200] if last_user_turn else "",
@@ -210,8 +213,6 @@ class Agent:
                                           max_facts=self.config.max_facts,
                                           max_experiences=self.config.max_experiences,
                                           max_reflections=self.config.max_reflections)
-        # Personality save handled by _on_reflect (CLI) or WebAgent (Web)
-        return final_text
 
     # ── CLI run loop (delegate to CliController) ──
 

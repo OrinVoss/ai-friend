@@ -45,6 +45,27 @@ class ToolAgentResult:
         return self.success_count > 0
 
 
+@dataclass
+class ToolAttemptTracker:
+    """Track retry rounds: 3 rounds x 3 retries = max 9 attempts."""
+    round_number: int = 0
+    retry_count: int = 0
+    total_attempts: int = 0
+    failure_log: list[dict] = field(default_factory=list)
+
+    @property
+    def can_retry_in_round(self) -> bool:
+        return self.retry_count < 3
+
+    @property
+    def can_start_new_round(self) -> bool:
+        return self.round_number < 3 and self.total_attempts < 9
+
+    @property
+    def is_exhausted(self) -> bool:
+        return self.total_attempts >= 9
+
+
 class ToolAgent:
     """Phase 1 agent that ONLY calls external tools, no roleplay."""
 
@@ -115,6 +136,89 @@ class ToolAgent:
             )
         else:
             logger.debug(f"[tool_agent] no tools needed ({result.elapsed_ms:.0f}ms)")
+        return result
+
+    def run_with_request(self, tool_request: str, max_retries: int = 3) -> ToolAgentResult:
+        """Run Agent 2: receive natural language tool request, parse and execute.
+
+        Retries up to max_retries times within a single round.
+        Caller handles the round-level loop (Agent 1 re-decide).
+        """
+        from prompts.system import build_tool_agent_prompt
+        from core.dispatcher import parse_tool_calls, execute_tool_calls
+
+        t0 = time.time()
+        result = ToolAgentResult()
+
+        if not self._registry.list_specs():
+            return result
+
+        logger.info(f"[tool_agent] request len={len(tool_request)}")
+        sys_prompt = build_tool_agent_prompt(self._registry)
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": (
+                f"Agent 1 的内驱推理请求：\n{tool_request}\n\n"
+                "请根据以上请求，输出 <tool_call> XML 标签来调用对应工具。"
+            )},
+        ]
+
+        last_failure = None
+        for attempt in range(1, max_retries + 1):
+            if attempt > 1:
+                logger.info(f"[tool_agent] retry {attempt}/{max_retries}")
+                # Reset messages for retry -- only keep system + request, fresh attempt
+                messages = [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": (
+                        f"Agent 1 的内驱推理请求：\n{tool_request}\n\n"
+                        f"之前的尝试失败了（{last_failure}）。"
+                        "请调整方式后重新输出 <tool_call>。"
+                    )},
+                ]
+
+            resp = self._provider.generate(messages, stream=False, max_tokens=512)
+            cleaned, calls = parse_tool_calls(resp)
+            if not calls:
+                # Try parsing the response as a direct instruction
+                logger.debug("[tool_agent] no tool calls parsed from response")
+                continue
+
+            messages.append({"role": "assistant", "content": resp})
+            results = execute_tool_calls(self._registry, calls)
+
+            round_records = []
+            for r in results:
+                record = ToolCallRecord(
+                    name=r["name"],
+                    arguments={},
+                    success=r["success"],
+                    output=r["output"][:3000],
+                )
+                round_records.append(record)
+                result.records.append(record)
+                result.total_calls += 1
+                if r["success"]:
+                    result.success_count += 1
+
+            result_text = _format_raw_results(results)
+            messages.append({"role": "user", "content": result_text})
+
+            if result.any_success:
+                break
+
+            last_failure = "; ".join(
+                r["output"][:100] for r in results if not r["success"]
+            )
+
+        result.elapsed_ms = (time.time() - t0) * 1000
+        if result.has_results:
+            logger.info(
+                f"[tool_agent] done: {result.total_calls} calls, "
+                f"{result.success_count} ok, "
+                f"{len(result.records) - result.success_count} failed, "
+                f"{result.elapsed_ms:.0f}ms"
+            )
         return result
 
     def format_for_phase2(self, result: ToolAgentResult) -> str:

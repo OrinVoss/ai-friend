@@ -19,6 +19,85 @@ CONTEXT_COMPRESS_PROMPT = """请将以下对话压缩为一段简洁的对话历
 """
 
 
+def build_inner_drive_prompt(
+    personality: PersonalityConfig,
+    emotion: EmotionalState,
+    memory_context: MemoryContext,
+    conversation_history: str,
+    tools=None,
+) -> str:
+    """Agent 1: Inner drive reasoning prompt -- assess what the AI needs to do."""
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
+    e = emotion
+    blocks = []
+
+    # Time
+    blocks.append(f"当前时间：{now}")
+
+    # Self-awareness
+    blocks.append(
+        f"=== 你对自己的认知 ===\n"
+        f"你是{personality.name}，一个 AI 朋友。\n"
+        f"你的核心特质：{format_traits(personality.traits)}\n"
+        f"你现在的情绪：{e.dominant_emotion}（效价 {e.valence:+.2f}，唤醒度 {e.arousal:.2f}）\n"
+        f"你和用户的关系：信任 {memory_context.relationship.get('trust', 0.3):.1f}，"
+        f"熟悉度 {memory_context.relationship.get('familiarity', 0.3):.1f}"
+    )
+
+    # User awareness
+    if memory_context.facts:
+        blocks.append("=== 你了解的关于用户的事情 ===")
+        for f in memory_context.facts[:8]:
+            blocks.append(f"- {f.fact_key}: {f.fact_value}")
+
+    if memory_context.experiences:
+        blocks.append("=== 你们的共同回忆 ===")
+        for exp in memory_context.experiences[:3]:
+            blocks.append(f"- [{exp.emotional_tone}] {exp.summary}")
+
+    # Inner drive -- the core reasoning instruction
+    blocks.append(
+        "=== 内驱推理 ==="
+        "\n你不是在被动等待指令。你需要主动判断："
+        "\n1. 用户说了什么？有什么隐含需求？"
+        "\n2. 有什么信息是你不知道但应该知道的？"
+        "\n3. 为了更好回应用户，你需要什么外部信息？"
+        "\n\n决策流程："
+        "\n- 如果需要回忆用户信息，先调用 recall 工具检索记忆"
+        "\n- 判断是否需要外部工具："
+        "\n  · web_fetch：用户提供了链接需要查看内容"
+        "\n  · web_search：用户问到了你不知道的最新信息"
+        "\n  · read_file/glob/grep：用户提到了文件需要读取"
+        "\n  · music_play：用户想听音乐"
+        "\n  · notify：用户需要提醒"
+        "\n\n输出格式（严格遵守）："
+        "\n如果不需要外部工具："
+        '\n  决策：不需要外部工具'
+        "\n  理由：（一句话说明为什么不需要）"
+        "\n\n如果需要外部工具："
+        "\n  决策：需要外部工具"
+        "\n  理由：（为什么要获取这个信息）"
+        "\n  工具请求："
+        "\n    需要调用 [工具名] [具体描述]"
+        "\n    参数：[参数名] = [参数值]"
+    )
+
+    # Tools available
+    if tools:
+        from tools.traits import ToolRegistry
+        if isinstance(tools, ToolRegistry):
+            specs = tools.format_for_prompt()
+            if specs:
+                blocks.append(f"=== 可用工具 ===\n{specs}")
+
+    # Recent conversation
+    blocks.append("=== 最近对话 ===")
+    blocks.append(conversation_history or "（还没有对话）")
+
+    return "\n\n".join(blocks)
+
+
 def build_tool_agent_prompt(tool_registry) -> str:
     """Phase 1: Minimal prompt for pure tool-calling agent -- no personality."""
     return (
@@ -54,6 +133,7 @@ def build_system_prompt(
     tools=None,
     consecutive_negative: int = 0,
     tool_records: str = "",
+    inner_drive_summary: str = "",
     **kwargs,
 ) -> str:
     from datetime import datetime
@@ -66,6 +146,12 @@ def build_system_prompt(
     # Block 1: Phase 1 tool results (injected first so model can't miss them)
     if tool_records:
         blocks.append(tool_records)
+
+    # Block 1b: Inner drive summary (Agent 1's reasoning)
+    if inner_drive_summary:
+        blocks.append(
+            f"=== 你之前的判断 ===\n{inner_drive_summary}"
+        )
 
     # Block 2: Identity
     blocks.append(

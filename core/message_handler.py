@@ -1,10 +1,8 @@
-"""Message entry points: process_message, process_proactive, process_explore.
+"""Three-layer Agent orchestration.
 
-Two-phase architecture:
-  Phase 1 (ToolAgent) -- pure tool calling, no personality
-  Phase 2 (Roleplay)   -- personality + emotion + memory + tool results
-
-Used by both Web path (web/server.py -> WebAgent) and CLI path (main.py -> Agent.run).
+Agent 1 (InnerDrive) -- assess intent, decide if external tools needed
+Agent 2 (ToolAgent)  -- execute external tools with retry
+Agent 3 (Roleplay)   -- personality-driven final response
 """
 
 import logging
@@ -17,18 +15,31 @@ logger = logging.getLogger(__name__)
 
 
 class MessageHandler:
-    """Handles incoming messages with two-phase tool-then-roleplay pipeline."""
+    """Orchestrates the three-Agent pipeline."""
 
     def __init__(self, agent):
         self._agent = agent
-        self._tool_agent = None  # lazy init after tool registry is populated
+        self._tool_agent = None  # lazy init
+        self._inner_drive = None  # lazy init
 
     @property
     def a(self):
         return self._agent
 
+    def _ensure_inner_drive(self):
+        if self._inner_drive is None:
+            from core.inner_drive import InnerDriveAgent
+            a = self.a
+            self._inner_drive = InnerDriveAgent(
+                provider=a.provider,
+                personality=a.personality,
+                ltm=a.ltm,
+                retriever=a.retriever,
+                short_term=a.short_term,
+                tool_registry=a._tool_registry,
+            )
+
     def _ensure_tool_agent(self):
-        """Lazy-init ToolAgent after tool_registry is populated."""
         if self._tool_agent is None:
             from core.tool_agent import ToolAgent
             self._tool_agent = ToolAgent(
@@ -37,7 +48,6 @@ class MessageHandler:
             )
 
     def _make_internal_registry(self):
-        """Create a registry with only recall and remember for Phase 2."""
         from tools.traits import ToolRegistry
         r = ToolRegistry()
         for name in ("recall", "remember"):
@@ -55,45 +65,73 @@ class MessageHandler:
             return random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
-
-        idle = time.time() - a.last_activity_time
         a.current_input = user_input
         a.last_activity_time = time.time()
         a.short_term.add_turn("user", user_input)
 
-        # ── Phase 1: Run tool agent for external tool execution ──
+        # ── Agent 1: Inner Drive ──
+        self._ensure_inner_drive()
+        drive_result = self._inner_drive.assess(user_input)
+
+        if not drive_result.needs_external_tools:
+            # No external tools needed → straight to Agent 3
+            logger.info(f"[msg] agent1: no external tools needed")
+            return self._run_agent3(user_input, drive_result, tool_result=None,
+                                   on_token=on_token)
+
+        # ── Agent 2: Tool execution with retry loop ──
         self._ensure_tool_agent()
-        tool_result = self._tool_agent.run(user_input)
-        tool_records = self._tool_agent.format_for_phase2(tool_result)
-        if tool_result.has_results:
+        from core.tool_agent import ToolAttemptTracker
+
+        tracker = ToolAttemptTracker()
+        tool_result = None
+        tool_records = ""
+
+        while not tracker.is_exhausted:
+            tracker.round_number += 1
+            tracker.retry_count = 0
+
+            # Get the primary tool request (or first if multiple)
+            request_text = drive_result.tool_requests[0].description if drive_result.tool_requests else user_input
+            logger.info(f"[msg] agent2: round {tracker.round_number}, request={request_text[:80]}")
+
+            # Agent 2 executes
+            tool_result = self._tool_agent.run_with_request(request_text)
+            tracker.total_attempts += 1
+            track_failures(tracker, tool_result)
+
+            if tool_result.any_success:
+                break
+
+            # In-round retries
+            while tracker.can_retry_in_round and not tool_result.any_success:
+                tracker.retry_count += 1
+                logger.info(f"[msg] agent2: retry {tracker.retry_count}/3 in round {tracker.round_number}")
+                tool_result = self._tool_agent.run_with_request(request_text)
+                tracker.total_attempts += 1
+                track_failures(tracker, tool_result)
+
+            if tool_result.any_success:
+                break
+
+            # Round exhausted -- ask Agent 1 to re-decide
+            if tracker.can_start_new_round:
+                logger.info(f"[msg] agent1: re-decide after {len(tracker.failure_log)} failures")
+                drive_result = self._inner_drive.re_decide(user_input, tracker.failure_log)
+                if not drive_result.needs_external_tools:
+                    logger.info("[msg] agent1: gave up after failures")
+                    break
+
+        tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
+        if tool_records:
             logger.info(
-                f"[msg] phase1: {tool_result.total_calls} tools, "
+                f"[msg] agent2: complete -- {tool_result.total_calls} calls, "
                 f"{tool_result.success_count} ok, "
                 f"{tool_result.total_calls - tool_result.success_count} failed"
             )
 
-        # ── Phase 2: Build roleplay prompt with tool results ──
-        mem_ctx = a.retriever.retrieve_for_query(user_input)
-        a.current_memory_context = mem_ctx
-        a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
-        conv_hist = a.short_term.format_for_prompt(max_chars=3000)
-        sys_prompt = build_system_prompt(
-            personality=a.personality.config, emotion=a.personality.emotion,
-            memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary,
-            tools=a._tool_registry,
-            consecutive_negative=a._consecutive_negative,
-            tool_call_history=a._tool_call_history,
-            idle_duration=idle,
-            tool_records=tool_records,
-        )
-        messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
-        # Phase 2: use filtered registry (recall/remember only) if Phase 1 ran
-        phase2_registry = None
-        if tool_records:
-            phase2_registry = self._make_internal_registry()
-        return a._react_loop(messages, on_token, add_to_history=True,
-                            tool_registry=phase2_registry)
+        # ── Agent 3: Emotional expression ──
+        return self._run_agent3(user_input, drive_result, tool_result, on_token=on_token)
 
     def handle_proactive(self, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -120,9 +158,8 @@ class MessageHandler:
         topic = a._pick_proactive_topic()
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
 
-        # Phase 1: Let tool agent explore freely
         self._ensure_tool_agent()
-        explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容，或者浏览网页。你可以用 web_search 和 web_fetch。"
+        explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容。用 web_search 和 web_fetch。"
         tool_result = self._tool_agent.run(explore_prompt)
         tool_records = self._tool_agent.format_for_phase2(tool_result)
 
@@ -138,17 +175,12 @@ class MessageHandler:
         )
         messages = self._build_messages(sys_prompt, user_input=None)
         interests = getattr(a.personality.config, 'interests', [])
-        interest_hint = ""
         if interests:
             picked = random.sample(interests, min(2, len(interests)))
-            interest_hint = f"可以看看关于{'/'.join(picked)}的内容。"
-        messages.append({
-            "role": "user",
-            "content": (
-                f"[自由探索] 系统已自动获取了一些内容（见上文）。{interest_hint}"
-                "如果发现特别有意思的，分享出来；实在没意思就说没啥。"
-            )
-        })
+            messages.append({
+                "role": "user",
+                "content": f"[自由探索] 系统已获取了一些内容。关于{'/'.join(picked)}，有特别的就分享。"
+            })
         logger.info(f"[explore] start: topic={topic}")
         phase2_registry = self._make_internal_registry() if tool_records else None
         result = a._react_loop(messages, on_token=None, add_to_history=False,
@@ -159,8 +191,36 @@ class MessageHandler:
         logger.debug(f"[explore] silent: result={result[:80] if result else 'None'}")
         return None
 
+    def _run_agent3(self, user_input: str, drive_result, tool_result,
+                    on_token=None) -> str:
+        """Run Agent 3: emotional expression with inner drive + tool results."""
+        from prompts.system import build_system_prompt
+        a = self.a
+
+        mem_ctx = a.retriever.retrieve_for_query(user_input)
+        a.current_memory_context = mem_ctx
+        a.ltm.repo.insert_turn(a.turn_count, "user", user_input,
+                               str(a.personality.emotion.to_dict()))
+
+        conv_hist = a.short_term.format_for_prompt(max_chars=3000)
+        tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
+
+        sys_prompt = build_system_prompt(
+            personality=a.personality.config, emotion=a.personality.emotion,
+            memory_context=mem_ctx, conversation_history=conv_hist,
+            compressed_summary=a._context.compressed_summary,
+            tools=a._tool_registry,
+            consecutive_negative=a._consecutive_negative,
+            tool_call_history=a._tool_call_history,
+            tool_records=tool_records,
+            inner_drive_summary=drive_result.summary if drive_result else "",
+        )
+        messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
+        phase2_registry = self._make_internal_registry() if tool_records else None
+        return a._react_loop(messages, on_token, add_to_history=True,
+                            tool_registry=phase2_registry)
+
     def _build_messages(self, sys_prompt: str, user_input: str | None) -> list[dict]:
-        """Common message assembly: system prompt + history + user message + overflow handling."""
         a = self.a
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
@@ -178,3 +238,13 @@ class MessageHandler:
                 a._context.compress(messages)
             messages.append({"role": "user", "content": user_input})
         return messages
+
+
+def track_failures(tracker, tool_result):
+    """Record failures from a tool execution round."""
+    for r in tool_result.records:
+        if not r.success:
+            tracker.failure_log.append({
+                "name": r.name,
+                "output": r.output[:200],
+            })

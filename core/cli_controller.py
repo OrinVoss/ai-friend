@@ -18,8 +18,20 @@ class CliController:
 
     def __init__(self, agent):
         self._agent = agent  # Agent instance, used to access all shared state
-        self._tool_agent = None  # lazy init after tool registry is populated
-        self._tool_records = ""  # Phase 1 results for current turn
+        self._tool_agent = None  # lazy init
+        self._inner_drive = None  # lazy init
+        self._tool_records = ""  # Agent 2 results for current turn
+        self._inner_drive_result = None  # Agent 1 result for current turn
+
+    def _ensure_inner_drive(self):
+        if self._inner_drive is None:
+            from core.inner_drive import InnerDriveAgent
+            a = self.a
+            self._inner_drive = InnerDriveAgent(
+                provider=a.provider, personality=a.personality,
+                ltm=a.ltm, retriever=a.retriever, short_term=a.short_term,
+                tool_registry=a._tool_registry,
+            )
 
     def _ensure_tool_agent(self):
         if self._tool_agent is None:
@@ -116,13 +128,10 @@ class CliController:
         a.current_memory_context = a.retriever.retrieve_for_query(user_input)
         a.ltm.repo.insert_turn(a.turn_count, "user", user_input, str(a.personality.emotion.to_dict()))
 
-        # Phase 1: Run tool agent for external tool execution
-        self._ensure_tool_agent()
+        # Agent 1: Inner drive reasoning
+        self._ensure_inner_drive()
+        self._inner_drive_result = self._inner_drive.assess(user_input)
         self._tool_records = ""
-        tool_result = self._tool_agent.run(user_input)
-        if tool_result.has_results:
-            self._tool_records = self._tool_agent.format_for_phase2(tool_result)
-
         a.state = AgentState.THINK
 
     def _on_think(self) -> None:
@@ -136,6 +145,18 @@ class CliController:
                 user_message = f"[主动开启对话] 主题方向：{a._pick_proactive_topic()}"
             else:
                 user_message = f"用户输入：{a.current_input or ''}"
+            # Agent 2: Run tools if Agent 1 decided they're needed
+            drive_result = getattr(self, '_inner_drive_result', None)
+            if drive_result and drive_result.needs_external_tools and not is_proactive:
+                self._ensure_tool_agent()
+                tool_result = self._tool_agent.run_with_request(
+                    drive_result.tool_requests[0].description
+                    if drive_result.tool_requests else user_message
+                )
+                if tool_result.has_results:
+                    self._tool_records = self._tool_agent.format_for_phase2(tool_result)
+
+            drive_summary = drive_result.summary if drive_result else ""
             sys_prompt = build_system_prompt(
                 personality=a.personality.config, emotion=a.personality.emotion,
                 memory_context=a.current_memory_context,
@@ -144,6 +165,7 @@ class CliController:
                 tools=a._tool_registry,
                 consecutive_negative=a._consecutive_negative,
                 tool_records=self._tool_records,
+                inner_drive_summary=drive_summary,
             )
             messages = [{"role": "system", "content": sys_prompt}]
             a._context.reset_estimate(estimate_tokens(sys_prompt))
@@ -249,6 +271,7 @@ class CliController:
             a.last_activity_time = time.time()
         a._reset_react()
         self._tool_records = ""
+        self._inner_drive_result = None
         a.state = AgentState.REFLECT
 
     def _on_reflect(self) -> None:
