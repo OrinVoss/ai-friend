@@ -115,6 +115,8 @@ class SessionManager:
         self.db: Database | None = None
         self.repo: Repository | None = None
         self._sessions: dict[str, WebAgent] = {}
+        self._proactive_tasks: dict[str, object] = {}  # sid → asyncio.Task
+        self._active_ws: dict[str, object] = {}  # sid → WebSocket
         self._lock = Lock()
 
     async def open(self):
@@ -135,7 +137,25 @@ class SessionManager:
     def remove(self, session_id: str) -> None:
         with self._lock:
             self._sessions.pop(session_id, None)
+            task = self._proactive_tasks.pop(session_id, None)
+            if task:
+                task.cancel()
+            self._active_ws.pop(session_id, None)
             logger.info(f"Session removed: {session_id}")
+
+    def register_proactive(self, session_id: str, task, websocket) -> None:
+        """Register or replace proactive task for a session. Cancels old task if exists."""
+        with self._lock:
+            old_task = self._proactive_tasks.pop(session_id, None)
+            if old_task:
+                old_task.cancel()
+            self._proactive_tasks[session_id] = task
+            self._active_ws[session_id] = websocket
+            logger.info(f"[session] proactive registered: {session_id}")
+
+    def get_active_ws(self, session_id: str):
+        """Get the currently active WebSocket for a session."""
+        return self._active_ws.get(session_id)
 
     def cleanup_old(self, max_sessions: int = 50) -> None:
         with self._lock:

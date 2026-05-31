@@ -132,6 +132,8 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
     sleep_cooldown = 0
     while True:
         try:
+            # Use the most recently active WebSocket for this session
+            active_ws = session_manager.get_active_ws(session_id) or websocket
             _, agent = session_manager.get_or_create(session_id)
             ag = agent.agent
 
@@ -143,7 +145,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                     ag.last_activity_time = time.time()
                     cooldown = 60
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
-                    await _send_segments(websocket, agent, msg, agent.emotion)
+                    await _send_segments(active_ws, agent, msg, agent.emotion)
                     if should_sleep:
                         loop = asyncio.get_event_loop()
                         await loop.run_in_executor(None, ag._generate_dream)
@@ -172,7 +174,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                 if response:
                     ag.last_activity_time = time.time()
                     cooldown = 12
-                    await _send_segments(websocket, agent, response, agent.emotion)
+                    await _send_segments(active_ws, agent, response, agent.emotion)
             await asyncio.sleep(15)
         except asyncio.CancelledError:
             break
@@ -186,7 +188,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info(f"[ws] accepted: {websocket.client.host}:{websocket.client.port}")
     session_id = None
-    proactive_task = None
 
     try:
         while True:
@@ -198,11 +199,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 sid = data.get("session_id")
                 session_id, agent = session_manager.get_or_create(sid)
                 logger.info(f"[ws] init session={session_id} sid_param={sid}")
-                if proactive_task:
-                    proactive_task.cancel()
-                proactive_task = asyncio.create_task(
-                    _proactive_loop(websocket, session_id)
-                )
+                # Register proactive task per-session (replaces old task if exists)
+                task = asyncio.create_task(_proactive_loop(websocket, session_id))
+                session_manager.register_proactive(session_id, task, websocket)
                 await websocket.send_text(json.dumps({
                     "type": "init_ok", "session_id": session_id,
                     "emotion": agent.emotion,
@@ -233,5 +232,5 @@ async def websocket_endpoint(websocket: WebSocket):
         except (WebSocketDisconnect, ConnectionError, RuntimeError):
             pass  # Client already disconnected, can't send error
     finally:
-        if proactive_task:
-            proactive_task.cancel()
+        if session_id:
+            session_manager.remove(session_id)
