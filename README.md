@@ -180,7 +180,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 
 - **上下文压缩** — 180K 上下文 80% 阈值自动压缩，有递归保护
 - **token 动态调整** — max_tokens 随情绪变化（excited 768, neutral 512, sad 256）
-- **会话管理** — session_id cookie 持久化，多标签页独立会话，短期记忆重启恢复
+- **会话管理** — session_id cookie 持久化，多标签页独立会话，短期记忆重启恢复。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
 - **环境变量安全** — API Key 支持 `DEEPSEEK_API_KEY` 环境变量，优先级高于 config.json
 
 ---

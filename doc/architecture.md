@@ -63,8 +63,8 @@ python web_main.py
     │
     └── Web: python web_main.py → FastAPI + WebSocket
               │
-              ├── web/server.py  (HTTP + WS + proactive_loop)
-              ├── web/session.py (SessionManager + WebAgent)
+              ├── web/server.py  (HTTP + WS + proactive_loop, 每个 session 仅一个活跃 loop)
+              ├── web/session.py (SessionManager + WebAgent + per-session proactive task/WS 追踪)
               └── web/static/    (HTML + CSS + JS)
     │
     ▼

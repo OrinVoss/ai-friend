@@ -25,39 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.2448180680007618,
-    "arousal": 0.9992038404370549,
-    "baseline_valence": -0.24852350655383582,
-    "baseline_arousal": 0.9842080406536866,
+    "valence": -0.2093399865064096,
+    "arousal": 0.9992182980123575,
+    "baseline_valence": -0.2515149087734145,
+    "baseline_arousal": 0.9845223006446783,
     "decay_rate": 0.05,
-    "mood_valence": -0.38980000000000004,
+    "mood_valence": -0.38530000000000003,
     "mood_arousal": 1.0,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.24286285295889035,
-    "trust": 0.6535943952907972,
-    "fear": 0.03293685573385582,
-    "surprise": 0.10206715771403575,
-    "sadness": 0.1634786370715577,
-    "anticipation": 0.3314072033113772,
-    "anger": 0.09935331518982075,
-    "disgust": 0.10000000100788144,
-    "resentment": 0.07890450461327682,
+    "joy": 0.2585403230455607,
+    "trust": 0.7118582174287783,
+    "fear": 0.03120276889137131,
+    "surprise": 0.10130222775868311,
+    "sadness": 0.1739418403639866,
+    "anticipation": 0.3125401753155354,
+    "anger": 0.10393609665101956,
+    "disgust": 0.10000000087741176,
+    "resentment": 0.07424124839063215,
     "emotion_events": [
-      {
-        "timestamp": 1780119804.6614676,
-        "trigger": "读取啊",
-        "primary_emotion": "anxious",
-        "intensity": 0.604152884771214,
-        "context": "读取啊"
-      },
-      {
-        "timestamp": 1780197400.3082418,
-        "trigger": "你猜哈哈哈哈",
-        "primary_emotion": "neutral",
-        "intensity": 0.6568987030826853,
-        "context": "你猜哈哈哈哈"
-      },
       {
         "timestamp": 1780197437.2149172,
         "trigger": "你没有放歌",
@@ -183,6 +169,20 @@
         "primary_emotion": "anxious",
         "intensity": 0.6535943952907972,
         "context": "你就读了这么少的歌吗"
+      },
+      {
+        "timestamp": 1780207626.957375,
+        "trigger": "你话好多啊",
+        "primary_emotion": "anxious",
+        "intensity": 0.6296897353774666,
+        "context": "你话好多啊"
+      },
+      {
+        "timestamp": 1780207707.1899042,
+        "trigger": "本地有什么我听什么",
+        "primary_emotion": "trusting",
+        "intensity": 0.7118582174287783,
+        "context": "本地有什么我听什么"
       }
     ],
     "history": [
@@ -192,11 +192,11 @@
       "trusting",
       "trusting",
       "trusting",
-      "trusting",
-      "trusting",
       "anxious",
-      "anxious"
+      "anxious",
+      "anxious",
+      "trusting"
     ],
-    "dominant_emotion": "anxious"
+    "dominant_emotion": "trusting"
   }
 }
