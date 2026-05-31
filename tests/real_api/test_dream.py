@@ -31,16 +31,24 @@ class TestRealDream(RealAPITestCase):
         cls.personality = Personality.load(cfg.personality_file)
 
     def test_generate_dream(self):
+        import tempfile
         from core.sleep_manager import SleepManager
-        sm = SleepManager(
-            sleep_state_file=":memory:",
-            personality=self.personality,
-            ltm=self.ltm,
-            provider=self.provider,
-        )
-        dream = sm.generate_dream()
-        self.assertIsInstance(dream, str)
-        self.assertGreater(len(dream), 0)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".sleep", delete=False) as f:
+            f.write("0")
+            tmp_path = f.name
+        try:
+            sm = SleepManager(
+                sleep_state_file=tmp_path,
+                personality=self.personality,
+                ltm=self.ltm,
+                provider=self.provider,
+            )
+            dream = sm.generate_dream()
+            self.assertIsInstance(dream, str)
+            self.assertGreater(len(dream), 0)
+        finally:
+            import os
+            os.unlink(tmp_path)
 
 
 if __name__ == "__main__":

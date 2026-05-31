@@ -118,7 +118,7 @@ class KimiProvider:
                     if not choices:
                         continue
                     delta = choices[0].get("delta", {})
-                    token = delta.get("content", "")
+                    token = delta.get("content") or ""
                     if token and on_token:
                         on_token(token)
                     full_response.append(token)
