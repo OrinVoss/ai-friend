@@ -53,7 +53,7 @@ main.py / web_main.py
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（33 用例）
+    ├── tests/ ───────────────── 单元测试（171 用例）
     │
     ├── storage/
     │   ├── database.py ───── SQLite 连接 + Schema + WAL 模式

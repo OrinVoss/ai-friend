@@ -289,8 +289,15 @@ ai-friend/
 │   ├── message-flow.md        消息流转流程
 │   └── milestones-and-issues.md 里程碑 + 90 issue
 │
-├── tests/                     单元测试（33 用例）
+├── tests/                     单元测试（171 用例）
 │   ├── mocks.py                Mock 工厂
+│   ├── test_emotional_state.py EmotionalState 测试（38 用例）
+│   ├── test_personality_core.py 人格核心测试（12 用例）
+│   ├── test_inner_drive.py     InnerDrive 测试（18 用例）
+│   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
+│   ├── test_dispatcher.py      工具调度测试（21 用例）
+│   ├── test_provider.py        Provider 测试（10 用例）
+│   ├── test_segmentation.py    分段推送测试（18 用例）
 │   ├── test_context_manager.py 上下文管理测试（12 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）

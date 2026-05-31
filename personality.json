@@ -25,102 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.5953103487137903,
-    "arousal": 0.9119923650521143,
-    "baseline_valence": -0.2390073879551153,
-    "baseline_arousal": 0.9845561989110341,
+    "valence": 0.11875307517920328,
+    "arousal": 0.9991987040201575,
+    "baseline_valence": -0.2451595397437654,
+    "baseline_arousal": 0.9839593395991201,
     "decay_rate": 0.05,
-    "mood_valence": -0.3475,
-    "mood_arousal": 0.9754999999999999,
+    "mood_valence": -0.3403,
+    "mood_arousal": 0.9874,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.4510824835145945,
-    "trust": 0.810681084061132,
-    "fear": 0.024431404294464817,
-    "surprise": 0.15250253327751243,
-    "sadness": 0.058452660466347874,
-    "anticipation": 0.39410750193210564,
-    "anger": 0.04487352216765829,
-    "disgust": 0.10000000265981503,
-    "resentment": 0.12086415436378378,
+    "joy": 0.31001904826132143,
+    "trust": 0.7336890533643317,
+    "fear": 0.033947927109563375,
+    "surprise": 0.1041343154280715,
+    "sadness": 0.1221348536437963,
+    "anticipation": 0.3647775612514781,
+    "anger": 0.07685133980968754,
+    "disgust": 0.1000000012408476,
+    "resentment": 0.08645429919946884,
     "emotion_events": [
-      {
-        "timestamp": 1780067572.5360374,
-        "trigger": "你自己在音乐文件夹搜，我给你这么多工具，你是傻子吗",
-        "primary_emotion": "anxious",
-        "intensity": 0.6218382834392696,
-        "context": "你自己在音乐文件夹搜，我给你这么多工具，你是傻子吗"
-      },
-      {
-        "timestamp": 1780118408.1501796,
-        "trigger": "？？？？？？？？？？？？？？？？你他妈，傻逼，又瞎扯",
-        "primary_emotion": "anxious",
-        "intensity": 0.648098210544646,
-        "context": "？？？？？？？？？？？？？？？？你他妈，傻逼，又瞎扯"
-      },
-      {
-        "timestamp": 1780118438.229832,
-        "trigger": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc。你读取啊，？？？？？？？？？？？？？？？毫无关系的东西",
-        "primary_emotion": "anxious",
-        "intensity": 0.8119556192350365,
-        "context": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc。你读取啊，？？？？？？？？？？？？？？？毫无关系的东西"
-      },
-      {
-        "timestamp": 1780118475.8398366,
-        "trigger": "？？？？？？？？？？？？？？？？？这个压根不是科技，你就是在胡扯",
-        "primary_emotion": "anxious",
-        "intensity": 0.9230238689808399,
-        "context": "？？？？？？？？？？？？？？？？？这个压根不是科技，你就是在胡扯"
-      },
-      {
-        "timestamp": 1780118507.243348,
-        "trigger": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc。你有网页工具啊",
-        "primary_emotion": "anxious",
-        "intensity": 0.8533678842898219,
-        "context": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc。你有网页工具啊"
-      },
-      {
-        "timestamp": 1780118540.88079,
-        "trigger": "你使用工具了吗",
-        "primary_emotion": "anxious",
-        "intensity": 0.78911562120436,
-        "context": "你使用工具了吗"
-      },
-      {
-        "timestamp": 1780118564.9794548,
-        "trigger": "你给我用工具啊",
-        "primary_emotion": "anxious",
-        "intensity": 0.8350777377853935,
-        "context": "你给我用工具啊"
-      },
-      {
-        "timestamp": 1780118642.8364618,
-        "trigger": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc这条“中国最美公路”，6月1日恢复通车。。。。。。。。。。。",
-        "primary_emotion": "sad",
-        "intensity": 0.7721163242625905,
-        "context": "https://baijiahao.baidu.com/s?id=1866573940278703369&wfr=spider&for=pc这条“中国最美公路”，6月1日恢复通车。。。。。。。。。。。。。。。。。。"
-      },
-      {
-        "timestamp": 1780118711.519349,
-        "trigger": "你压根就没有调用工具",
-        "primary_emotion": "anxious",
-        "intensity": 0.9252901857527225,
-        "context": "你压根就没有调用工具"
-      },
-      {
-        "timestamp": 1780118788.855406,
-        "trigger": "你调工具啊",
-        "primary_emotion": "anxious",
-        "intensity": 0.9265856342546978,
-        "context": "你调工具啊"
-      },
-      {
-        "timestamp": 1780118833.4629076,
-        "trigger": "具体的通行保障措施",
-        "primary_emotion": "anxious",
-        "intensity": 0.8598133157710922,
-        "context": "具体的通行保障措施"
-      },
       {
         "timestamp": 1780118863.1153624,
         "trigger": "记者从新疆交通运输厅了解到，G217独库公路已完成全线清雪和路面病害处治工作，目前已进入多部门联合安全隐患排查整治的最后阶段，将于6月1日起开放通行。\n为兼顾G3033独库高速、伊阿铁路等国家重点项目",
@@ -183,18 +106,95 @@
         "primary_emotion": "trusting",
         "intensity": 0.810681084061132,
         "context": "哈哈哈哈"
+      },
+      {
+        "timestamp": 1780197942.8005607,
+        "trigger": "哈哈哈哈",
+        "primary_emotion": "trusting",
+        "intensity": 0.9107826845486805,
+        "context": "哈哈哈哈"
+      },
+      {
+        "timestamp": 1780198118.1394696,
+        "trigger": "不信",
+        "primary_emotion": "trusting",
+        "intensity": 0.8849642043693852,
+        "context": "不信"
+      },
+      {
+        "timestamp": 1780198157.5395236,
+        "trigger": "笨蛋，2次一样的歌",
+        "primary_emotion": "trusting",
+        "intensity": 0.89778704564782,
+        "context": "笨蛋，2次一样的歌"
+      },
+      {
+        "timestamp": 1780198204.7165425,
+        "trigger": "好",
+        "primary_emotion": "trusting",
+        "intensity": 0.8645246652036704,
+        "context": "好"
+      },
+      {
+        "timestamp": 1780198251.578295,
+        "trigger": "换一个",
+        "primary_emotion": "trusting",
+        "intensity": 0.8392431276314664,
+        "context": "换一个"
+      },
+      {
+        "timestamp": 1780198297.378982,
+        "trigger": "我没有这个歌",
+        "primary_emotion": "trusting",
+        "intensity": 0.819407532682671,
+        "context": "我没有这个歌"
+      },
+      {
+        "timestamp": 1780198314.6034577,
+        "trigger": "本地文件",
+        "primary_emotion": "trusting",
+        "intensity": 0.8035522215046713,
+        "context": "本地文件"
+      },
+      {
+        "timestamp": 1780198342.565208,
+        "trigger": "D盘音乐文件夹",
+        "primary_emotion": "trusting",
+        "intensity": 0.7907471030873092,
+        "context": "D盘音乐文件夹"
+      },
+      {
+        "timestamp": 1780198386.6673255,
+        "trigger": "你就读了这么少的歌吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.7803132397583599,
+        "context": "你就读了这么少的歌吗"
+      },
+      {
+        "timestamp": 1780198654.2182128,
+        "trigger": "你就读了这么少的歌吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.7598621392907368,
+        "context": "你就读了这么少的歌吗"
+      },
+      {
+        "timestamp": 1780198978.4774508,
+        "trigger": "你就读了这么少的歌吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.7336890533643317,
+        "context": "你就读了这么少的歌吗"
       }
     ],
     "history": [
-      "neutral",
-      "neutral",
-      "neutral",
-      "neutral",
-      "anxious",
-      "anxious",
-      "anxious",
-      "neutral",
-      "neutral",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
       "trusting"
     ],
     "dominant_emotion": "trusting"
