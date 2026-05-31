@@ -1,9 +1,9 @@
+import asyncio
 import logging
 import os
-import sqlite3
-import threading
-from contextlib import contextmanager
-from typing import Generator
+from contextlib import asynccontextmanager
+
+import aiosqlite
 
 logger = logging.getLogger(__name__)
 
@@ -11,31 +11,42 @@ logger = logging.getLogger(__name__)
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._lock = threading.Lock()
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self.initialize()
-        logger.info(f"[db] opened: {db_path}")
+        self._lock = asyncio.Lock()
+        self.conn: aiosqlite.Connection | None = None
 
-    @contextmanager
-    def cursor(self) -> Generator[sqlite3.Cursor, None, None]:
-        with self._lock:
-            c = self.conn.cursor()
+    async def open(self) -> None:
+        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+        self.conn = await aiosqlite.connect(self.db_path)
+        self.conn.row_factory = aiosqlite.Row
+        await self.conn.execute("PRAGMA journal_mode=WAL")
+        await self.conn.execute("PRAGMA foreign_keys=ON")
+        await self.initialize()
+        logger.info(f"[db] opened: {self.db_path}")
+
+    @asynccontextmanager
+    async def cursor(self):
+        if self.conn is None:
+            raise RuntimeError("Database not opened. Call await db.open() first.")
+        async with self._lock:
+            c = await self.conn.cursor()
             try:
                 yield c
-                self.conn.commit()
-            except sqlite3.Error:
-                self.conn.rollback()
+                await self.conn.commit()
+            except aiosqlite.Error:
+                await self.conn.rollback()
                 raise
             finally:
-                c.close()
+                await c.close()
 
-    def initialize(self) -> None:
-        with self.cursor() as c:
-            c.executescript("""
+    def get_connection(self):
+        """Return connection for direct use (bulk operations). Caller must manage locking."""
+        if self.conn is None:
+            raise RuntimeError("Database not opened.")
+        return self.conn
+
+    async def initialize(self) -> None:
+        async with self.cursor() as c:
+            await c.executescript("""
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version INTEGER PRIMARY KEY,
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -104,12 +115,10 @@ class Database:
                     ('playfulness', 0.3);
             """)
 
-            # Schema migration: add columns only if they don't exist
             for table, column, col_type, default_val in [
                 ("user_facts", "importance", "REAL", "0.5"),
                 ("experiences", "importance", "REAL", "0.5"),
                 ("reflections", "is_active", "INTEGER", "1"),
-                # Semantic embedding columns (nullable blob for float32 vectors)
                 ("user_facts", "embedding", "BLOB", "NULL"),
                 ("user_facts", "embedding_version", "INTEGER", "0"),
                 ("experiences", "embedding", "BLOB", "NULL"),
@@ -117,12 +126,15 @@ class Database:
                 ("reflections", "embedding", "BLOB", "NULL"),
                 ("reflections", "embedding_version", "INTEGER", "0"),
             ]:
-                c.execute(f"PRAGMA table_info({table})")
-                columns = [row[1] for row in c.fetchall()]
+                await c.execute(f"PRAGMA table_info({table})")
+                rows = await c.fetchall()
+                columns = [row[1] for row in rows]
                 if column not in columns:
-                    c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
+                    await c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
                     logger.info(f"Schema migration: added {table}.{column}")
 
-    def close(self) -> None:
-        logger.info(f"[db] closed: {self.db_path}")
-        self.conn.close()
+    async def close(self) -> None:
+        if self.conn:
+            logger.info(f"[db] closed: {self.db_path}")
+            await self.conn.close()
+            self.conn = None

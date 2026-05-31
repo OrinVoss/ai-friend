@@ -112,10 +112,15 @@ class WebAgent:
 class SessionManager:
     def __init__(self, config: Config):
         self.config = config
-        self.db = Database(config.db_path)
-        self.repo = Repository(self.db)
+        self.db: Database | None = None
+        self.repo: Repository | None = None
         self._sessions: dict[str, WebAgent] = {}
         self._lock = Lock()
+
+    async def open(self):
+        self.db = Database(self.config.db_path)
+        await self.db.open()
+        self.repo = Repository(self.db)
 
     def get_or_create(self, session_id: Optional[str] = None) -> tuple[str, WebAgent]:
         with self._lock:

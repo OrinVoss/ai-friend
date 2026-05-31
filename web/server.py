@@ -21,6 +21,7 @@ session_manager = SessionManager(config)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Server starting...")
+    await session_manager.open()
     yield
     logger.info("Server shutting down...")
 

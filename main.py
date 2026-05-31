@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AI Friend — 一个有记忆和人格的 AI 朋友控制台应用。"""
 
+import asyncio
 import logging
 
 from config import load_config
@@ -24,7 +25,7 @@ from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
 
-def main():
+async def main():
     config = load_config()
     setup_logging(config.log_level)
     logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ def main():
 
     # Initialize storage
     db = Database(config.db_path)
+    await db.open()
     repo = Repository(db)
 
     # Initialize personality
@@ -114,4 +116,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

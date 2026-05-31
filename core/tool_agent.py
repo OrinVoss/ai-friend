@@ -103,6 +103,7 @@ class ToolAgent:
                 messages,
                 stream=False,
                 max_tokens=512,
+                response_format=self._registry.to_json_schema(),
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
@@ -155,11 +156,12 @@ class ToolAgent:
 
         logger.info(f"[tool_agent] request len={len(tool_request)}")
         sys_prompt = build_tool_agent_prompt(self._registry)
+        json_schema = self._registry.to_json_schema()
         messages = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": (
                 f"Agent 1 的内驱推理请求：\n{tool_request}\n\n"
-                "请根据以上请求，输出 <tool_call> XML 标签来调用对应工具。"
+                "请根据以上请求，输出 JSON 格式的工具调用。"
             )},
         ]
 
@@ -167,17 +169,17 @@ class ToolAgent:
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
                 logger.info(f"[tool_agent] retry {attempt}/{max_retries}")
-                # Reset messages for retry -- only keep system + request, fresh attempt
                 messages = [
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": (
                         f"Agent 1 的内驱推理请求：\n{tool_request}\n\n"
                         f"之前的尝试失败了（{last_failure}）。"
-                        "请调整方式后重新输出 <tool_call>。"
+                        "请调整方式后重新输出 JSON 格式的工具调用。"
                     )},
                 ]
 
-            resp = self._provider.generate(messages, stream=False, max_tokens=512)
+            resp = self._provider.generate(messages, stream=False, max_tokens=512,
+                                          response_format=json_schema)
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
                 # Try parsing the response as a direct instruction

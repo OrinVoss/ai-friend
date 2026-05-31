@@ -32,7 +32,8 @@ class KimiProvider:
     def generate(self, messages: list[dict],
                  stream: bool = True,
                  on_token: Optional[callable] = None,
-                 max_tokens: Optional[int] = None) -> str:
+                 max_tokens: Optional[int] = None,
+                 response_format: Optional[dict] = None) -> str:
         chat_url = f"{self.endpoint}/v1/chat/completions"
 
         payload = {
@@ -42,6 +43,9 @@ class KimiProvider:
             "temperature": self.temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
+
+        if response_format:
+            payload["response_format"] = response_format
 
         if self.reasoning_effort:
             payload["reasoning_effort"] = self.reasoning_effort

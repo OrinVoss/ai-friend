@@ -14,17 +14,24 @@ THINK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
 
 
 def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
-    """Parse LLM response, extract tool calls, return (cleaned_text, parsed_calls).
+    """Parse LLM response, extract tool calls.
 
-    Each parsed_call: {"name": str, "arguments": dict}
-    Strips <think>...</think> blocks and <tool_call>...</tool_call> from visible text.
+    Three-tier parsing:
+    1. Structured JSON with "calls" array (response_format json_object)
+    2. XML <tool_call> tags (legacy)
+    3. Bare JSON object fallback
     """
-    text = response
+    text = response.strip()
 
     # Strip <think> blocks
-    text = THINK_PATTERN.sub("", text)
+    text = THINK_PATTERN.sub("", text).strip()
 
-    # Extract <tool_call> blocks
+    # ── Tier 1: Structured JSON with "calls" array ──
+    calls = _try_structured_json(text)
+    if calls:
+        return "", calls
+
+    # ── Tier 2: Legacy XML <tool_call> tags ──
     calls = []
     remaining = text
     cleaned_parts = []
@@ -44,7 +51,6 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
             arguments = parsed.get("arguments", {})
             if not isinstance(arguments, dict):
                 arguments = {}
-            # Normalize argument field names
             arguments = _normalize_args(arguments)
             if name:
                 calls.append({"name": name, "arguments": arguments})
@@ -57,11 +63,10 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
 
     cleaned = "".join(cleaned_parts).strip()
 
-    # Fallback: try to parse entire response as bare JSON tool call
+    # ── Tier 3: Bare JSON object fallback ──
     if not calls:
-        trimmed = response.strip()
         try:
-            obj = json.loads(trimmed)
+            obj = json.loads(text)
             if isinstance(obj, dict):
                 name = obj.get("name") or obj.get("tool", "")
                 if name:
@@ -72,6 +77,33 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
             pass
 
     return cleaned, calls
+
+
+def _try_structured_json(text: str) -> list[dict]:
+    """Try parsing text as JSON with 'calls' array (structured output format)."""
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(obj, dict):
+        return []
+
+    raw_calls = obj.get("calls")
+    if not isinstance(raw_calls, list):
+        return []
+
+    parsed = []
+    for item in raw_calls:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name", "")
+        args = item.get("arguments", {})
+        if not isinstance(args, dict):
+            args = {}
+        if name:
+            parsed.append({"name": name, "arguments": _normalize_args(args)})
+    return parsed
 
 
 def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[dict]:
