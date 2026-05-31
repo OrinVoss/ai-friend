@@ -91,36 +91,5 @@ class ToolRegistry:
             tool_names.append(spec.name)
 
         return {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "tool_calls_output",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "calls": {
-                            "type": "array",
-                            "description": "List of tool calls to execute. Empty if no tools needed.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "enum": tool_names,
-                                        "description": "Tool name to call",
-                                    },
-                                    "arguments": {
-                                        "type": "object",
-                                        "description": "Arguments to pass to the tool",
-                                    },
-                                },
-                                "required": ["name", "arguments"],
-                                "additionalProperties": False,
-                            },
-                        }
-                    },
-                    "required": ["calls"],
-                    "additionalProperties": False,
-                },
-            },
+            "type": "json_object",
         }

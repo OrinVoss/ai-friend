@@ -229,16 +229,11 @@ class TestJSONSchema(unittest.TestCase):
 
     def test_schema_structure(self):
         schema = self.reg.to_json_schema(names=["web_search", "web_fetch"])
-        self.assertEqual(schema["type"], "json_schema")
-        self.assertIn("json_schema", schema)
-        props = schema["json_schema"]["schema"]["properties"]
-        self.assertIn("calls", props)
+        self.assertEqual(schema["type"], "json_object")
 
     def test_schema_filters_names(self):
         schema = self.reg.to_json_schema(names=["web_search"])
-        items = schema["json_schema"]["schema"]["properties"]["calls"]["items"]
-        enum = items["properties"]["name"]["enum"]
-        self.assertEqual(enum, ["web_search"])
+        self.assertEqual(schema["type"], "json_object")
 
 
 if __name__ == "__main__":
