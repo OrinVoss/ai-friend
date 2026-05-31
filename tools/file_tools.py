@@ -23,7 +23,8 @@ def _is_binary(filepath: str) -> bool:
         with open(filepath, "rb") as f:
             chunk = f.read(1024)
         return b"\x00" in chunk
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Binary check failed for {path}: {e}")
         return False
 
 
@@ -42,7 +43,8 @@ def _get_allowed_roots() -> list[str]:
         if project not in paths:
             paths.append(project)
         return paths
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Config load failed for allowed roots, using project fallback: {e}")
         return [os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))]
 
 
@@ -53,8 +55,9 @@ def _path_in_allowed(filepath: str) -> str | None:
         try:
             if resolved.startswith(os.path.abspath(root)):
                 return resolved
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Path check failed for root {root}: {e}")
+            continue
     return None
 
 

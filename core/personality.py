@@ -92,7 +92,8 @@ class Personality:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to load personality from {path}: {e}")
             return cls(PersonalityConfig())
 
         p_data = data.get("personality", data)

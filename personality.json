@@ -25,32 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.09499938903980468,
-    "arousal": 0.9992703631649285,
-    "baseline_valence": -0.2615516592313138,
-    "baseline_arousal": 0.9855531906655823,
+    "valence": 0.16694683662624876,
+    "arousal": 0.9992776595332791,
+    "baseline_valence": -0.26234814263900064,
+    "baseline_arousal": 0.9856976587589266,
     "decay_rate": 0.05,
-    "mood_valence": -0.3412,
+    "mood_valence": -0.3277,
     "mood_arousal": 1.0,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.27079085563004707,
-    "trust": 0.6986865369884676,
-    "fear": 0.02499392101479886,
-    "surprise": 0.10025839471425448,
-    "sadness": 0.15822292875764227,
-    "anticipation": 0.2705403959850127,
-    "anger": 0.08840600010644388,
-    "disgust": 0.1000000005401103,
-    "resentment": 0.05998565507476545,
+    "joy": 0.259672739507698,
+    "trust": 0.6868932512123731,
+    "fear": 0.024774858124967596,
+    "surprise": 0.10020508802061528,
+    "sadness": 0.14437364738865582,
+    "anticipation": 0.27388341765140106,
+    "anger": 0.08035983047882017,
+    "disgust": 0.10000000050394073,
+    "resentment": 0.05818608542252249,
     "emotion_events": [
-      {
-        "timestamp": 1780198297.378982,
-        "trigger": "我没有这个歌",
-        "primary_emotion": "trusting",
-        "intensity": 0.819407532682671,
-        "context": "我没有这个歌"
-      },
       {
         "timestamp": 1780198314.6034577,
         "trigger": "本地文件",
@@ -183,11 +176,17 @@
         "primary_emotion": "neutral",
         "intensity": 0.6986865369884676,
         "context": "我要听《加州旅馆》，给我播放"
+      },
+      {
+        "timestamp": 1780210549.002262,
+        "trigger": "我要听《加州旅馆》，给我播放",
+        "primary_emotion": "neutral",
+        "intensity": 0.6868932512123731,
+        "context": "我要听《加州旅馆》，给我播放"
       }
     ],
     "history": [
       "anxious",
-      "anxious",
       "trusting",
       "anxious",
       "anxious",
@@ -195,7 +194,8 @@
       "anxious",
       "anxious",
       "anxious",
-      "trusting"
+      "trusting",
+      "neutral"
     ],
     "dominant_emotion": "neutral"
   }

@@ -26,15 +26,16 @@ class SleepManager:
         try:
             with open(self._sleep_state_file) as f:
                 return f.read().strip() == "1"
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to read sleep state: {e}")
             return False
 
     def _save_sleep_state(self) -> None:
         try:
             with open(self._sleep_state_file, "w") as f:
                 f.write("1" if self._sleeping else "0")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to save sleep state: {e}")
 
     def get_sleep_state(self) -> tuple[bool, str | None]:
         """Check if AI should sleep/wake. Returns (should_sleep, wake_message_or_None)."""
