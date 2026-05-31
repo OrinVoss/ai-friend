@@ -48,8 +48,15 @@ class WebAgent:
         def llm_gen(prompt, temperature=0.2):
             return self.provider.generate([{"role": "user", "content": prompt}], stream=False)
 
-        self.retriever = MemoryRetriever(self.ltm)
-        self.consolidator = MemoryConsolidator(self.ltm, llm_gen)
+        from memory.embeddings import EmbeddingEngine
+        embed_engine = EmbeddingEngine(
+            endpoint=config.embedding_endpoint,
+            dim=config.embedding_dim,
+        )
+
+        self.retriever = MemoryRetriever(self.ltm, embedding_engine=embed_engine)
+        self.consolidator = MemoryConsolidator(self.ltm, llm_gen,
+                                                embedding_engine=embed_engine)
 
         registry = ToolRegistry()
         registry.register(RecallTool(self.retriever, self.ltm))

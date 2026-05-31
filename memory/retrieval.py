@@ -1,6 +1,8 @@
-import re
 import logging
+import re
 from typing import Optional
+
+import numpy as np
 
 from models.conversation import MemoryContext
 from models.memory import UserFact
@@ -11,14 +13,16 @@ logger = logging.getLogger(__name__)
 
 class MemoryRetriever:
     """Three-layer memory retrieval:
-    Layer 1: Hot Memory — always included (high-score facts, recent experiences)
-    Layer 2: Query-guided — keyword filter + optional LLM reranking
-    Layer 3: On-demand — triggered by "[回忆: xxx]" syntax
+    Layer 1: Hot Memory -- always included (high-score facts, recent experiences)
+    Layer 2: Hybrid Search -- semantic (0.6) + keyword (0.4) with optional LLM rerank
+    Layer 3: On-demand -- triggered by "[回忆: xxx]" syntax
     """
 
-    def __init__(self, long_term: LongTermMemory, llm_rerank_fn: Optional[callable] = None):
+    def __init__(self, long_term: LongTermMemory, llm_rerank_fn: Optional[callable] = None,
+                 embedding_engine=None):
         self.ltm = long_term
         self.llm_rerank_fn = llm_rerank_fn
+        self._embed = embedding_engine
 
     def retrieve_for_query(self, query: str) -> MemoryContext:
         """Layer 1 + Layer 2: build context for a user message."""
@@ -30,24 +34,29 @@ class MemoryRetriever:
         reflections = self.ltm.get_recent_reflections(limit=3)
         relationship = self.ltm.get_relationship()
 
-        # Layer 2 step A: keyword-based candidate filtering
+        # Layer 2: hybrid or keyword scoring
         keywords = self._extract_keywords(query)
-        scored_facts = self._score_facts(hot_facts, keywords, query)
+        if self._embed and self._embed.health_check():
+            candidates = self._hybrid_score(query, hot_facts, keywords)
+        else:
+            candidates = self._score_facts(hot_facts, keywords, query)
+        candidates = candidates[:30]
 
-        # Limit to top 30 candidates
-        candidates = scored_facts[:30]
-
-        # Layer 2 step B: LLM reranking if > 15 candidates
+        # LLM reranking if > 15 candidates
         if len(candidates) > 15 and self.llm_rerank_fn and query.strip():
             selected_indices = self._llm_rerank(query, candidates)
             if selected_indices is not None:
                 candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
 
-        # Keep top 10 facts
         selected_facts = candidates[:10]
 
-        # Search experiences by keywords
-        keyword_experiences = self.ltm.search_experiences(keywords, limit=5)
+        # Search experiences (semantic if available)
+        if self._embed and self._embed.health_check():
+            keyword_experiences = self._search_experiences_semantic(
+                query, recent_experiences, keywords
+            )
+        else:
+            keyword_experiences = self.ltm.search_experiences(keywords, limit=5)
         all_experiences = self._merge_unique_experiences(
             keyword_experiences, recent_experiences
         )[:5]
@@ -92,6 +101,82 @@ class MemoryRetriever:
             return m.group(1).strip()
         return None
 
+    # ── Hybrid scoring ──
+
+    def _hybrid_score(self, query: str, candidates: list, keywords: list) -> list:
+        """Hybrid scoring: semantic (0.6) + keyword (0.4)."""
+        SEMANTIC_WEIGHT = 0.6
+        KEYWORD_WEIGHT = 0.4
+
+        try:
+            query_vec = self._embed.encode_single(query)
+        except Exception as e:
+            logger.warning(f"[retrieval] embed failed, fallback to keyword: {e}")
+            return self._score_facts(candidates, keywords, query)
+
+        from memory.embeddings import EmbeddingEngine
+
+        scores = []
+        for c in candidates:
+            semantic = 0.0
+            if hasattr(c, 'embedding') and c.embedding is not None:
+                try:
+                    vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding))
+                    semantic = float(np.dot(vec, query_vec))
+                except Exception:
+                    pass
+
+            keyword = self._keyword_score_single(c, keywords, query)
+            final = semantic * SEMANTIC_WEIGHT + keyword * KEYWORD_WEIGHT
+            scores.append((c, final))
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+        return [c for c, _ in scores[:30]]
+
+    def _search_experiences_semantic(self, query: str, recent: list,
+                                     keywords: list) -> list:
+        """Semantic + keyword hybrid experience search."""
+        all_exp = self.ltm.search_experiences(keywords, limit=15)
+        combined = self._merge_unique_experiences(all_exp, recent)
+        if not combined or not self._embed:
+            return all_exp
+
+        try:
+            query_vec = self._embed.encode_single(query)
+        except Exception:
+            return all_exp
+
+        from memory.embeddings import EmbeddingEngine
+        scored = []
+        for exp in combined:
+            sim = 0.0
+            if hasattr(exp, 'embedding') and exp.embedding is not None:
+                try:
+                    vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding))
+                    sim = float(np.dot(vec, query_vec))
+                except Exception:
+                    pass
+            scored.append((exp, sim))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [exp for exp, _ in scored[:5]]
+
+    # ── Keyword scoring (existing, extracted for reuse) ──
+
+    @staticmethod
+    def _keyword_score_single(f: UserFact, keywords: list[str], query: str) -> float:
+        """Score a single fact by keyword match."""
+        score = f.composite_score * 0.2
+        score += f.importance * 0.3
+        keyword_hits = sum(1 for kw in keywords
+                           if kw in f.fact_key.lower()
+                           or kw in f.fact_value.lower()
+                           or kw in f.category.lower())
+        score += keyword_hits * 0.2
+        if any(kw == f.category for kw in keywords):
+            score += 0.2
+        score -= min(f.recall_count * 0.02, 0.3)
+        return max(0, score)
+
     @staticmethod
     def _extract_keywords(text: str) -> list[str]:
         words = re.findall(r'[\w一-鿿]+', text.lower())
@@ -106,37 +191,13 @@ class MemoryRetriever:
         return [w for w in words if w not in stopwords and len(w) > 1]
 
     @staticmethod
-    def _score_facts(facts: list[UserFact],
-                     keywords: list[str],
+    def _score_facts(facts: list[UserFact], keywords: list[str],
                      query: str) -> list[UserFact]:
+        """Pure keyword scoring (fallback when embedding is unavailable)."""
         scored = []
-        q_lower = query.lower()
-
         for f in facts:
-            score = f.composite_score * 0.2  # base: existing score
-
-            # importance boost (permanent info ranks higher)
-            score += f.importance * 0.3
-
-            # recency (simplified: composite_score already decays)
-            # keyword boost
-            keyword_hits = sum(1 for kw in keywords
-                               if kw in f.fact_key.lower()
-                               or kw in f.fact_value.lower()
-                               or kw in f.category.lower())
-            score += keyword_hits * 0.2
-
-            # category boost
-            if any(kw == f.category for kw in keywords):
-                score += 0.2
-
-            # recall penalty: prevent repeated same facts
-            recall_penalty = min(f.recall_count * 0.02, 0.3)
-            score -= recall_penalty
-
-            f.composite_score = max(0, score)
+            f.composite_score = MemoryRetriever._keyword_score_single(f, keywords, query)
             scored.append(f)
-
         scored.sort(key=lambda x: x.composite_score, reverse=True)
         return scored
 

@@ -18,20 +18,38 @@ class Repository:
 
     def upsert_fact(self, category: str, key: str, value: str,
                     confidence: float = 1.0, source_turn: Optional[int] = None,
-                    importance: float = 0.5) -> int:
+                    importance: float = 0.5,
+                    embedding: Optional[bytes] = None) -> int:
         logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f}")
         with self.db.cursor() as c:
-            c.execute("""
-                INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance, source_turn, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(category, fact_key) DO UPDATE SET
-                    fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
-                                     THEN excluded.fact_value ELSE user_facts.fact_value END,
-                    confidence = MAX(user_facts.confidence, excluded.confidence),
-                    importance = MAX(user_facts.importance, excluded.importance),
-                    recall_count = user_facts.recall_count + 1,
-                    updated_at = CURRENT_TIMESTAMP
-            """, (category, key, value, confidence, importance, source_turn))
+            if embedding is not None:
+                c.execute("""
+                    INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance,
+                                           source_turn, embedding, embedding_version, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(category, fact_key) DO UPDATE SET
+                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
+                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
+                        confidence = MAX(user_facts.confidence, excluded.confidence),
+                        importance = MAX(user_facts.importance, excluded.importance),
+                        recall_count = user_facts.recall_count + 1,
+                        embedding = excluded.embedding,
+                        embedding_version = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (category, key, value, confidence, importance, source_turn, embedding))
+            else:
+                c.execute("""
+                    INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance,
+                                           source_turn, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(category, fact_key) DO UPDATE SET
+                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
+                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
+                        confidence = MAX(user_facts.confidence, excluded.confidence),
+                        importance = MAX(user_facts.importance, excluded.importance),
+                        recall_count = user_facts.recall_count + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (category, key, value, confidence, importance, source_turn))
             return c.lastrowid
 
     def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
@@ -80,15 +98,16 @@ class Repository:
     def insert_experience(self, summary: str, tone: str, significance: float,
                           tags: list[str], turn_start: Optional[int] = None,
                           turn_end: Optional[int] = None,
-                          importance: float = 0.5) -> int:
+                          importance: float = 0.5,
+                          embedding: Optional[bytes] = None) -> int:
         logger.info(f"[db] insert_exp: {summary[:60]} tone={tone} sig={significance:.2f} imp={importance:.2f}")
         with self.db.cursor() as c:
             c.execute("""
                 INSERT INTO experiences (summary, emotional_tone, significance, importance, tags,
-                                         turn_range_start, turn_range_end)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                         turn_range_start, turn_range_end, embedding, embedding_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (summary, tone, significance, importance, json.dumps(tags, ensure_ascii=False),
-                  turn_start, turn_end))
+                  turn_start, turn_end, embedding))
             return c.lastrowid
 
     def search_experiences(self, keywords: list[str] | None = None,
@@ -134,13 +153,15 @@ class Repository:
     # ── Reflections ──
 
     def insert_reflection(self, content: str, insight_type: str,
-                          related_ids: list[int], significance: float) -> int:
+                          related_ids: list[int], significance: float,
+                          embedding: Optional[bytes] = None) -> int:
         logger.info(f"[db] insert_ref: type={insight_type} sig={significance:.2f} content={content[:60]}")
         with self.db.cursor() as c:
             c.execute("""
-                INSERT INTO reflections (content, insight_type, related_experience_ids, significance)
-                VALUES (?, ?, ?, ?)
-            """, (content, insight_type, json.dumps(related_ids), significance))
+                INSERT INTO reflections (content, insight_type, related_experience_ids, significance,
+                                         embedding, embedding_version)
+                VALUES (?, ?, ?, ?, ?, 1)
+            """, (content, insight_type, json.dumps(related_ids), significance, embedding))
             return c.lastrowid
 
     def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
@@ -151,6 +172,25 @@ class Repository:
                 LIMIT ?
             """, (limit,))
             return [self._row_to_reflection(r) for r in c.fetchall()]
+
+    def bulk_update_embeddings(self, table: str,
+                               updates: list[tuple[int, bytes]]):
+        """Batch update embedding vectors in a single transaction.
+
+        Args:
+            table: "user_facts" | "experiences" | "reflections"
+            updates: [(id, embedding_bytes), ...]
+        """
+        if not updates:
+            return
+        with self.db.get_connection() as conn:
+            c = conn.cursor()
+            c.executemany(
+                f"UPDATE {table} SET embedding = ?, embedding_version = 1 WHERE id = ?",
+                [(emb, rid) for rid, emb in updates],
+            )
+            conn.commit()
+            logger.debug(f"[db] bulk_embed: updated {len(updates)} rows in {table}")
 
     # ── Relationship ──
 

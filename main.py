@@ -63,9 +63,18 @@ def main():
         messages = [{"role": "user", "content": prompt}]
         return provider.generate(messages, stream=False)
 
+    # Initialize local embedding engine (optional, graceful degradation)
+    from memory.embeddings import EmbeddingEngine
+    embed_engine = EmbeddingEngine(
+        endpoint=config.embedding_endpoint,
+        dim=config.embedding_dim,
+    )
+
     # Initialize memory components
-    retriever = MemoryRetriever(ltm, llm_rerank_fn=llm_rerank)
-    consolidator = MemoryConsolidator(ltm, llm_generate)
+    retriever = MemoryRetriever(ltm, llm_rerank_fn=llm_rerank,
+                                embedding_engine=embed_engine)
+    consolidator = MemoryConsolidator(ltm, llm_generate,
+                                      embedding_engine=embed_engine)
 
     # Initialize UI
     ui = ConsoleInterface()

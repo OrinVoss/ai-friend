@@ -36,6 +36,10 @@ class Config:
         "~/Documents",
         "~/Downloads",
     ])
+    # Local embedding engine
+    embedding_endpoint: str = "http://localhost:8080/v1/embeddings"
+    embedding_dim: int = 512
+    embedding_cache_size: int = 1000
 
 
 CONFIG_PATH = "config.json"

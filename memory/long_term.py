@@ -15,9 +15,11 @@ class LongTermMemory:
     def store_fact(self, category: str, key: str, value: str,
                    confidence: float = 1.0,
                    source_turn: Optional[int] = None,
-                   importance: float = 0.5) -> int:
+                   importance: float = 0.5,
+                   embedding: Optional[bytes] = None) -> int:
         logger.debug(f"[mem] store_fact: {category}/{key}")
-        return self.repo.upsert_fact(category, key, value, confidence, source_turn, importance)
+        return self.repo.upsert_fact(category, key, value, confidence, source_turn,
+                                     importance, embedding)
 
     def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
         return self.repo.search_facts(query, limit)
@@ -28,10 +30,12 @@ class LongTermMemory:
     def store_experience(self, summary: str, tone: str, significance: float,
                          tags: list[str], turn_start: Optional[int] = None,
                          turn_end: Optional[int] = None,
-                         importance: float = 0.5) -> int:
+                         importance: float = 0.5,
+                         embedding: Optional[bytes] = None) -> int:
         logger.debug(f"[mem] store_exp: {summary[:50]} significance={significance:.2f}")
         return self.repo.insert_experience(summary, tone, significance,
-                                           tags, turn_start, turn_end, importance)
+                                           tags, turn_start, turn_end, importance,
+                                           embedding)
 
     def search_experiences(self, keywords: list[str] | None = None,
                            limit: int = 10) -> list[Experience]:
@@ -42,9 +46,10 @@ class LongTermMemory:
 
     def store_reflection(self, content: str, insight_type: str,
                          related_ids: list[int],
-                         significance: float = 0.5) -> int:
+                         significance: float = 0.5,
+                         embedding: Optional[bytes] = None) -> int:
         return self.repo.insert_reflection(content, insight_type,
-                                           related_ids, significance)
+                                           related_ids, significance, embedding)
 
     def get_recent_reflections(self, limit: int = 3) -> list[Reflection]:
         return self.repo.get_recent_reflections(limit)

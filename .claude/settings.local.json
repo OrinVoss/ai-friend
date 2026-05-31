@@ -17,7 +17,8 @@
       "Read(//c/Users/17040/.claude/**)",
       "Read(//d/.claude/**)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if 'skill' in k.lower\\(\\)}, indent=2\\)\\)\")",
-      "Bash(dreamina *)"
+      "Bash(dreamina *)",
+      "Read(//d//**)"
     ]
   }
 }

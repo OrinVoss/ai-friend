@@ -109,6 +109,13 @@ class Database:
                 ("user_facts", "importance", "REAL", "0.5"),
                 ("experiences", "importance", "REAL", "0.5"),
                 ("reflections", "is_active", "INTEGER", "1"),
+                # Semantic embedding columns (nullable blob for float32 vectors)
+                ("user_facts", "embedding", "BLOB", "NULL"),
+                ("user_facts", "embedding_version", "INTEGER", "0"),
+                ("experiences", "embedding", "BLOB", "NULL"),
+                ("experiences", "embedding_version", "INTEGER", "0"),
+                ("reflections", "embedding", "BLOB", "NULL"),
+                ("reflections", "embedding_version", "INTEGER", "0"),
             ]:
                 c.execute(f"PRAGMA table_info({table})")
                 columns = [row[1] for row in c.fetchall()]

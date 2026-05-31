@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class MemoryConsolidator:
-    def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable):
+    def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable,
+                 embedding_engine=None):
         self.ltm = ltm
         self.llm = llm_generate_fn
+        self._embed = embedding_engine
         self._pending_buffer: list = []
         self._consolidation_count = 0
 
@@ -70,6 +72,9 @@ class MemoryConsolidator:
 
         # Step 5: Prune to limits
         self._prune(max_facts, max_experiences, max_reflections)
+
+        # Step 5.5: Batch encode new items for semantic search
+        self._embed_new_items()
 
         # Step 6: Clear pending
         self._pending_buffer.clear()
@@ -246,6 +251,50 @@ class MemoryConsolidator:
         pruned_r = self.ltm.repo.prune_reflections(max_reflections)
         if pruned_f or pruned_e or pruned_r:
             logger.info(f"Pruned: {pruned_f} facts, {pruned_e} experiences, {pruned_r} reflections")
+
+    def _embed_new_items(self) -> None:
+        """Batch encode new facts/experiences/reflections that lack embeddings."""
+        if not self._embed or not self._embed.health_check():
+            return
+
+        from memory.embeddings import EmbeddingEngine
+        try:
+            with self.ltm.repo.db.get_connection() as conn:
+                # Collect items without embeddings
+                all_updates = []
+
+                for table, text_cols in [
+                    ("user_facts", ["category", "fact_key", "fact_value"]),
+                    ("experiences", ["summary", "emotional_tone", "tags"]),
+                    ("reflections", ["content"]),
+                ]:
+                    col_list = ", ".join(text_cols)
+                    rows = conn.execute(
+                        f"SELECT id, {col_list} FROM {table} "
+                        "WHERE embedding IS NULL LIMIT 50"
+                    ).fetchall()
+
+                    if rows:
+                        texts = []
+                        targets = []
+                        for row in rows:
+                            rid = row["id"]
+                            parts = [str(row[c] or "") for c in text_cols]
+                            texts.append(" ".join(parts))
+                            targets.append((table, rid))
+
+                        vecs = self._embed.encode(texts)
+                        for (tbl, rid), vec in zip(targets, vecs):
+                            all_updates.append((tbl, rid, EmbeddingEngine.vec_to_bytes(vec)))
+
+                if all_updates:
+                    for tbl in ["user_facts", "experiences", "reflections"]:
+                        tbl_updates = [(rid, emb) for t, rid, emb in all_updates if t == tbl]
+                        if tbl_updates:
+                            self.ltm.repo.bulk_update_embeddings(tbl, tbl_updates)
+                    logger.info(f"[embed] encoded {len(all_updates)} new items")
+        except Exception as e:
+            logger.warning(f"[embed] batch encoding failed: {e}")
 
     @staticmethod
     def _format_turns(turns: list) -> str:
