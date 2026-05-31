@@ -26,8 +26,9 @@ main.py / web_main.py
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
     ├── core/
-    │   ├── tool_agent.py ─────── Phase 1 ToolAgent：纯工具调用, temp=0.3, 无人格/情绪/记忆
-    │   ├── agent.py ──────────── Phase 2 Roleplay Agent：人格驱动 + ReAct 循环, temp=0.8
+    │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
+    │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
+    │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
     │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
     │   ├── sleep_manager.py ──── 睡眠/唤醒系统（窗口判断+梦境）
     │   ├── proactivity.py ────── 主动行为引擎（评分+话题+限速）
@@ -45,7 +46,7 @@ main.py / web_main.py
     │
     ├── tools/
     │   ├── traits.py ──────── Tool 基类 + ToolRegistry
-    │   ├── memory_tools.py ── recall / remember
+    │   ├── memory_tools.py ── recall / remember (Agent 1,3)
     │   ├── file_tools.py ──── read_file（目录列举 + 多文件）
     │   ├── search_tools.py ── glob + grep（白名单限制）
     │   ├── notify_tool.py ─── notify（PowerShell toast）
@@ -96,7 +97,7 @@ Web 模式： web_main.py → uvicorn
 
 ### 1.3 设计原则
 
-- **两阶段架构**：Phase 1 ToolAgent（纯工具执行, temp=0.3）→ Phase 2 Roleplay Agent（人格驱动, temp=0.8），从根本上解决模型虚构工具调用内容的问题
+- **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行, temp=0.3，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
 - **单向依赖**：core → memory → storage，core → tools，不存在循环依赖
 - **接口隔离**：provider 抽象 LLM 调用，storage 抽象持久化，各层可独立替换
 - **双路径**：CLI 用状态机驱动，Web 用事件驱动，共享核心逻辑（_react_loop）
@@ -470,23 +471,24 @@ LLM 输出格式：
 3. JSON 解析，参数别名归一化（search → query, text → content）
 4. 回退：尝试将整个响应作为 JSON 解析
 
-### 5.4 内置工具（9 个，两阶段分工）
+### 5.4 内置工具（9 个，三层分工）
 
-两阶段架构从根本上解决模型虚构工具调用内容的问题：
-- **Phase 1 (ToolAgent)**: temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。7 个外部工具。
-- **Phase 2 (Roleplay Agent)**: temperature=0.8，完整人格。仅 recall/remember 两个内部工具（均为本地 SQLite 操作）。外部工具指令已完全移出 prompt。
+三层架构从根本上解决模型虚构工具调用内容的问题：
+- **Agent 1 (InnerDriveAgent)**：自主推理决策，内部使用 recall/remember。识别知识缺口，输出自然语言工具请求给 Agent 2。
+- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。7 个外部工具。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
+- **Agent 3 (Roleplay Agent)**：temperature=0.8，完整人格。接收 inner_drive_summary + tool_results。仅 recall/remember 两个内部工具（均为本地 SQLite 操作）。外部工具指令已完全移出 prompt。
 
-| 工具 | 功能 | 参数 | 后端 | 阶段 |
+| 工具 | 功能 | 参数 | 后端 | Agent |
 |------|------|------|------|------|
-| web_fetch | 提取网页正文内容（自动去 HTML） | url | AnySearch extract | Phase 1 |
-| web_search | 网络搜索，支持中文 + freshness(day/week/month/year) | query, max_results, freshness | AnySearch API (JSON-RPC 2.0) | Phase 1 |
-| read_file | 读取本地文件（≤500KB，目录列举，多文件，行号） | path, limit, offset | 本地文件系统 | Phase 1 |
-| glob | glob 模式搜索文件（**/*.py 等） | pattern, path | 本地遍历 | Phase 1 |
-| grep | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Phase 1 |
-| music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile | Phase 1 |
-| notify | Windows toast 桌面通知（独立线程，不阻塞） | title, message, duration | PowerShell WinRT | Phase 1 |
-| recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 | Phase 2 |
-| remember | 记住用户重要信息 | category, key, value, importance | SQLite upsert | Phase 2 |
+| web_fetch | 提取网页正文内容（自动去 HTML） | url | AnySearch extract | Agent 2 |
+| web_search | 网络搜索，支持中文 + freshness(day/week/month/year) | query, max_results, freshness | AnySearch API (JSON-RPC 2.0) | Agent 2 |
+| read_file | 读取本地文件（≤500KB，目录列举，多文件，行号） | path, limit, offset | 本地文件系统 | Agent 2 |
+| glob | glob 模式搜索文件（**/*.py 等） | pattern, path | 本地遍历 | Agent 2 |
+| grep | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Agent 2 |
+| music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile | Agent 2 |
+| notify | Windows toast 桌面通知（独立线程，不阻塞） | title, message, duration | PowerShell WinRT | Agent 2 |
+| recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 | Agent 1,3 |
+| remember | 记住用户重要信息 | category, key, value, importance | SQLite upsert | Agent 1,3 |
 
 #### 工具别名归一化
 
@@ -497,7 +499,7 @@ LLM 输出格式：
 
 #### 工具调用记录
 
-每次执行后记录到 `_tool_call_history` (最多 20 条)，注入 Phase 2 系统 prompt，AI 可告知用户真实调用记录。
+每次执行后记录到 `_tool_call_history` (最多 20 条)，注入 Agent 3 系统 prompt，AI 可告知用户真实调用记录。
 
 ### 5.5 自主行为（作息 + 探索 + 聊天）
 
@@ -606,8 +608,11 @@ _proactive_loop (15s tick)
 
 | 方法 | 位置 | 说明 |
 |------|------|------|
-| `ToolAgent.run()` | core/tool_agent.py | Phase 1 纯工具调用，解析用户输入 → 执行外部工具 → 返回结果 |
-| `ToolAgent._build_prompt()` | core/tool_agent.py | Phase 1 精简 prompt（无情绪/记忆/工具记录） |
+| `InnerDriveAgent.perceive_and_decide()` | core/inner_drive.py | Agent 1 自主推理：检索记忆 → 识别缺口 → 决策 → 输出自然语言请求或跳过 |
+| `build_inner_drive_prompt()` | prompts/system.py | Agent 1 system prompt：当前时间 + 身份 + 记忆 + 工具列表 |
+| `ToolAgent.run_with_request()` | core/tool_agent.py | Agent 2 接收自然语言请求，执行外部工具，ToolAttemptTracker 重试 |
+| `ToolAgent._build_prompt()` | core/tool_agent.py | Agent 2 精简 prompt（无情绪/记忆/工具记录） |
+| `ToolAttemptTracker` | core/tool_agent.py | 3 retries/round × 3 rounds max = 9 总尝试，失败回报 Agent 1 |
 | `_get_sleep_state()` | core/agent.py | 返回 (should_sleep, message_or_None) |
 | `_generate_dream()` | core/agent.py | LLM 生成 1-2 句碎片化梦境 |
 | `_check_rate_limit(action)` | core/agent.py | explore: 3600s 间隔, chat: 1800s 间隔 |
@@ -625,16 +630,16 @@ self._proactive._last_explore_time: float  # 上次探索时间戳 (ProactivityM
 self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityManager)
 ```
 
-### 5.6 虚假操作检测（已由两阶段架构根治）
+### 5.6 虚假操作检测（已由三层架构根治）
 
-两阶段架构从根本上解决了模型虚构工具调用的问题：
-- Phase 1 ToolAgent 仅负责工具执行，不在 prompt 中包含 personality 或对话历史，temperature=0.3 确保结果稳定
-- Phase 2 Roleplay Agent 的 prompt 中已完全移除外部工具指令（仅保留 recall/remember 两个内部工具）
+三层架构从根本上解决了模型虚构工具调用的问题：
+- Agent 2 ToolAgent 仅负责工具执行，不在 prompt 中包含 personality 或对话历史，temperature=0.3 确保结果稳定
+- Agent 3 Roleplay Agent 的 prompt 中已完全移除外部工具指令（仅保留 recall/remember 两个内部工具）
 - 模型不再有虚构工具行为的动机和空间
 
 ```python
 def contains_fake_action(text):
-    # 旧版检测（两阶段架构下此问题已根本解决）
+    # 旧版检测（三层架构下此问题已根本解决）
     # 检测 LLM 声称执行了操作但未调工具
     keywords = ["已发送", "已通知", "已记住", ...]
 ```

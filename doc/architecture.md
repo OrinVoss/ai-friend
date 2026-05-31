@@ -1,6 +1,6 @@
 # AI 朋友 — 架构与使用文档
 
-> 具有人格、情绪、长短期记忆的 AI 朋友。基于 DeepSeek API，采用 ReAct Agent 架构，支持 CLI 和 Web 双端。
+> 具有人格、情绪、长短期记忆的 AI 朋友。基于 DeepSeek API，采用三层 Agent 架构，支持 CLI 和 Web 双端。
 
 ---
 
@@ -68,17 +68,26 @@ python web_main.py
               └── web/static/    (HTML + CSS + JS)
     │
     ▼
-Phase 1: core/tool_agent.py  (ToolAgent, temp=0.3, 纯工具调用)
-    │  7 个外部工具: web_fetch, web_search, read_file, glob, grep, music_play, notify
-    │  无人格/无情绪/无记忆, 只执行工具 → 结果注入 Phase 2
+Agent 1: core/inner_drive.py  (InnerDriveAgent)
+    │  Perceive → 检索记忆 → 识别缺口 → 决策
+    │  内部工具: recall / remember
+    │  若不需要外部工具 → 跳过 Agent 2 (闲聊优化)
+    │  若需要 → 输出自然语言请求给 Agent 2
     ▼
-Phase 2: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
+Agent 2: core/tool_agent.py  (ToolAgent, temp=0.3, 纯工具调用)
+    │  7 个外部工具: web_fetch, web_search, read_file, glob, grep, music_play, notify
+    │  ToolAttemptTracker: 3 retries/round, 3 rounds max
+    │  失败 → 回报 Agent 1 重新决策
+    │  无人格/无情绪/无记忆
+    ▼
+Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
+    │  接收 inner_drive_summary + tool_results
     │
     ├── core/context_manager.py  (上下文窗口管理)
     ├── core/sleep_manager.py    (睡眠/唤醒)
     ├── core/proactivity.py      (主动行为引擎)
     ├── core/cli_controller.py   (CLI 状态机)
-    ├── core/message_handler.py  (消息入口)
+    ├── core/message_handler.py  (消息入口 + 三层编排 + 重试循环)
     ├── core/personality.py  (四层情绪引擎)
     ├── core/provider.py     (LLM API 客户端)
     ├── core/dispatcher.py   (tool_call 解析执行)
@@ -89,12 +98,12 @@ Phase 2: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   ├── retrieval.py     (三层检索)
     │   └── consolidation.py (记忆合并 + 情感分析)
     │
-    ├── tools/               (Phase 1: 7 外部工具 / Phase 2: 2 内部工具)
+    ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
     ├── storage/             (SQLite WAL, 版本化迁移)
-    ├── prompts/             (提示词模板, 破防/怨恨/梦境注入)
+    ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
     └── models/              (EmotionalState, EmotionEvent)
 
-Phase 2 后处理（不变）:
+后处理（不变）:
     Emotion → Memory consolidation → Reflection
 ```
 
@@ -153,22 +162,23 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 ---
 
-## 工具系统（9 个，两阶段分工）
+## 工具系统（9 个，三层分工）
 
-| 阶段 | 工具 | 功能 | 后端 |
+| Agent | 工具 | 功能 | 后端 |
 |------|------|------|------|
-| Phase 1 | web_fetch | 网页内容提取 | AnySearch extract |
-| Phase 1 | web_search | 网络搜索 | AnySearch API |
-| Phase 1 | read_file | 读取本地文件 | 本地文件系统 |
-| Phase 1 | glob | 文件名模式搜索 | 本地遍历 |
-| Phase 1 | grep | 正则内容搜索 | 本地搜索 |
-| Phase 1 | music_play | 播放音乐 | 默认播放器 |
-| Phase 1 | notify | Windows toast 通知 | PowerShell WinRT |
-| Phase 2 | recall | 回忆用户信息 | SQLite |
-| Phase 2 | remember | 记住用户信息 | SQLite |
+| Agent 2 | web_fetch | 网页内容提取 | AnySearch extract |
+| Agent 2 | web_search | 网络搜索 | AnySearch API |
+| Agent 2 | read_file | 读取本地文件 | 本地文件系统 |
+| Agent 2 | glob | 文件名模式搜索 | 本地遍历 |
+| Agent 2 | grep | 正则内容搜索 | 本地搜索 |
+| Agent 2 | music_play | 播放音乐 | 默认播放器 |
+| Agent 2 | notify | Windows toast 通知 | PowerShell WinRT |
+| Agent 1,3 | recall | 回忆用户信息 | SQLite |
+| Agent 1,3 | remember | 记住用户信息 | SQLite |
 
-Phase 1 ToolAgent 通过 `<tool_call>` XML 标签调用外部工具，temperature=0.3，无人格/情绪/记忆。
-Phase 2 Roleplay Agent 仅保留内部工具（recall/remember），外部工具指令已完全移除。
+Agent 1 (InnerDriveAgent) 自主推理决策，输出自然语言工具请求。
+Agent 2 (ToolAgent) 接收请求执行外部工具，ToolAttemptTracker 控制重试，temperature=0.3。
+Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部工具可用。
 
 ---
 
@@ -249,14 +259,15 @@ Phase 2 Roleplay Agent 仅保留内部工具（recall/remember），外部工具
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（两阶段架构）
-│   ├── tool_agent.py        Phase 1 ToolAgent（纯工具调用, temp=0.3）
-│   ├── agent.py             Phase 2 Roleplay Agent（人格驱动, temp=0.8）
+├── core/                    核心引擎（三层架构）
+│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 缺口决策）
+│   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行, temp=0.3）
+│   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）
 │   ├── personality.py       情绪引擎（四层）
 │   ├── provider.py          LLM API 客户端
 │   └── dispatcher.py        tool_call 解析
 ├── memory/                  记忆系统
-├── tools/                   Phase 1: 7 外部 / Phase 2: 2 内部
+├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（WAL + 迁移）
 ├── prompts/                 提示词模板
 ├── models/                  数据模型

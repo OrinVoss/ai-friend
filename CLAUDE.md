@@ -18,11 +18,14 @@ CLI (main.py) ──▶ Agent.run() 状态机循环
 Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
                            │
 共享核心 ──────────────────┘
-  core/agent.py        ReAct Agent（状态机 + event-driven 双路径）
-  core/personality.py  情绪引擎（四层：输入→调制+衰减→怨恨→事件记忆）
-  core/provider.py     DeepSeek API 客户端（trust_env=False）
-  memory/              短期(LRU+Lock) / 长期(SQLite) / 检索(三层) / 合并
-  tools/               recall / remember / read_file / notify
+  三层 Agent 架构：Agent 1 InnerDrive → Agent 2 ToolAgent → Agent 3 Roleplay
+  core/inner_drive.py   Agent 1：自主推理 + 记忆检索 + 缺口决策（输出自然语言工具请求）
+  core/tool_agent.py    Agent 2：外部工具执行 + ToolAttemptTracker（3retry×3round）
+  core/agent.py         Agent 3：ReAct Agent（状态机 + event-driven 双路径）
+  core/personality.py   情绪引擎（四层：输入→调制+衰减→怨恨→事件记忆）
+  core/provider.py      DeepSeek API 客户端（trust_env=False）
+  memory/               短期(LRU+Lock) / 长期(SQLite) / 检索(三层) / 合并
+  tools/                Agent 1,3: recall/remember / Agent 2: web_fetch/web_search/read_file/glob/grep/music/notify
   models/personality.py EmotionalState（VAD + 8 Plutchik + resentment + emotion_events）
 ```
 

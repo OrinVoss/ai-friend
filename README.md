@@ -1,8 +1,8 @@
 # AI Friend
 
-具有人格、情绪和长短期记忆的 AI 朋友。基于 DeepSeek API，采用 ReAct Agent 架构，支持 CLI 和 Web 双端。
+具有人格、情绪和长短期记忆的 AI 朋友。基于 DeepSeek API，采用三层 Agent 架构，支持 CLI 和 Web 双端。
 
-核心引擎采用两阶段 Agent 架构：Phase 1 ToolAgent 纯工具调用 + Phase 2 Roleplay Agent 人格驱动回复，从根本上解决模型虚构工具调用内容的问题。
+核心引擎采用三层 Agent 架构：Agent 1 InnerDrive 自主推理 → Agent 2 ToolAgent 外部工具执行 → Agent 3 Roleplay 人格驱动回复，从根本上解决模型虚构工具调用内容的问题。闲聊场景中 Agent 1 检测无需外部工具，直接跳过 Agent 2，仅需 1 次 LLM 调用。
 
 ---
 
@@ -53,52 +53,65 @@
 
 三层检索：Hot Memory → Query-Guided（评分 + LLM重排）→ On-Demand（recall 工具）
 
-### 工具系统（9 个，两阶段分工）
+### 工具系统（9 个，三层分工）
 
-**Phase 1 — ToolAgent 纯工具调用（7 个外部工具）**：web_fetch / web_search / read_file / glob / grep / music_play / notify
+**Agent 1 — InnerDriveAgent（内部工具）**：recall / remember
 
-Phase 1 无人格、无情绪、无记忆，仅负责执行外部工具，将结果注入 Phase 2 上下文。使用独立精简 prompt，temperature=0.3。
+Perceive → 检索记忆 → 识别知识缺口 → 决策。若无需外部工具，直接跳过 Agent 2（闲聊优化：仅 1 次 LLM 调用）。若需要外部工具，输出自然语言请求给 Agent 2。
 
-**Phase 2 — Roleplay Agent 内部工具（2 个）**：recall / remember
+**Agent 2 — ToolAgent（7 个外部工具）**：web_fetch / web_search / read_file / glob / grep / music_play / notify
 
-Phase 2 保留 recall 和 remember（均为本地 SQLite 操作），外部工具指令已完全移除。
+接收 Agent 1 的自然语言请求，解析并执行外部工具。ToolAttemptTracker（每轮 3 次重试，最多 3 轮），失败后回报 Agent 1 重新决策。独立精简 prompt，temperature=0.3，无人格/情绪/记忆。
 
-| 工具 | 功能 | 参数 | 后端 | 阶段 |
+**Agent 3 — Roleplay Agent（内部工具）**：recall / remember
+
+接收 inner_drive_summary + tool_results，仅内部工具可用。完整人格 + 情绪 + 记忆，temperature=0.8。
+
+| 工具 | 功能 | 参数 | 后端 | Agent |
 |------|------|------|------|------|
-| `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API | Phase 1 |
-| `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API | Phase 1 |
-| `read_file` | 读取本地文件（≤500KB，行号+行偏移+多文件） | path, limit, offset | 本地 IO | Phase 1 |
-| `glob` | glob 模式搜索文件（`**/*.py` 等） | pattern, path | 本地遍历 | Phase 1 |
-| `grep` | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Phase 1 |
-| `music_play` | 播放音乐（模糊搜索） | song | 默认播放器 | Phase 1 |
-| `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT | Phase 1 |
-| `recall` | 回忆用户信息或共同经历 | query | SQLite | Phase 2 |
-| `remember` | 记住用户重要信息 | category, key, value, importance | SQLite | Phase 2 |
+| `web_fetch` | 提取网页正文（自动去 HTML） | url | AnySearch API | Agent 2 |
+| `web_search` | 网络搜索，支持时效过滤 | query, max_results, freshness | AnySearch API | Agent 2 |
+| `read_file` | 读取本地文件（≤500KB，行号+行偏移+多文件） | path, limit, offset | 本地 IO | Agent 2 |
+| `glob` | glob 模式搜索文件（`**/*.py` 等） | pattern, path | 本地遍历 | Agent 2 |
+| `grep` | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Agent 2 |
+| `music_play` | 播放音乐（模糊搜索） | song | 默认播放器 | Agent 2 |
+| `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT | Agent 2 |
+| `recall` | 回忆用户信息或共同经历 | query | SQLite | Agent 1, 3 |
+| `remember` | 记住用户重要信息 | category, key, value, importance | SQLite | Agent 1, 3 |
 
-Phase 1 通过 `<tool_call>` XML 标签自主调用，结果作为 `<tool_result>` 注入 Phase 2 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
+Agent 2 通过 `<tool_call>` XML 标签自主调用，结果作为 `<tool_result>` 注入 Agent 3 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
 
-### 两阶段响应流程
+### 三层响应流程
 
 ```
 用户输入
     │
     ▼
-Phase 1: ToolAgent (core/tool_agent.py)
-    │  temp=0.3, 无人格/情绪/记忆
-    │  纯工具调用: web_fetch/web_search/read_file/glob/grep/music_play/notify
-    │  结果作为 <tool_result> 注入 Phase 2 上下文
+Agent 1: InnerDriveAgent (core/inner_drive.py)
+    │  Perceive → 检索记忆 → 识别缺口 → 决策
+    │  内部工具: recall / remember（SQLite）
+    │  若闲聊无需工具 → 直接跳过 Agent 2
+    │  若需外部工具 → 输出自然语言请求给 Agent 2
     ▼
-Phase 2: Roleplay Agent (core/agent.py)
+Agent 2: ToolAgent ──── (闲聊跳过) ────┐
+    │  core/tool_agent.py              │
+    │  接收自然语言请求                   │
+    │  执行外部工具: web_fetch/web_search │
+    │  read_file/glob/grep/music/notify   │
+    │  ToolAttemptTracker: 3retry×3round  │
+    │  失败→回报 Agent 1 重新决策         │
+    ▼                                   │
+Agent 3: Roleplay Agent (core/agent.py)◄┘
     │  temp=0.8, 完整人格 + 情绪 + 记忆
     │  personality.json → PersonalityConfig + EmotionalState
     │  analyze_sentiment(user_input) → sentiment 值
     │  estimate_emotional_impact(sentiment) → trait 调制 → shift()
     │  _cross_modulate() → 情绪互相制约
     │  decay() → 分速衰减
-    │  build_system_prompt() → LLM 看到人格 + 情绪 + 怨恨
+    │  build_system_prompt(inner_drive_summary, tool_results) → LLM
     │  可用工具: recall / remember（内部 SQLite 操作）
     ▼
-AI 回复 = 人格底色 × 当前情绪 × Phase 1 工具结果 × 对话上下文
+AI 回复 = 人格底色 × 当前情绪 × Agent 1 决策 × Agent 2 工具结果 × 对话上下文
     │
     ▼
 Emotion → Memory consolidation → Reflection（后处理，不变）
@@ -283,9 +296,10 @@ ai-friend/
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
 │   └── test_message_handler.py 消息处理测试（7 用例）
 │
-├── core/                      核心引擎（7 模块，两阶段架构）
-│   ├── tool_agent.py           Phase 1 ToolAgent：纯工具调用（7 外部工具，temp=0.3）
-│   ├── agent.py                核心引擎（223 行）：Phase 2 Roleplay Agent + ReAct 循环
+├── core/                      核心引擎（8 模块，三层架构）
+│   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
+│   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
+│   ├── agent.py                核心引擎（223 行）：Agent 3 Roleplay + ReAct 循环
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
 │   ├── sleep_manager.py       睡眠系统：窗口判断 + 梦境生成 + 状态持久化
 │   ├── proactivity.py         主动行为：评分 + 话题选择 + 频率限制
@@ -302,7 +316,7 @@ ai-friend/
 │   ├── retrieval.py            三层检索（评分 + LLM 重排 + 按需回溯）
 │   └── consolidation.py        记忆合并（事实/体验/反思）+ 情感分析
 │
-├── tools/                     工具系统（Phase 1: 7 外部 / Phase 2: 2 内部）
+├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
 │   ├── traits.py               Tool 基类 + ToolResult + ToolRegistry
 │   ├── memory_tools.py         recall + remember
 │   ├── file_tools.py           read_file（路径限制 + 大小限制 + 目录列举）
@@ -312,7 +326,7 @@ ai-friend/
 │   └── music_tool.py           music_play（模糊搜索 + 默认播放器）
 │
 ├── storage/                    SQLite（WAL + 版本化 Schema 迁移 + 软删除）
-├── prompts/                    提示词模板（破防/怨恨/梦境/工具记录注入）
+├── prompts/                    提示词模板（inner_drive / 破防/怨恨/梦境/工具记录注入）
 ├── models/                     数据模型（EmotionalState / EmotionEvent / Turn）
 ├── ui/                         CLI 界面（ConsoleInterface + 打字机效果）
 └── web/                        Web 界面

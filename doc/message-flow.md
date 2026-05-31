@@ -4,24 +4,36 @@
 
 ---
 
-## 两阶段流水线总览
+## 三层流水线总览
 
 ```
 用户输入
     │
     ▼
 ┌──────────────────────────────────────────────┐
-│  Phase 1: ToolAgent (core/tool_agent.py)      │
+│  Agent 1: InnerDriveAgent (core/inner_drive.py)│
+│  Perceive → 检索记忆 → 识别缺口 → 决策          │
+│  内部工具: recall / remember (SQLite)          │
+│  无需外部工具? → 直接跳过 Agent 2 (闲聊优化)      │
+│  需外部工具? → 输出自然语言请求给 Agent 2        │
+└──────────────────┬───────────────────────────┘
+                   │
+                   ▼ (非闲聊路径)
+┌──────────────────────────────────────────────┐
+│  Agent 2: ToolAgent (core/tool_agent.py)       │
 │  temp=0.3, 精简 prompt, 无人格/情绪/记忆        │
+│  ToolAttemptTracker: 3 retries/round, 3 rounds │
 │  执行外部工具: web_fetch/web_search/read_file   │
 │             glob/grep/music_play/notify          │
-│  结果作为 <tool_result> 注入 Phase 2 上下文       │
+│  失败 → 回报 Agent 1 重新决策                    │
+│  结果作为 <tool_result> 注入 Agent 3 上下文       │
 └──────────────────┬───────────────────────────┘
                    │
                    ▼
 ┌──────────────────────────────────────────────┐
-│  Phase 2: Roleplay Agent (core/agent.py)      │
+│  Agent 3: Roleplay Agent (core/agent.py)       │
 │  temp=0.8, 完整人格 + 情绪 + 记忆              │
+│  接收 inner_drive_summary + tool_results       │
 │  内部工具: recall / remember                    │
 │  ReAct 循环: THINK → ACT → THINK → ...        │
 └──────────────────┬───────────────────────────┘
@@ -30,7 +42,7 @@
               后处理: Emotion → Memory → Reflection
 ```
 
-## 状态机总览（Phase 2 内部）
+## 状态机总览（Agent 3 内部）
 
 ```
 BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ REFLECT ──▶ IDLE
@@ -201,38 +213,57 @@ self._tool_call_history.append({
 
 ---
 
-### 3. THINK — 调用 LLM（两阶段）
+### 3. THINK — 调用 LLM（三层）
 
-先执行 Phase 1 ToolAgent，再执行 Phase 2 Roleplay Agent。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。
 
-#### Phase 1: ToolAgent（纯工具调用）
+#### Agent 1: InnerDriveAgent（自主推理决策）
 
 ```
-用户输入 + 工具上下文
+用户输入 + 记忆上下文
     │
     ▼
-ToolAgent._build_prompt()  ── 精简 prompt, 仅含工具列表 + 当前时间
-    │ 无人格描述, 无情绪状态, 无对话历史, 无工具调用记录
+InnerDriveAgent.perceive_and_decide()
+    │ build_inner_drive_prompt(): 当前时间 + 身份 + 记忆 + 工具列表
+    │ 内部使用 recall 检索 + remember 存储
+    ▼
+POST DeepSeek API  ── 模型自主推理决策
+    │
+    ├── 闲聊/无需工具 → 输出 inner_drive_summary → 跳过 Agent 2 → 直接进入 Agent 3
+    │   (仅 1 次 LLM 调用)
+    │
+    └── 需要外部工具 → 输出自然语言工具请求给 Agent 2
+        ▼
+进入 Agent 2
+```
+
+#### Agent 2: ToolAgent（外部工具执行）
+
+```
+Agent 1 的自然语言请求
+    │
+    ▼
+ToolAgent.run_with_request(request, tool_registry)
+    │ _build_prompt(): 精简 prompt, 仅含工具列表 + 当前时间
+    │ ToolAttemptTracker: 每轮 3 次重试, 最多 3 轮 (9 总尝试)
     │ temperature=0.3
     ▼
-POST DeepSeek API  ── 模型决策是否使用工具
+POST DeepSeek API  ── 模型决策并执行工具
     │
-    ├── 无 <tool_call> → 结果为空 → 直接进入 Phase 2
+    ├── 执行成功 → 结果注入 Agent 3 上下文
     │
-    └── 有 <tool_call> → dispatcher 执行工具
-        │  ≥ 1 轮 tool call results
-        │  作为 <tool_result> 注入 Phase 2 上下文
+    └── 全部尝试失败 → 回报 Agent 1 重新决策
         ▼
-进入 Phase 2
+Agent 1 重新评估 → 调整策略或放弃外部工具
 ```
 
-#### Phase 2: Roleplay Agent（人格驱动回复）
+#### Agent 3: Roleplay Agent（人格驱动回复）
 
-THINK 可能执行多次（ReAct 循环），每次的流程相同：
+接收 inner_drive_summary + tool_results。可能执行多次 ReAct 循环：
 
 ```
     ┌── 首次调用 ──────────────────────────────┐
-    │ ① build_system_prompt() 拼接 7 个区块    │
+    │ ① build_system_prompt(inner_drive_summary, tool_results) 拼接 7 个区块    │
     │                                          │
     │    Block 1 — 当前时间                     │
     │    ┌──────────────────────────────────┐   │
@@ -287,7 +318,7 @@ THINK 可能执行多次（ReAct 循环），每次的流程相同：
     └──────────────────────────────────────────┘
 ```
 
-**ReAct 多轮迭代（Phase 2，仅 recall/remember）**：
+**ReAct 多轮迭代（Agent 3，仅 recall/remember）**：
 
 ```
 THINK ─── 解析出 <tool_call> {"name": "recall", "arguments": {...}}
@@ -440,18 +471,27 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Phase 1: ToolAgent (core/tool_agent.py)                     │
-│  temp=0.3, 精简 prompt, 仅工具列表                            │
-│  ① POST DeepSeek API → 模型决策是否使用外部工具                 │
-│  ② 无 <tool_call> → 直接进入 Phase 2                          │
-│  ③ 有 <tool_call> → 执行工具 → 结果注入 Phase 2 上下文          │
+│  Agent 1: InnerDriveAgent (core/inner_drive.py)                │
+│  ① 检索记忆 → 识别知识缺口 → 自主推理决策                       │
+│  ② 闲聊/无需工具 → 直接进入 Agent 3 (1 次 LLM 调用)             │
+│  ③ 需外部工具 → 输出自然语言请求给 Agent 2                      │
 └──────────────────────────────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Phase 2: THINK / _react_loop (core/agent.py)                │
+│  Agent 2: ToolAgent (core/tool_agent.py)                       │
+│  temp=0.3, 精简 prompt, ToolAttemptTracker                     │
+│  ① 接收 Agent 1 自然语言请求 → POST API → 执行外部工具           │
+│  ② 成功 → 结果注入 Agent 3 上下文                               │
+│  ③ 失败 → 回报 Agent 1 重新决策                                 │
+└──────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Agent 3: THINK / _react_loop (core/agent.py)                 │
 │  temp=0.8, 完整人格 + 情绪 + 记忆                              │
-│  ① 组装 system prompt（含 Phase 1 工具结果）                   │
+│  接收 inner_drive_summary + tool_results                       │
+│  ① 组装 system prompt（含 Agent 2 工具结果）                   │
 │  ② 估算 token，动态塞对话到 80%                               │
 │  ③ POST DeepSeek API（max_tokens 随情绪调整）                  │
 │  ④ 解析 SS，检查 <tool_call>（仅 recall/remember）              │

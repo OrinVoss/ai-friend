@@ -1,6 +1,6 @@
 # 里程碑与 Issue
 
-> 最后更新：2026-05-30 | 总计 84 issues（27 已完成，57 开放）| 架构里程碑：两阶段 Agent (ToolAgent + Roleplay Agent) 已上线
+> 最后更新：2026-05-31 | 总计 84 issues（27 已完成，57 开放）| 架构里程碑：三层 Agent (InnerDrive + ToolAgent + Roleplay) 已上线
 
 ---
 
@@ -74,7 +74,7 @@
 | #2 | 结构化输出替代正则 tool_call | 中 | 需 DeepSeek API 支持 JSON mode |
 | #10 | conversation_turns 加 session_id | 中 | Schema 变更，需迁移现有数据 |
 | #30 | ~~拆分 Agent God Class~~ | ~~高~~ | ✅ 已完成 (2026-05-30): Agent 784→223行，拆为 6 功能类聚模块 + 33 单元测试 |
-| #101 | 两阶段 Agent 架构 (ToolAgent + Roleplay) | — | ✅ 已完成 (2026-05-30): Phase 1 纯工具调用(temp=0.3) + Phase 2 人格驱动(temp=0.8)，从根本上解决模型虚构工具调用问题 |
+| #101 | 三层 Agent 架构 (InnerDrive + ToolAgent + Roleplay) | — | ✅ 已完成 (2026-05-30): Agent 1 InnerDrive 自主推理决策 + Agent 2 ToolAgent 外部工具执行(ToolAttemptTracker) + Agent 3 Roleplay 人格驱动，闲聊优化为单次 LLM 调用 |
 
 #### Bug 修复
 | # | 标题 | 严重度 |
@@ -254,7 +254,7 @@
 
 ### v1.0 完成标准
 
-- [x] 两阶段 Agent 架构上线（Phase 1 ToolAgent + Phase 2 Roleplay Agent）
+- [x] 三层 Agent 架构上线（Agent 1 InnerDrive + Agent 2 ToolAgent + Agent 3 Roleplay）
 - [ ] 所有 v0.1~v0.5 关键 bug 已关闭
 - [ ] 情感四层架构完整运作
 - [ ] Web 端可长期运行不泄漏/不崩溃
