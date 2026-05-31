@@ -30,3 +30,7 @@ Thumbs.db
 
 # Test files (keep tests/ directory)
 /test_*.py
+
+# Local LLM models and binaries
+memory/*.gguf
+memory/llama-bin/
