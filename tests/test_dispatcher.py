@@ -3,6 +3,7 @@ import unittest
 
 from core.dispatcher import (
     parse_tool_calls, execute_tool_calls, format_tool_results,
+    _try_structured_json,
     contains_fake_action, _normalize_args,
 )
 from tests.mocks import mock_tool_registry
@@ -173,6 +174,71 @@ class TestNormalizeArgs(unittest.TestCase):
         self.assertEqual(result["query"], "hello")
         # keyword stays because query already exists (group skipped)
         self.assertIn("keyword", result)
+
+
+class TestStructuredJSON(unittest.TestCase):
+    def test_calls_array(self):
+        result = _try_structured_json(
+            '{"calls":[{"name":"web_search","arguments":{"query":"test"}}]}'
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "web_search")
+        self.assertEqual(result[0]["arguments"]["query"], "test")
+
+    def test_empty_calls(self):
+        result = _try_structured_json('{"calls":[]}')
+        self.assertEqual(len(result), 0)
+
+    def test_multiple_calls(self):
+        result = _try_structured_json(
+            '{"calls":[{"name":"a","arguments":{}},{"name":"b","arguments":{}}]}'
+        )
+        self.assertEqual(len(result), 2)
+
+    def test_invalid_json(self):
+        result = _try_structured_json("not json")
+        self.assertEqual(len(result), 0)
+
+    def test_missing_calls_key(self):
+        result = _try_structured_json('{"other":123}')
+        self.assertEqual(len(result), 0)
+
+    def test_calls_not_array(self):
+        result = _try_structured_json('{"calls":"string"}')
+        self.assertEqual(len(result), 0)
+
+    def test_missing_name(self):
+        result = _try_structured_json('{"calls":[{"arguments":{"q":"x"}}]}')
+        self.assertEqual(len(result), 0)
+
+
+class TestJSONSchema(unittest.TestCase):
+    def setUp(self):
+        from tools.traits import ToolRegistry, Tool, ToolResult
+        self.reg = ToolRegistry()
+
+        class FakeTool(Tool):
+            def __init__(self, name): self._name = name
+            def name(self): return self._name
+            def description(self): return f"Fake {self._name}"
+            def parameters_schema(self): return {"type": "object"}
+            async def execute(self, args): return ToolResult.ok("ok")
+
+        self.reg.register(FakeTool("web_search"))
+        self.reg.register(FakeTool("web_fetch"))
+
+    def test_schema_structure(self):
+        schema = self.reg.to_json_schema(names=["web_search", "web_fetch"])
+        self.assertEqual(schema["type"], "json_schema")
+        self.assertIn("json_schema", schema)
+        props = schema["json_schema"]["schema"]["properties"]
+        self.assertIn("calls", props)
+
+    def test_schema_filters_names(self):
+        schema = self.reg.to_json_schema(names=["web_search"])
+        items = schema["json_schema"]["schema"]["properties"]["calls"]["items"]
+        enum = items["properties"]["name"]["enum"]
+        self.assertEqual(enum, ["web_search"])
 
 
 if __name__ == "__main__":

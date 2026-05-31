@@ -695,9 +695,9 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 ### 5.6 虚假操作检测（已由三层架构根治）
 
 三层架构从根本上解决了模型虚构工具调用的问题：
-- Agent 2 ToolAgent 仅负责工具执行，不在 prompt 中包含 personality 或对话历史，temperature=0.3 确保结果稳定
+- Agent 2 ToolAgent 仅负责工具执行，不在 prompt 中包含 personality 或对话历史，temperature=0.3 确保结果稳定，通过 `response_format={"type": "json_object"}` 启用 JSON mode 结构化输出
 - Agent 3 Roleplay Agent 的 prompt 中已完全移除外部工具指令（仅保留 recall/remember 两个内部工具）
-- 模型不再有虚构工具行为的动机和空间
+- dispatcher 三层解析（JSON 数组 / XML 正则 / 裸 JSON）确保工具调用可靠提取，模型不再有虚构工具行为的动机和空间
 
 ```python
 def contains_fake_action(text):
@@ -945,9 +945,12 @@ conversation_turns  完整对话历史
 ### 9.2 WAL 模式
 
 ```sql
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
+-- 异步执行（aiosqlite）
+await conn.execute("PRAGMA journal_mode=WAL")
+await conn.execute("PRAGMA foreign_keys=ON")
 ```
+
+WAL 模式允许并发读写，配合 `asyncio.Lock` 确保协程安全。
 
 ### 9.3 连接管理
 

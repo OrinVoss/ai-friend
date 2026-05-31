@@ -25,32 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.019142555566945156,
-    "arousal": 0.999197966979956,
-    "baseline_valence": -0.24611094434632774,
-    "baseline_arousal": 0.9839937462031288,
+    "valence": -0.1501909750059143,
+    "arousal": 0.9991996873101564,
+    "baseline_valence": -0.24723283490286446,
+    "baseline_arousal": 0.9840768087410976,
     "decay_rate": 0.05,
-    "mood_valence": -0.3583,
-    "mood_arousal": 0.9923000000000001,
+    "mood_valence": -0.3763,
+    "mood_arousal": 0.9972000000000001,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.2838423491915294,
-    "trust": 0.7045118431322667,
-    "fear": 0.036760401313952897,
-    "surprise": 0.10328140832984453,
-    "sadness": 0.15109141773990298,
-    "anticipation": 0.35366442668084297,
-    "anger": 0.09369240660105348,
-    "disgust": 0.10000000115775175,
-    "resentment": 0.08386067022348477,
+    "joy": 0.257929560608284,
+    "trust": 0.6740239463863679,
+    "fear": 0.038936428211549114,
+    "surprise": 0.10260445551736622,
+    "sadness": 0.17809668909490559,
+    "anticipation": 0.3403977353994107,
+    "anger": 0.10914206433964488,
+    "disgust": 0.10000000108022057,
+    "resentment": 0.08134485011678022,
     "emotion_events": [
-      {
-        "timestamp": 1780119606.3735423,
-        "trigger": "重新调用工具",
-        "primary_emotion": "sad",
-        "intensity": 0.6856289284707533,
-        "context": "重新调用工具"
-      },
       {
         "timestamp": 1780119732.1506758,
         "trigger": "重新读取百度热搜",
@@ -183,6 +176,13 @@
         "primary_emotion": "trusting",
         "intensity": 0.7045118431322667,
         "context": "你就读了这么少的歌吗"
+      },
+      {
+        "timestamp": 1780204845.1005578,
+        "trigger": "你就读了这么少的歌吗",
+        "primary_emotion": "anxious",
+        "intensity": 0.6740239463863679,
+        "context": "你就读了这么少的歌吗"
       }
     ],
     "history": [
@@ -195,8 +195,8 @@
       "trusting",
       "trusting",
       "trusting",
-      "trusting"
+      "anxious"
     ],
-    "dominant_emotion": "trusting"
+    "dominant_emotion": "anxious"
   }
 }

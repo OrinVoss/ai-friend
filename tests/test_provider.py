@@ -178,6 +178,26 @@ class TestProviderRetry(unittest.TestCase):
         )
         self.assertEqual("".join(tokens), "ok")
 
+    @patch('requests.Session.post')
+    def test_response_format_in_payload(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"calls":[]}'}}],
+            "usage": {"total_tokens": 5, "prompt_tokens": 3, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_resp
+
+        rf = {"type": "json_object"}
+        result = self.provider.generate(
+            [{"role": "user", "content": "hi"}],
+            stream=False, response_format=rf,
+        )
+        call_args = mock_post.call_args
+        payload = call_args[1]["json"]
+        self.assertIn("response_format", payload)
+        self.assertEqual(payload["response_format"], rf)
+
 
 if __name__ == "__main__":
     unittest.main()
