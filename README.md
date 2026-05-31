@@ -51,7 +51,9 @@
     └── relationship_metrics 关系指标
 ```
 
-三层检索：Hot Memory → Query-Guided（评分 + LLM重排）→ On-Demand（recall 工具）
+三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
+
+语义搜索基于本地 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, 512维向量），通过 llama.cpp server 提供 /v1/embeddings API。嵌入服务器不可用时自动降级为纯关键词检索，不影响正常使用。
 
 ### 工具系统（9 个，三层分工）
 
@@ -191,6 +193,7 @@ cp config.example.json config.json
 # 编辑 config.json 填入 API Key
 # 或用环境变量: export DEEPSEEK_API_KEY=sk-...
 # 搜索工具: export ANYSEARCH_API_KEY=as_sk-...
+# 语义搜索（可选）: start_embedding_server.bat（需下载 Qwen3.5-0.8B-Q6_K.gguf 约 640MB + llama.cpp）
 ```
 
 ```bash
@@ -221,6 +224,9 @@ python web_main.py
 | `web_host` | — | `0.0.0.0` | Web 绑定地址 |
 | `web_port` | — | `8000` | Web 端口 |
 | — | `ANYSEARCH_API_KEY` | — | AnySearch API Key（可选，匿名也可用） |
+| `embedding_endpoint` | — | `http://localhost:8080/v1/embeddings` | llama.cpp 嵌入服务地址 |
+| `embedding_dim` | — | `512` | 嵌入向量维度（Qwen3.5-0.8B 输出） |
+| `embedding_cache_size` | — | `1000` | 嵌入缓存条目数（LRU） |
 
 ---
 
@@ -320,8 +326,9 @@ ai-friend/
 ├── memory/                    记忆系统
 │   ├── short_term.py           ConversationBuffer（deque, 线程安全, get_all_reversed）
 │   ├── long_term.py            LongTermMemory（SQLite CRUD 封装）
-│   ├── retrieval.py            三层检索（评分 + LLM 重排 + 按需回溯）
-│   └── consolidation.py        记忆合并（事实/体验/反思）+ 情感分析
+│   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 512维, LRU cache）
+│   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4）
+│   └── consolidation.py        记忆合并（事实/体验/反思）+ 自动嵌入编码
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
 │   ├── traits.py               Tool 基类 + ToolResult + ToolRegistry

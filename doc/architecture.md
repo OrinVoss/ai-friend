@@ -95,8 +95,9 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     ├── memory/
     │   ├── short_term.py    (ConversationBuffer, 线程安全)
     │   ├── long_term.py     (SQLite CRUD)
-    │   ├── retrieval.py     (三层检索)
-    │   └── consolidation.py (记忆合并 + 情感分析)
+    │   ├── embeddings.py    (EmbeddingEngine, Qwen3.5-0.8B, llama.cpp, LRU cache)
+    │   ├── retrieval.py     (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
+    │   └── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
     ├── storage/             (SQLite WAL, 版本化迁移)
@@ -153,10 +154,13 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 ## 记忆系统
 
-三层检索：
+三层检索（支持混合评分）：
 1. **Hot Memory**：高分 facts + 最新 experiences（常驻 prompt）
-2. **Query-Guided**：评分过滤 → LLM 重排序
+2. **Query-Guided**：语义 (0.6) + 关键词 (0.4) 混合评分 → LLM 重排序
 3. **On-Demand**：LLM 主动调 recall 工具回溯
+
+语义搜索：基于 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, llama.cpp, 512维），
+通过本地 llama-server /v1/embeddings API 计算余弦相似度。嵌入服务器不可用时自动降级为纯关键词检索。
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 

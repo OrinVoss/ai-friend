@@ -39,10 +39,11 @@ main.py / web_main.py
     │   └── dispatcher.py ─────── tool_call XML 解析 + 工具调度
     │
     ├── memory/
-    │   ├── short_term.py ─── ConversationBuffer（内存 deque）
-    │   ├── long_term.py ──── LongTermMemory（SQLite CRUD 封装）
-    │   ├── retrieval.py ──── 三层检索 + 评分 + LLM 重排序
-    │   └── consolidation.py ─ 记忆合并（短→长转移 + 修剪）
+    │   ├── short_term.py ───── ConversationBuffer（内存 deque）
+    │   ├── long_term.py ────── LongTermMemory（SQLite CRUD 封装）
+    │   ├── embeddings.py ───── EmbeddingEngine（llama-server API）+ EmbeddingCache（LRU）
+    │   ├── retrieval.py ────── 三层检索 + 混合评分（语义 0.6 + 关键词 0.4）+ LLM 重排序
+    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + 自动嵌入编码）
     │
     ├── tools/
     │   ├── traits.py ──────── Tool 基类 + ToolRegistry
@@ -429,6 +430,43 @@ pending_turns
   3. 摘要注入 system prompt
   4. 清空 ConversationBuffer
 ```
+
+### 4.6 语义嵌入
+
+本地嵌入引擎 `memory/embeddings.py` 提供两类组件：
+
+**EmbeddingEngine** — llama.cpp server 客户端：
+- 模型：Qwen3.5-0.8B-Q6_K.gguf（~640MB, GPU CUDA 加速）
+- 端点：`http://localhost:8080/v1/embeddings`（OpenAI 兼容 API）
+- 维度：512（L2 归一化后存为 SQLite BLOB）
+- 启动方式：`start_embedding_server.bat`（启动 llama-server）
+
+**EmbeddingCache** — LRU 缓存：
+- 按 SHA-256 文本哈希去重，避免重复编码
+- 默认容量 1000 条，达到上限淘汰最旧条目
+- 每个条目存储 `np.ndarray` 副本，线程安全
+
+**混合检索流程**：
+
+```
+用户查询
+    │
+    ├── health_check() → 嵌入服务可用?
+    │   ├── 是 → encode_single(query) → cosine 相似度 × 0.6
+    │   │         + keyword_score × 0.4 → 综合排序
+    │   └── 否 → 纯关键词评分（降级）
+    │
+    └── 候选结果 → LLM 重排（>15 条时）→ 注入 prompt
+```
+
+**嵌入存储**：
+
+每次 consolidation 完成后，`_embed_new_items()` 扫描 `user_facts`、`experiences`、`reflections` 三表中 `embedding IS NULL` 的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。
+
+**优雅降级**：
+- 嵌入服务不可用时（health_check 失败/网络错误），自动回退到纯关键词评分
+- 不影响记忆合并和基本检索功能
+- 启动期间无需等待嵌入服务
 
 ---
 
@@ -927,7 +965,10 @@ class Database:
   "max_reflections": 50,
   "web_host": "0.0.0.0",
   "web_port": 8000,
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "embedding_endpoint": "http://localhost:8080/v1/embeddings",
+  "embedding_dim": 512,
+  "embedding_cache_size": 1000
 }
 ```
 
