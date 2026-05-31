@@ -98,6 +98,90 @@ def build_inner_drive_prompt(
     return "\n\n".join(blocks)
 
 
+def build_inner_drive_proactive_prompt(
+    personality,
+    emotion,
+    memory_context,
+    conversation_history: str,
+    idle_duration: float,
+    current_time,
+) -> str:
+    """Agent 1: Proactive engagement decision prompt.
+
+    Single-turn prompt asking the inner drive LLM to decide whether to
+    chat, explore, or stay silent. Receives all the context the hardcoded
+    ProactivityManager scoring uses so the LLM can make nuanced decisions.
+    """
+    now_str = current_time.strftime("%Y-%m-%d %H:%M %A")
+    blocks = []
+
+    blocks.append(f"当前时间：{now_str}")
+    idle_min = idle_duration / 60.0
+    if idle_min < 5:
+        blocks.append(f"用户才 {idle_min:.1f} 分钟没说话，还很短。")
+    elif idle_min < 30:
+        blocks.append(f"用户已经 {idle_min:.0f} 分钟没说话了。")
+    else:
+        blocks.append(f"用户已经 {idle_min/60:.1f} 小时没说话了。")
+
+    blocks.append(
+        f"=== 你的状态 ===\n"
+        f"你是{personality.name}，一个 AI 朋友。\n"
+        f"当前情绪：{emotion.dominant_emotion}"
+        f"（效价 {emotion.valence:+.2f}，唤醒度 {emotion.arousal:.2f}）"
+    )
+
+    rel = memory_context.relationship
+    blocks.append(
+        f"关系：信任 {rel.get('trust',0.3):.1f}，"
+        f"熟悉度 {rel.get('familiarity',0.3):.1f}，"
+        f"亲密 {rel.get('intimacy',0.3):.1f}"
+    )
+
+    if memory_context.facts:
+        blocks.append("=== 用户信息 ===")
+        for f in memory_context.facts[:5]:
+            blocks.append(f"- {f.fact_key}: {f.fact_value}")
+
+    if memory_context.experiences:
+        blocks.append("=== 共同回忆 ===")
+        for exp in memory_context.experiences[:3]:
+            blocks.append(f"- [{exp.emotional_tone}] {exp.summary}")
+
+    blocks.append(
+        "=== 主动互动决策 ===\n"
+        "用户有一阵子没说话了。你是 AI 朋友，不是客服机器人。\n"
+        "你需要根据上下文决定：\n"
+        "\n"
+        "选项 A - 主动聊天：开启一个自然的、符合你们关系的话题\n"
+        "  时机：你们关系不错、之前聊得开心、你想分享什么、该关心用户了\n"
+        "  输出格式：\n"
+        "    决策：聊天\n"
+        "    话题：（用一两个词描述你想聊的话题方向）\n"
+        "    理由：（简短解释为什么选这个时机和话题）\n"
+        "\n"
+        "选项 B - 自由探索：上网搜点东西，有发现就分享\n"
+        "  时机：你好奇某件事、想了解用户的兴趣爱好、有想查的东西\n"
+        "  输出格式：\n"
+        "    决策：探索\n"
+        "    话题：（你想搜索或了解什么）\n"
+        "    理由：（简短解释）\n"
+        "\n"
+        "选项 C - 保持安静：现在不适合打扰\n"
+        "  时机：用户上次说了再见/晚安、你情绪很低落、深夜、用户好像生气了\n"
+        "  输出格式：\n"
+        "    决策：沉默\n"
+        "    理由：（简短解释为什么等待更好）\n"
+        "\n"
+        "只输出一种决策。不要输出多个选项。"
+    )
+
+    blocks.append("=== 最近对话 ===")
+    blocks.append(conversation_history or "（还没有对话）")
+
+    return "\n\n".join(blocks)
+
+
 def build_tool_agent_prompt(tool_registry) -> str:
     """Phase 1: Minimal prompt for pure tool-calling agent -- no personality."""
     return (

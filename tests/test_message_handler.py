@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from core.message_handler import MessageHandler
+from core.inner_drive import ProactiveIntent
 from tests.mocks import mock_tool_registry
 
 
@@ -93,6 +94,37 @@ class TestMessageHandler(unittest.TestCase):
         self.agent._context.compressed_summary = "previous summary"
         result = self.handler.handle_message("hello")
         self.assertEqual(result, "Hello!")
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_proactive_with_intent(self, _mock):
+        intent = ProactiveIntent(
+            action="chat", topic_hint="旅行计划",
+            reasoning="上次聊到旅行，可以继续"
+        )
+        result = self.handler.handle_proactive(intent=intent)
+        self.assertEqual(result, "Hello!")
+        self.agent._react_loop.assert_called_once()
+        # Should NOT have called pick_proactive_topic (intent was provided)
+        self.agent._pick_proactive_topic.assert_not_called()
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_proactive_without_intent_fallback(self, _mock):
+        result = self.handler.handle_proactive()  # no intent
+        self.assertEqual(result, "Hello!")
+        self.agent._react_loop.assert_called_once()
+        # Should fall back to pick_proactive_topic
+        self.agent._pick_proactive_topic.assert_called()
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_explore_with_intent(self, _mock):
+        self.agent._react_loop.return_value = "我发现了一篇关于机器学习的有趣文章，内容非常有启发性值得大家阅读！"
+        intent = ProactiveIntent(
+            action="explore", topic_hint="机器学习最新动态",
+            reasoning="用户是程序员，可能对ML感兴趣"
+        )
+        result = self.handler.handle_explore(intent=intent)
+        self.assertIsNotNone(result)
+        self.agent._pick_proactive_topic.assert_not_called()
 
 
 if __name__ == "__main__":

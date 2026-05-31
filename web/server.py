@@ -164,12 +164,25 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
             score = ag._calculate_proactivity(idle)
             if random.random() < score:
                 loop = asyncio.get_event_loop()
-                # Explore (max 1/hr) or Chat (max 2/hr)
-                if random.random() < 0.4 and ag._check_rate_limit("explore"):
-                    response = await loop.run_in_executor(None, agent.process_explore)
-                elif ag._check_rate_limit("chat"):
-                    response = await loop.run_in_executor(None, agent.process_proactive)
+
+                # Agent 1 (InnerDrive) decides what to do
+                intent = await loop.run_in_executor(
+                    None, ag.decide_proactive_action, idle
+                )
+
+                if intent.action == "explore" and ag._check_rate_limit("explore"):
+                    response = await loop.run_in_executor(
+                        None, agent.process_explore_with_intent, intent
+                    )
+                elif intent.action == "chat" and ag._check_rate_limit("chat"):
+                    response = await loop.run_in_executor(
+                        None, agent.process_proactive_with_intent, intent
+                    )
                 else:
+                    if intent.action == "silent":
+                        logger.debug(f"[proactive] inner drive chose silent: {intent.reasoning[:80]}")
+                    else:
+                        logger.debug(f"[proactive] rate limit blocked action={intent.action}")
                     response = None
                 if response:
                     ag.last_activity_time = time.time()

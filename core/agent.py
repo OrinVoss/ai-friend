@@ -104,11 +104,17 @@ class Agent:
     def process_message(self, user_input: str, on_token=None) -> str:
         return self._messages.handle_message(user_input, on_token)
 
-    def process_proactive(self, on_token=None) -> str:
-        return self._messages.handle_proactive(on_token)
+    def process_proactive(self, on_token=None, *, intent=None) -> str:
+        return self._messages.handle_proactive(on_token=on_token, intent=intent)
 
-    def process_explore(self) -> str | None:
-        return self._messages.handle_explore()
+    def process_explore(self, intent=None) -> str | None:
+        return self._messages.handle_explore(intent=intent)
+
+    def decide_proactive_action(self, idle_duration: float):
+        """Use inner drive to decide what proactive action to take."""
+        from core.inner_drive import ProactiveIntent
+        inner_drive = self._messages.ensure_inner_drive()
+        return inner_drive.assess_proactive(idle_duration)
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
                     tool_registry=None, skip_post_process: bool = False) -> str:

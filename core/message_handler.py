@@ -39,6 +39,11 @@ class MessageHandler:
                 tool_registry=a._tool_registry,
             )
 
+    def ensure_inner_drive(self):
+        """Ensure inner drive is initialized and return it."""
+        self._ensure_inner_drive()
+        return self._inner_drive
+
     def _ensure_tool_agent(self):
         if self._tool_agent is None:
             from core.tool_agent import ToolAgent
@@ -150,11 +155,20 @@ class MessageHandler:
         # ── Agent 3: Emotional expression ──
         return self._run_agent3(user_input, drive_result, tool_result, on_token=on_token)
 
-    def handle_proactive(self, on_token=None) -> str:
+    def handle_proactive(self, on_token=None, intent=None) -> str:
         from prompts.system import build_system_prompt
         a = self.a
-        mem_ctx = a.retriever.retrieve_for_query("")
-        topic = a._pick_proactive_topic()
+
+        if intent is not None and intent.topic_hint:
+            topic = intent.topic_hint
+            memory_query = intent.topic_hint
+            inner_drive_summary = intent.reasoning
+        else:
+            topic = a._pick_proactive_topic()
+            memory_query = ""
+            inner_drive_summary = ""
+
+        mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
@@ -163,16 +177,29 @@ class MessageHandler:
             tools=a._tool_registry,
             is_proactive=True,
             consecutive_negative=a._consecutive_negative,
+            inner_drive_summary=inner_drive_summary,
         )
         messages = self._build_messages(sys_prompt, user_input=f"[主动开启对话] 主题方向：{topic}")
-        logger.info(f"[proactive] chat: topic={topic}")
+        logger.info(
+            f"[proactive] chat: topic={topic} "
+            f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
+        )
         return a._react_loop(messages, on_token, add_to_history=False)
 
-    def handle_explore(self) -> str | None:
+    def handle_explore(self, intent=None) -> str | None:
         from prompts.system import build_system_prompt
         a = self.a
-        mem_ctx = a.retriever.retrieve_for_query("")
-        topic = a._pick_proactive_topic()
+
+        if intent is not None and intent.topic_hint:
+            topic = intent.topic_hint
+            memory_query = intent.topic_hint
+            inner_drive_summary = intent.reasoning
+        else:
+            topic = a._pick_proactive_topic()
+            memory_query = ""
+            inner_drive_summary = ""
+
+        mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
 
         self._ensure_tool_agent()
@@ -188,6 +215,7 @@ class MessageHandler:
             is_proactive=True,
             consecutive_negative=a._consecutive_negative,
             explore_mode=True,
+            inner_drive_summary=inner_drive_summary,
         )
         messages = self._build_messages(sys_prompt, user_input=None)
         if tool_records:
@@ -199,7 +227,10 @@ class MessageHandler:
                 "role": "user",
                 "content": f"[自由探索] 系统已获取了一些内容。关于{'/'.join(picked)}，有特别的就分享。"
             })
-        logger.info(f"[explore] start: topic={topic}")
+        logger.info(
+            f"[explore] start: topic={topic} "
+            f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
+        )
         phase2_registry = self._make_internal_registry() if tool_records else None
         result = a._react_loop(messages, on_token=None, add_to_history=False,
                               tool_registry=phase2_registry)

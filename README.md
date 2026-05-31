@@ -154,7 +154,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 
 #### 自主探索
 
-空闲时 40% 概率进入探索模式：AI 自主使用工具（上网/听歌/翻文件），发现有趣的才分享给用户，没什么就安静结束。
+空闲时 ProactivityManager 评分触发后，由 InnerDrive (Agent 1) LLM 推理决定主动聊天、自由探索还是保持安静——不再是随机分流。探索模式：AI 自主使用工具（上网/听歌/翻文件），发现有趣的才分享给用户，没什么就安静结束。
 
 #### 频率限制
 
@@ -295,11 +295,11 @@ ai-friend/
 │   ├── message-flow.md        消息流转流程
 │   └── milestones-and-issues.md 里程碑 + 90 issue
 │
-├── tests/                     单元测试（171 用例）
+├── tests/                     单元测试（200 用例）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
-│   ├── test_inner_drive.py     InnerDrive 测试（18 用例）
+│   ├── test_inner_drive.py     InnerDrive 测试（28 用例）
 │   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
 │   ├── test_dispatcher.py      工具调度测试（21 用例）
 │   ├── test_provider.py        Provider 测试（10 用例）
@@ -307,7 +307,8 @@ ai-friend/
 │   ├── test_context_manager.py 上下文管理测试（12 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
-│   └── test_message_handler.py 消息处理测试（7 用例）
+│   ├── test_message_handler.py 消息处理测试（10 用例）
+│   └── test_agent_proactive.py Agent 主动行为测试（6 用例）
 │
 ├── core/                      核心引擎（8 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
@@ -383,9 +384,11 @@ _proactive_loop (15s)
     ├─ 睡眠时间? → 入睡/醒来 → 发消息 + 梦境
     ├─ 睡着? → skip
     ├─ idle < 情绪阈值? → skip
-    ├─ proactivity score 命中?
-    │   ├─ 40% 探索 (max 1/hr) → 自由工具 → 有趣才分享
-    │   └─ 60% 聊天 (max 2/hr) → 主动搭话
+    ├─ ProactivityManager 评分命中? (Stage 1 轻量预筛选)
+    │   └─ InnerDrive Agent 1 决策 (Stage 2 LLM推理)
+    │       ├─ 聊天 (max 2/hr) → 主动搭话
+    │       ├─ 探索 (max 1/hr) → 自由工具 → 有趣才分享
+    │       └─ 沉默 → 不操作（不消耗频率限制）
     └─ 未命中 → 等 15s
 ```
 

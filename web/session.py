@@ -88,17 +88,26 @@ class WebAgent:
         self.personality.save(self.config.personality_file)
         return result
 
-    def process_proactive(self) -> str:
+    def process_proactive(self, on_token=None, *, intent=None) -> str:
         result = self.agent.process_proactive(
-            on_token=self._on_token_callback,
+            on_token=on_token or self._on_token_callback,
+            intent=intent,
         )
         self.personality.save(self.config.personality_file)
         return result
 
-    def process_explore(self) -> str | None:
-        result = self.agent.process_explore()
+    def process_explore(self, intent=None) -> str | None:
+        result = self.agent.process_explore(intent=intent)
         self.personality.save(self.config.personality_file)
         return result
+
+    def process_proactive_with_intent(self, intent) -> str:
+        """Convenience for run_in_executor (no keyword args)."""
+        return self.process_proactive(intent=intent)
+
+    def process_explore_with_intent(self, intent) -> str | None:
+        """Convenience for run_in_executor (no keyword args)."""
+        return self.process_explore(intent=intent)
 
     @property
     def emotion(self):

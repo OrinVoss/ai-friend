@@ -37,6 +37,14 @@ class InnerDriveResult:
     summary: str = ""                          # Compact summary for Agent 3
 
 
+@dataclass
+class ProactiveIntent:
+    """Agent 1 output for proactive engagement decisions."""
+    action: str = "silent"      # "chat", "explore", or "silent"
+    topic_hint: str = ""        # What to talk about or explore
+    reasoning: str = ""         # Why this decision (serves as context for Agent 3)
+
+
 class InnerDriveAgent:
     """Agent 1: Self-aware reasoning before any external tool execution."""
 
@@ -101,6 +109,47 @@ class InnerDriveAgent:
             reasoning="达到最大迭代次数，默认不需要外部工具",
             summary="",
         )
+
+    def assess_proactive(self, idle_duration: float) -> ProactiveIntent:
+        """Decide whether and how to proactively engage the user.
+
+        Called after ProactivityManager's cheap scoring triggers.
+        Replaces random topic selection and the 40/60 explore/chat split
+        with LLM-based reasoning about context, memory, and emotional state.
+        """
+        from datetime import datetime
+        from prompts.system import build_inner_drive_proactive_prompt
+
+        now = datetime.now()
+        mem_ctx = self._retriever.retrieve_for_query("")
+        conv_hist = self._short_term.format_for_prompt(max_chars=2000)
+
+        sys_prompt = build_inner_drive_proactive_prompt(
+            personality=self._personality.config,
+            emotion=self._personality.emotion,
+            memory_context=mem_ctx,
+            conversation_history=conv_hist,
+            idle_duration=idle_duration,
+            current_time=now,
+        )
+
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": (
+                f"用户已经 {idle_duration:.0f} 秒没有说话。"
+                f"现在是 {now.strftime('%H:%M')}。"
+                f"请决定：现在应该主动聊天、去探索点东西，还是继续安静等待？"
+            )},
+        ]
+
+        logger.info(f"[inner_drive] proactive assess idle={idle_duration:.0f}s")
+        resp = self._provider.generate(messages, stream=False, max_tokens=256)
+        intent = self._parse_proactive_intent(resp)
+        logger.info(
+            f"[inner_drive] proactive decision: action={intent.action} "
+            f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+        )
+        return intent
 
     def review(self, user_input: str, tool_records_text: str,
                round_num: int = 1, max_rounds: int = 3) -> InnerDriveResult:
@@ -295,6 +344,27 @@ class InnerDriveAgent:
             ))
 
         return requests
+
+    def _parse_proactive_intent(self, text: str) -> ProactiveIntent:
+        """Parse the LLM's proactive decision output into a ProactiveIntent."""
+        text = text.strip()
+
+        if "探索" in text:
+            action = "explore"
+        elif "沉默" in text or "等待" in text or "安静" in text:
+            action = "silent"
+        elif "聊天" in text or "说话" in text or "主动" in text:
+            action = "chat"
+        else:
+            action = "chat"
+
+        topic_match = re.search(r'话题[：:]\s*(.+?)(?:\n|[。！？]|$)', text)
+        topic = topic_match.group(1).strip() if topic_match else ""
+
+        reason_match = re.search(r'理由[：:]\s*(.+?)(?:\n|[。！？]|$)', text)
+        reason = reason_match.group(1).strip() if reason_match else text[:200]
+
+        return ProactiveIntent(action=action, topic_hint=topic, reasoning=reason)
 
     def _format_internal_results(self, results: list[dict]) -> str:
         """Format internal tool results for Agent 1's ReAct loop."""

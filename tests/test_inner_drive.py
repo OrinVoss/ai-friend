@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from core.inner_drive import (
     InnerDriveAgent, InnerDriveResult, ToolRequest,
+    ProactiveIntent,
     EXTERNAL_TOOL_NAMES,
 )
 from tests.mocks import mock_tool_registry
@@ -197,6 +198,108 @@ class TestExtractToolRequests(unittest.TestCase):
             "需要获取 https://a.com 的内容，同时搜索：test query"
         )
         self.assertGreaterEqual(len(requests), 2)
+
+
+class TestProactiveIntent(unittest.TestCase):
+    def test_default_silent(self):
+        pi = ProactiveIntent()
+        self.assertEqual(pi.action, "silent")
+        self.assertEqual(pi.topic_hint, "")
+
+    def test_chat_intent(self):
+        pi = ProactiveIntent(action="chat", topic_hint="天气", reasoning="用户好久没说话")
+        self.assertEqual(pi.action, "chat")
+        self.assertEqual(pi.topic_hint, "天气")
+
+    def test_explore_intent(self):
+        pi = ProactiveIntent(action="explore", topic_hint="AI新闻", reasoning="想了解最新动态")
+        self.assertEqual(pi.action, "explore")
+
+
+class TestParseProactiveIntent(unittest.TestCase):
+    def setUp(self):
+        self.agent = InnerDriveAgent(
+            provider=MagicMock(),
+            personality=MagicMock(),
+            ltm=MagicMock(),
+            retriever=MagicMock(),
+            short_term=MagicMock(),
+            tool_registry=mock_tool_registry(),
+        )
+
+    def test_parse_chat(self):
+        intent = self.agent._parse_proactive_intent(
+            "决策：聊天\n话题：天气\n理由：用户好久没说话了"
+        )
+        self.assertEqual(intent.action, "chat")
+        self.assertIn("天气", intent.topic_hint)
+
+    def test_parse_explore(self):
+        intent = self.agent._parse_proactive_intent(
+            "决策：探索\n话题：最新AI新闻\n理由：想知道发生了什么"
+        )
+        self.assertEqual(intent.action, "explore")
+
+    def test_parse_silent(self):
+        intent = self.agent._parse_proactive_intent(
+            "决策：沉默\n理由：用户说了晚安"
+        )
+        self.assertEqual(intent.action, "silent")
+
+    def test_parse_default_chat(self):
+        intent = self.agent._parse_proactive_intent(
+            "我想跟用户聊聊最近的事情"
+        )
+        self.assertEqual(intent.action, "chat")
+
+
+class TestAssessProactive(unittest.TestCase):
+    def setUp(self):
+        self.provider = MagicMock()
+        self.provider.generate.return_value = (
+            "决策：聊天\n话题：旅行\n理由：上次聊到旅行很开心"
+        )
+        self.personality = MagicMock()
+        self.personality.config.traits = []
+        self.personality.config.name = "TestBot"
+        self.personality.config.interests = ["music"]
+        self.personality.emotion.dominant_emotion = "engaged"
+        self.personality.emotion.valence = 0.6
+        self.personality.emotion.arousal = 0.5
+        self.retriever = MagicMock()
+        self.retriever.retrieve_for_query.return_value = _make_memory_mock()
+        self.short_term = MagicMock()
+        self.short_term.format_for_prompt.return_value = "用户：今天天气真好"
+
+        self.agent = InnerDriveAgent(
+            provider=self.provider,
+            personality=self.personality,
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=self.short_term,
+            tool_registry=mock_tool_registry(),
+        )
+
+    def test_assess_proactive_chat(self):
+        intent = self.agent.assess_proactive(300)
+        self.assertEqual(intent.action, "chat")
+        self.assertEqual(intent.topic_hint, "旅行")
+        self.provider.generate.assert_called_once()
+
+    def test_assess_proactive_explore(self):
+        self.provider.generate.return_value = (
+            "决策：探索\n话题：最新音乐动态\n理由：用户喜欢音乐"
+        )
+        intent = self.agent.assess_proactive(600)
+        self.assertEqual(intent.action, "explore")
+        self.assertIn("音乐", intent.topic_hint)
+
+    def test_assess_proactive_silent(self):
+        self.provider.generate.return_value = (
+            "决策：沉默\n理由：深夜了，不适合打扰"
+        )
+        intent = self.agent.assess_proactive(1800)
+        self.assertEqual(intent.action, "silent")
 
 
 if __name__ == "__main__":

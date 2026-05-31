@@ -200,6 +200,23 @@ Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部�
 
 ## 自主行为系统
 
+### 两级门控决策 (#125)
+
+```
+Stage 1 (轻量): ProactivityManager.calculate_proactivity(idle) → score
+                random() < score → 触发 Stage 2
+
+Stage 2 (LLM):  InnerDriveAgent.assess_proactive(idle, time) → ProactiveIntent
+                → action: "chat" | "explore" | "silent"
+                → topic_hint, reasoning（传入 Agent 3 作上下文）
+
+Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
+                explore → MessageHandler.handle_explore(intent=intent)
+                silent → 不操作（不消耗频率限制）
+```
+
+主动行为决策现在由 InnerDrive (Agent 1) 的 LLM 推理驱动，替换了原来的随机话题选择和 40/60 分流。ProactivityManager 保留作为 Stage 1 轻量预筛选器（避免每 15 秒调用 LLM）。
+
 ### 作息
 
 | 事件 | 时间 | 触发 |
