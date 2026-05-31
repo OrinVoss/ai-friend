@@ -229,10 +229,12 @@ class MessageHandler:
             tools=a._tool_registry,
             consecutive_negative=a._consecutive_negative,
             tool_call_history=a._tool_call_history,
-            tool_records=tool_records,
             inner_drive_summary=drive_result.summary if drive_result else "",
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
+        # Inject tool results as USER message (LLM respects user messages >> system messages)
+        if tool_records:
+            messages.insert(-1, {"role": "user", "content": tool_records})
         phase2_registry = self._make_internal_registry() if tool_records else None
         return a._react_loop(messages, on_token, add_to_history=True,
                             tool_registry=phase2_registry)

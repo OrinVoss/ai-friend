@@ -224,23 +224,28 @@ class ToolAgent:
         return result
 
     def format_for_phase2(self, result: ToolAgentResult) -> str:
-        """Format Phase 1 results as a system message for Phase 2."""
+        """Format Phase 2 results as a user message for Agent 3."""
         if not result.has_results:
             return ""
 
+        total_entries = sum(r.output.count("\n") + 1 for r in result.records)
         parts = [
-            "=== 系统已自动获取的外部内容 ===",
-            "以下内容由工具自动获取，你不需要再调用 web_fetch、web_search、read_file 等外部工具。",
-            "直接阅读这些内容，如实汇报给用户。不要编造、不要润色。",
+            "=== 系统已获取的真实数据（你只能基于这些数据回复，不得编造任何内容） ===",
+            f"共执行 {result.total_calls} 个工具，成功 {result.success_count} 个，耗时 {result.elapsed_ms:.0f}ms。",
+            "以下是工具返回的原始内容。你只能基于这些内容回复——不要说任何数据中没有的信息。",
             "",
         ]
         for i, r in enumerate(result.records, 1):
             status = "成功" if r.success else "失败"
+            entry_count = r.output.count("\n") + 1 if r.output else 0
             parts.append(
-                f"[调用 {i}] {r.name}（{status}）:\n"
-                f"{r.output}\n"
+                f"[工具 {i}] {r.name}（{status}，{entry_count} 条结果）:\n"
+                f"{r.output[:6000]}\n"
             )
-        parts.append("=== 外部内容结束，开始回复用户 ===")
+        parts.append(
+            f"=== 数据结束。以上共 {total_entries} 条记录。"
+            "你只能基于这些数据回复，禁止编造、润色、补充任何信息。 ==="
+        )
         return "\n".join(parts)
 
 

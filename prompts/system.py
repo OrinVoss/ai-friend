@@ -334,8 +334,7 @@ def build_system_prompt(
                     "示例：\n"
                     '<tool_call>\n{"name": "recall", "arguments": {"query": "用户喜欢什么"}}\n</tool_call>\n\n'
                     "工具会依次执行，执行结果会返回给你。\n"
-                    "如果不需要调用工具，正常回复就好。\n\n"
-                    "注意：外部内容（网页、文件、搜索等）已由系统自动获取并放在上文——你直接阅读汇报即可，不需要再调用外部工具。"
+                    "如果不需要调用工具，正常回复就好。"
                 )
 
     # Block 8: Tool call history (from current session)

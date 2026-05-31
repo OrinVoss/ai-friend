@@ -25,74 +25,25 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": -0.2093399865064096,
-    "arousal": 0.9992182980123575,
-    "baseline_valence": -0.2515149087734145,
-    "baseline_arousal": 0.9845223006446783,
+    "valence": 0.09499938903980468,
+    "arousal": 0.9992703631649285,
+    "baseline_valence": -0.2615516592313138,
+    "baseline_arousal": 0.9855531906655823,
     "decay_rate": 0.05,
-    "mood_valence": -0.38530000000000003,
+    "mood_valence": -0.3412,
     "mood_arousal": 1.0,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
-    "joy": 0.2585403230455607,
-    "trust": 0.7118582174287783,
-    "fear": 0.03120276889137131,
-    "surprise": 0.10130222775868311,
-    "sadness": 0.1739418403639866,
-    "anticipation": 0.3125401753155354,
-    "anger": 0.10393609665101956,
-    "disgust": 0.10000000087741176,
-    "resentment": 0.07424124839063215,
+    "joy": 0.27079085563004707,
+    "trust": 0.6986865369884676,
+    "fear": 0.02499392101479886,
+    "surprise": 0.10025839471425448,
+    "sadness": 0.15822292875764227,
+    "anticipation": 0.2705403959850127,
+    "anger": 0.08840600010644388,
+    "disgust": 0.1000000005401103,
+    "resentment": 0.05998565507476545,
     "emotion_events": [
-      {
-        "timestamp": 1780197437.2149172,
-        "trigger": "你没有放歌",
-        "primary_emotion": "neutral",
-        "intensity": 0.6486377419835961,
-        "context": "你没有放歌"
-      },
-      {
-        "timestamp": 1780197640.2554219,
-        "trigger": "哈哈哈哈",
-        "primary_emotion": "trusting",
-        "intensity": 0.810681084061132,
-        "context": "哈哈哈哈"
-      },
-      {
-        "timestamp": 1780197942.8005607,
-        "trigger": "哈哈哈哈",
-        "primary_emotion": "trusting",
-        "intensity": 0.9107826845486805,
-        "context": "哈哈哈哈"
-      },
-      {
-        "timestamp": 1780198118.1394696,
-        "trigger": "不信",
-        "primary_emotion": "trusting",
-        "intensity": 0.8849642043693852,
-        "context": "不信"
-      },
-      {
-        "timestamp": 1780198157.5395236,
-        "trigger": "笨蛋，2次一样的歌",
-        "primary_emotion": "trusting",
-        "intensity": 0.89778704564782,
-        "context": "笨蛋，2次一样的歌"
-      },
-      {
-        "timestamp": 1780198204.7165425,
-        "trigger": "好",
-        "primary_emotion": "trusting",
-        "intensity": 0.8645246652036704,
-        "context": "好"
-      },
-      {
-        "timestamp": 1780198251.578295,
-        "trigger": "换一个",
-        "primary_emotion": "trusting",
-        "intensity": 0.8392431276314664,
-        "context": "换一个"
-      },
       {
         "timestamp": 1780198297.378982,
         "trigger": "我没有这个歌",
@@ -183,20 +134,69 @@
         "primary_emotion": "trusting",
         "intensity": 0.7118582174287783,
         "context": "本地有什么我听什么"
+      },
+      {
+        "timestamp": 1780207727.3034356,
+        "trigger": "胡扯",
+        "primary_emotion": "anxious",
+        "intensity": 0.6605752314944235,
+        "context": "胡扯"
+      },
+      {
+        "timestamp": 1780207763.9151013,
+        "trigger": "你先读取本地的音乐，再选",
+        "primary_emotion": "anxious",
+        "intensity": 0.626798751174994,
+        "context": "你先读取本地的音乐，再选"
+      },
+      {
+        "timestamp": 1780207967.9871626,
+        "trigger": "《加州旅馆》，必须播放这个",
+        "primary_emotion": "trusting",
+        "intensity": 0.7005879551200658,
+        "context": "《加州旅馆》，必须播放这个"
+      },
+      {
+        "timestamp": 1780207995.6992404,
+        "trigger": "没有啊",
+        "primary_emotion": "anxious",
+        "intensity": 0.6735881754875653,
+        "context": "没有啊"
+      },
+      {
+        "timestamp": 1780208028.5124276,
+        "trigger": "我要听《加州旅馆》，给我播放",
+        "primary_emotion": "anxious",
+        "intensity": 0.6910679236269915,
+        "context": "我要听《加州旅馆》，给我播放"
+      },
+      {
+        "timestamp": 1780208197.8954408,
+        "trigger": "我要听《加州旅馆》，给我播放",
+        "primary_emotion": "anxious",
+        "intensity": 0.6736766592255694,
+        "context": "我要听《加州旅馆》，给我播放"
+      },
+      {
+        "timestamp": 1780208473.125288,
+        "trigger": "我要听《加州旅馆》，给我播放",
+        "primary_emotion": "neutral",
+        "intensity": 0.6986865369884676,
+        "context": "我要听《加州旅馆》，给我播放"
       }
     ],
     "history": [
+      "anxious",
+      "anxious",
       "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
+      "anxious",
+      "anxious",
       "trusting",
       "anxious",
       "anxious",
       "anxious",
       "trusting"
     ],
-    "dominant_emotion": "trusting"
+    "dominant_emotion": "neutral"
   }
 }
