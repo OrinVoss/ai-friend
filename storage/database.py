@@ -138,6 +138,11 @@ class Database:
                 ("reflections", "embedding_version", "INTEGER", "0"),
                 ("user_facts", "fact_type", "TEXT", "'user_fact'"),   # #127
                 ("conversation_turns", "is_tool_claim", "INTEGER", "0"),  # #130
+                ("user_facts", "session_id", "TEXT", "'default'"),          # #40
+                ("experiences", "session_id", "TEXT", "'default'"),         # #40
+                ("reflections", "session_id", "TEXT", "'default'"),         # #40
+                ("conversation_turns", "session_id", "TEXT", "'default'"),  # #40
+                ("relationship_metrics", "session_id", "TEXT", "'default'"),# #40
             ]:
                 await c.execute(f"PRAGMA table_info({table})")
                 rows = await c.fetchall()

@@ -195,13 +195,11 @@ class MemoryRetriever:
     @staticmethod
     def _score_facts(facts: list[UserFact], keywords: list[str],
                      query: str) -> list[UserFact]:
-        """Pure keyword scoring (fallback when embedding is unavailable)."""
-        scored = []
-        for f in facts:
-            f.composite_score = MemoryRetriever._keyword_score_single(f, keywords, query)
-            scored.append(f)
-        scored.sort(key=lambda x: x.composite_score, reverse=True)
-        return scored
+        """Pure keyword scoring (fallback when embedding is unavailable).
+        Does NOT mutate the input facts. (#21)"""
+        scored = [(f, MemoryRetriever._keyword_score_single(f, keywords, query)) for f in facts]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [f for f, _ in scored]
 
     def _llm_rerank(self, query: str, candidates: list[UserFact],
                     max_candidates: int = 15) -> Optional[list[int]]:

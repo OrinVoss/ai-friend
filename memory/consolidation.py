@@ -10,6 +10,8 @@ from prompts.templates import (
     FACT_EXTRACTION_PROMPT,
     EXPERIENCE_SUMMARIZATION_PROMPT,
     REFLECTION_PROMPT,
+    REFLECTION_L2_PROMPT,
+    REFLECTION_L3_PROMPT,
     EMOTION_ANALYSIS_PROMPT,
 )
 
@@ -23,6 +25,7 @@ class MemoryConsolidator:
         self.llm = llm_generate_fn
         self._embed = embedding_engine
         self._pending_buffer: list = []
+        self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
         from memory.fact_checker import FactChecker
         self._fact_checker = FactChecker(embedding_engine)
@@ -44,7 +47,11 @@ class MemoryConsolidator:
         return False
 
     def add_pending(self, turn) -> None:
-        self._pending_buffer.append(turn)
+        # #22: dedup by turn_id + role
+        key = (turn.turn_id, turn.role)
+        if key not in self._seen_ids:
+            self._seen_ids.add(key)
+            self._pending_buffer.append(turn)
 
     def consolidate(self, short_term: ConversationBuffer,
                     personality: Personality,
@@ -76,9 +83,15 @@ class MemoryConsolidator:
                 logger.warning(f"Experience summarization failed: {e}")
                 errors.append("experiences")
 
-        # Step 3: Generate reflection
+        # Step 3: Generate reflection — tiered L1/L2/L3 (#5)
         try:
-            self._generate_reflection(personality)
+            self._consolidation_count += 1
+            if self._consolidation_count % 10 == 0:
+                self._generate_reflection_l3(personality)
+            elif self._consolidation_count % 3 == 0:
+                self._generate_reflection_l2()
+            else:
+                self._generate_reflection_l1(personality)
         except Exception as e:
             logger.warning(f"Reflection generation failed: {e}")
             errors.append("reflections")
@@ -221,6 +234,87 @@ class MemoryConsolidator:
                 logger.info(f"Stored experience ({significance:.2f}): {summary[:50]}")
         except Exception as e:
             logger.warning(f"Experience summarization failed: {e}")
+
+    def _generate_reflection_l1(self, personality: Personality) -> None:
+        """L1: Basic reflection — facts and user discoveries. Every consolidation."""
+        self._generate_reflection(personality)
+
+    def _generate_reflection_l2(self) -> None:
+        """L2: Pattern recognition — recurring behavior patterns. Every 3rd consolidation."""
+        try:
+            experiences = self.ltm.get_recent_experiences(limit=10)
+            facts = self.ltm.get_all_active_facts(limit=15)
+            exp_text = "\n".join(
+                f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
+                for e in experiences
+            ) or "暂无"
+            fact_text = "\n".join(
+                f"- {f.fact_key}: {f.fact_value}" for f in facts
+            ) or "暂无"
+            prompt = REFLECTION_L2_PROMPT.format(facts=fact_text, experiences=exp_text)
+            result = self.llm(prompt, temperature=0.4)
+            content = ""
+            significance = 0.5
+            related_ids = []
+            for line in result.strip().split("\n"):
+                line = line.strip()
+                if line.startswith("CONTENT:"):
+                    content = line[len("CONTENT:"):].strip()
+                elif line.startswith("SIGNIFICANCE:"):
+                    try:
+                        significance = float(line[len("SIGNIFICANCE:"):].strip())
+                    except ValueError: pass
+                elif line.startswith("RELATED_EXPERIENCES:"):
+                    ids_str = line[len("RELATED_EXPERIENCES:"):].strip()
+                    related_ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
+            if content and significance > 0.3:
+                self.ltm.store_reflection(content, "l2_pattern", related_ids, significance)
+                logger.info(f"Stored L2 pattern: {content[:50]}")
+        except Exception as e:
+            logger.warning(f"L2 reflection failed: {e}")
+
+    def _generate_reflection_l3(self, personality: Personality) -> None:
+        """L3: Deep insight — psychological-level analysis. Every 10th consolidation."""
+        try:
+            experiences = self.ltm.get_recent_experiences(limit=20)
+            reflections = self.ltm.get_recent_reflections(limit=10)
+            facts = self.ltm.get_all_active_facts(limit=20)
+            relationship = self.ltm.get_relationship()
+            patterns = [r for r in reflections if r.insight_type == "l2_pattern"][:5]
+            exp_text = "\n".join(
+                f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
+                for e in experiences
+            ) or "暂无"
+            fact_text = "\n".join(
+                f"- {f.fact_key}: {f.fact_value}" for f in facts
+            ) or "暂无"
+            pat_text = "\n".join(f"- {r.content}" for r in patterns) or "暂无"
+            prompt = REFLECTION_L3_PROMPT.format(
+                facts=fact_text, experiences=exp_text,
+                relationship=relationship,
+                current_emotion=personality.emotion.dominant_emotion,
+                patterns=pat_text,
+            )
+            result = self.llm(prompt, temperature=0.5)
+            content = ""
+            significance = 0.5
+            related_ids = []
+            for line in result.strip().split("\n"):
+                line = line.strip()
+                if line.startswith("CONTENT:"):
+                    content = line[len("CONTENT:"):].strip()
+                elif line.startswith("SIGNIFICANCE:"):
+                    try:
+                        significance = float(line[len("SIGNIFICANCE:"):].strip())
+                    except ValueError: pass
+                elif line.startswith("RELATED_EXPERIENCES:"):
+                    ids_str = line[len("RELATED_EXPERIENCES:"):].strip()
+                    related_ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
+            if content and significance > 0.5:
+                self.ltm.store_reflection(content, "l3_deep_insight", related_ids, significance)
+                logger.info(f"Stored L3 insight: {content[:50]}")
+        except Exception as e:
+            logger.warning(f"L3 reflection failed: {e}")
 
     def _generate_reflection(self, personality: Personality) -> None:
         try:

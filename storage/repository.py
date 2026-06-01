@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class Repository:
     def __init__(self, db: Database):
         self.db = db
+        self.session_id: str = "default"  # #40: override per session
 
     # ── Sync wrappers ──
     def insert_turn_sync(self, *a, **kw): return run_async(self.insert_turn(*a, **kw))
@@ -31,8 +32,8 @@ class Repository:
             if embedding is not None:
                 await c.execute("""
                     INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
-                                           source_turn, embedding, embedding_version, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                                           source_turn, embedding, embedding_version, session_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
@@ -42,12 +43,12 @@ class Repository:
                         embedding = excluded.embedding,
                         embedding_version = 1,
                         updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, fact_type, confidence, importance, source_turn, embedding))
+                """, (category, key, value, fact_type, confidence, importance, source_turn, embedding, self.session_id))
             else:
                 await c.execute("""
                     INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
-                                           source_turn, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                           source_turn, session_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
@@ -55,7 +56,7 @@ class Repository:
                         importance = MAX(user_facts.importance, excluded.importance),
                         recall_count = user_facts.recall_count + 1,
                         updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, fact_type, confidence, importance, source_turn))
+                """, (category, key, value, fact_type, confidence, importance, source_turn, self.session_id))
             await self.db.commit()
             return c.lastrowid
 
@@ -68,10 +69,11 @@ class Repository:
                     WHERE is_active = 1
                       AND confidence >= 0.2
                       AND fact_type = 'user_fact'
+                      AND session_id = ?
                       AND (fact_key LIKE ? OR fact_value LIKE ? OR category LIKE ?)
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
-                """, (f"%{query}%", f"%{query}%", f"%{query}%", limit))
+                """, (self.session_id, f"%{query}%", f"%{query}%", f"%{query}%", limit))
             else:
                 await c.execute("""
                     SELECT * FROM user_facts
@@ -79,7 +81,7 @@ class Repository:
                       AND confidence >= 0.2
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
-                """, (limit,))
+                """, (self.session_id, limit))
             return [self._row_to_fact(r) for r in await c.fetchall()]
 
     async def get_active_facts(self, limit: int = 50) -> list[UserFact]:
@@ -90,9 +92,10 @@ class Repository:
                 WHERE is_active = 1
                   AND confidence >= 0.2
                   AND fact_type = 'user_fact'
+                  AND session_id = ?
                 ORDER BY composite_score DESC, recall_count DESC
                 LIMIT ?
-            """, (limit,))
+            """, (self.session_id, limit))
             return [self._row_to_fact(r) for r in await c.fetchall()]
 
     async def update_fact_score(self, fact_id: int, score: float) -> None:
@@ -264,9 +267,9 @@ class Repository:
         logger.info(f"[db] insert_turn: turn={turn_number} role={role} len={len(content)} claim={is_tool_claim}")
         async with self.db.cursor() as c:
             await c.execute("""
-                INSERT INTO conversation_turns (turn_number, role, content, emotional_state, is_tool_claim)
-                VALUES (?, ?, ?, ?, ?)
-            """, (turn_number, role, content, emotional_state, int(is_tool_claim)))
+                INSERT INTO conversation_turns (turn_number, role, content, emotional_state, is_tool_claim, session_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (turn_number, role, content, emotional_state, int(is_tool_claim), self.session_id))
             await self.db.commit()
             return c.lastrowid
 

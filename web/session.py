@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class WebAgent:
-    def __init__(self, config: Config, db: Database, repo: Repository):
+    def __init__(self, config: Config, db: Database, repo: Repository, session_id: str = "default"):
         self.config = config
         self.db = db
         self.repo = repo
+        self.session_id = session_id
+        repo.session_id = session_id  # #40
         self.personality = Personality.load(config.personality_file)
         self.ltm = LongTermMemory(repo)
         self.short_term = ConversationBuffer(maxlen=config.short_term_capacity)
@@ -138,7 +140,7 @@ class SessionManager:
             sid = session_id or uuid.uuid4().hex[:12]
             if sid not in self._sessions:
                 logger.info(f"[session] create: {sid}")
-                self._sessions[sid] = WebAgent(self.config, self.db, self.repo)
+                self._sessions[sid] = WebAgent(self.config, self.db, self.repo, session_id=sid)
             else:
                 logger.debug(f"[session] restore: {sid}")
             return sid, self._sessions[sid]

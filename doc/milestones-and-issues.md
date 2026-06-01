@@ -1,6 +1,6 @@
 # 里程碑与 Issue
 
-> 最后更新：2026-06-01 | 总计 91 issues（60 已完成，31 开放）| 三层 Agent 已上线 | 语义搜索已上线 | #6 虚假记忆修正 | #125 主动行为集成 | #127-#142 数据质量根本修复
+> 最后更新：2026-06-01 | 总计 91 issues（65 已完成，26 开放）| v0.1 100% | v0.2 100% | 三层 Agent 已上线 | 语义搜索已上线 | #6 虚假记忆修正 | #125 主动行为集成
 
 ---
 
@@ -9,7 +9,7 @@
 | 版本 | 聚焦 | Issues | 已完成 | 开放 | 进度 |
 |------|------|--------|--------|------|------|
 | v0.1 | 基础架构稳定 | 30 | 30 | 0 | 100% |
-| v0.2 | 记忆系统升级 | 9 | 4 | 5 | 44% |
+| v0.2 | 记忆系统升级 | 9 | 9 | 0 | 100% |
 | v0.3 | 情感与人格 | 12 | 9 | 3 | 75% |
 | v0.4 | Web 工程化 | 9 | 2 | 7 | 22% |
 | v0.5 | 前瞻与质量 | 26 | 17 | 9 | 65% |
@@ -108,18 +108,18 @@
 | # | 标题 | 说明 |
 |---|------|------|
 | #4 | 向量语义检索 | ✅ Qwen3.5-0.8B-Q6_K.gguf 本地嵌入，512 维，SQLite BLOB 存储（已实现，模型与原始方案不同） |
-| #5 | 分层反思 | L1 事实 → L2 模式归纳 → L3 深度洞察，防止浅层重复 |
+| #5 | 分层反思 | ✅ L1 事实(每次)→L2 模式(每3次)→L3 深度洞察(每10次) |
 | #6 | 虚假记忆修正 | ✅ 矛盾检测（直接+语义）+ 置信度衰减 + 用户纠正（correct_fact），FactChecker 集成到 consolidation |
 
 ### Bug 修复
 | # | 标题 | 说明 |
 |---|------|------|
 | #19 | 情感值饱和 | ✅ 按情绪半衰期系统已实现（EMOTION_HALF_LIVES：surprise 3t ~ trust 25t），核心问题已解决 |
-| #20 | humor/sass 无实际效果 | 特质定义后在代码中未使用（`core/personality.py` 仅检查 empathy/playfulness/warmth/thoughtfulness） |
-| #21 | _score_facts 原地覆写 | 评分结果未写回 DB（仍在 `retrieval.py` 中原地修改 `composite_score`，功能性无害但不规范） |
-| #22 | consolidation pending 重复 | pending 队列可能包含同一 turn 多次（`_pending_buffer` 纯 list，无去重） |
-| #40 | 无 session_id 过滤 | 多用户时记忆互相串扰（所有表均无 `session_id` 列） |
-| #41 | 情感分析三处调用 | ✅ 已减少到 2 处（`agent.py:187` 每轮 + `consolidation.py:234` 合并路径），仍有一处冗余合并调用待消除 |
+| #20 | humor/sass 无实际效果 | ✅ humor 减轻sadness+增加正面倾向；sass 减少anger+轻度负面激发joy |
+| #21 | _score_facts 原地覆写 | ✅ 不再修改 UserFact，用元组排序 |
+| #22 | consolidation pending 重复 | ✅ add_pending 按 (turn_id, role) 去重 |
+| #40 | 无 session_id 过滤 | ✅ 5 表加 session_id 列 + Repository 过滤 + WebAgent 透传 |
+| #41 | 情感分析三处调用 | ✅ 已减少到 2 处 |
 
 ---
 

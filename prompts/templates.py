@@ -81,6 +81,59 @@ RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
 """
 
 
+# ── Tiered Reflection Prompts (#5) ──
+
+REFLECTION_L2_PROMPT = """回顾你和用户最近的多次互动，寻找反复出现的**行为模式**。
+
+已有的用户事实：
+{facts}
+
+最近的共享体验：
+{experiences}
+
+请识别一个跨多次对话反复出现的模式（pattern），例如：
+- 用户每次聊到工作就会情绪低落
+- 用户在深夜更容易敞开心扉
+- 用户在讨论XX话题时特别兴奋
+
+输出格式：
+TYPE: pattern
+CONTENT: <一行描述这个模式，要具体不要笼统>
+SIGNIFICANCE: <0.0~1.0>
+RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
+
+新的模式识别：
+"""
+
+REFLECTION_L3_PROMPT = """基于你和用户的长期互动，进行一次**深度心理洞察**。
+
+你们的关系：{relationship}
+你的情绪状态：{current_emotion}
+
+已有的用户模式（L2）：
+{patterns}
+
+所有活跃事实：
+{facts}
+
+所有体验：
+{experiences}
+
+请产出一次有深度的洞察，例如：
+- 用户行为背后的深层动机
+- 你们关系的本质动态
+- 用户可能自己都没意识到的需求
+
+输出格式：
+TYPE: l3_deep_insight
+CONTENT: <一段深度的心理学级别洞察，有观点有证据>
+SIGNIFICANCE: <0.0~1.0>
+RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
+
+新的深度洞察：
+"""
+
+
 # ── Emotional Analysis ──
 EMOTION_ANALYSIS_PROMPT = """分析用户这条消息的情感倾向。
 输出格式（一行JSON）：

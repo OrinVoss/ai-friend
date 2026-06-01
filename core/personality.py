@@ -58,6 +58,18 @@ class Personality:
                 primary_deltas["trust"] = primary_deltas.get("trust", 0) + 0.1
             if t.name == "thoughtfulness" and t.value > 0.6:
                 primary_deltas["anticipation"] = primary_deltas.get("anticipation", 0) + 0.05
+            if t.name == "humor" and t.value > 0.5:  # #20
+                # Humor dampens sadness impact
+                if "sadness" in primary_deltas and primary_deltas["sadness"] > 0:
+                    primary_deltas["sadness"] *= (1 - t.value * 0.4)
+                dv += t.value * 0.1
+            if t.name == "sass" and t.value > 0.5:  # #20
+                # Sass generates playful pseudo-anger on mild negatives
+                if -0.5 < user_sentiment < 0:
+                    primary_deltas["joy"] = primary_deltas.get("joy", 0) + t.value * 0.05
+                # Sass burns off anger faster (sharp tongue, short memory)
+                if "anger" in primary_deltas:
+                    primary_deltas["anger"] *= (1 - t.value * 0.3)
 
         return dv, da, primary_deltas
 
