@@ -1,76 +1,70 @@
-# 第1周：止血（P0 + 安全关键，15 个）
+# 第1周：止血（P0 + 安全关键，15 个）✅ P0 已完成
 
 **目标**：消除所有已知的数据丢失、运行时崩溃、可被利用的安全漏洞。
 
+## 状态：P0 6/6 完成
+
 ---
 
-## Day 1-2：P0 收尾（6 个）
+## Day 1-2：P0 收尾（6 个）✅
 
-### #202 — repo.session_id 全局可变竞态
+### #202 — repo.session_id 全局可变竞态 ✅ 已关闭
 
 - **文件**：`storage/repository.py:17`、`web/session.py:34`
-- **当前行为**：所有 WebAgent 共享一个 Repository 实例。`repo.session_id = session_id` 直接修改全局属性。两用户并发时，A 的 session_id 可能被 B 覆盖，A 的数据写入 B 的会话或查询到 B 的数据。
-- **崩溃条件**：2+ WebSocket 同时连接 → `get_or_create` → 各自设置 `repo.session_id`
-- **修复**：用 `threading.local()` 存储每线程 session_id，Repository 方法读 `self._local.session_id`
-- **影响文件**：`repository.py`（17 行方法签名不变，仅改属性读取）、`session.py`（设置方式改）
-- **副作用**：无。方法签名不变，所有调用方不受影响。
-- **验证**：`test_repository.py` + 新增多 session 并发测试
-- **GitHub**：#202
+- **结果**：单人使用不触发 → 关闭
+- **GitHub**：#202 (closed as not-applicable)
 
-### #203 — Agent 1 持有完整 registry 可绕过 Agent 2
+### #203 — Agent 1 持有完整 registry 可绕过 Agent 2 ✅
 
 - **文件**：`core/inner_drive.py:50`、`core/message_handler.py:31`
-- **当前行为**：`InnerDriveAgent._full_registry` 包含所有外部工具。Agent 1 的 ReAct 循环调用 `parse_tool_calls(resp)` 和 `execute_tool_calls(self._full_registry, calls)`。正常情况下 Agent 1 prompt 只列内部工具，LLM 不会输出外部工具。但如果 LLM 输出了 `web_fetch`，dispatcher 会直接执行，完全绕过 Agent 2 的重试机制。
-- **崩溃条件**：LLM 幻觉输出外部工具调用（罕见但可能）
-- **修复**：在 `_ensure_inner_drive()` 中创建隔离 registry（仅 recall/remember），不传 `_full_registry`
-- **影响文件**：`message_handler.py`（改 `_ensure_inner_drive`）
-- **副作用**：无。Agent 1 只用内部工具是设计意图。
-- **验证**：现有 `test_inner_drive.py` 全部通过 + 新增 registry 隔离测试
-- **GitHub**：#203
+- **修复**：`_ensure_inner_drive()` 创建隔离 registry（仅 recall/remember）
+- **commit**：c4cc233
+- **GitHub**：#203 (closed)
 
-### #204 — ToolAttemptTracker round_number 永不递增
+### #204 — ToolAttemptTracker round_number 永不递增 ✅
 
 - **文件**：`core/tool_agent.py:48-67`、`core/message_handler.py:91-135`
-- **当前行为**：`ToolAttemptTracker()` 在 while 循环内创建（`message_handler.py:91`），每轮新建实例，`round_number` 始终为 0。`can_start_new_round` 检查 `round_number < max_rounds` 永远为 True，理论上允许无限重试。实际被 `MAX_AGENT2_ROUNDS=3` 的 while 条件限制，所以没有实际后果。
-- **崩溃条件**：无明显崩溃，但代码逻辑错误
-- **修复**：在 while 循环外创建 tracker，每轮 `tracker.round_number = round_num`
-- **影响文件**：`message_handler.py:91`（移动 tracker 创建位置）
-- **副作用**：无。行为不变（while 条件已有限制），只是代码逻辑正确了。
-- **验证**：现有测试全部通过
-- **GitHub**：#204
+- **修复**：tracker 移出 while 循环，每轮 `tracker.round_number = round_num`
+- **commit**：c4cc233
+- **GitHub**：#204 (closed)
 
-### #205 — Agent 2 多轮结果被丢弃
+### #205 — Agent 2 多轮结果被丢弃 ✅
 
 - **文件**：`core/message_handler.py:100-156`
-- **当前行为**：`_run_agent3(user_input, drive_result, tool_result)` 传入的是**最后一轮**的 `tool_result`。`_run_agent3` 内部 `tool_records = self._tool_agent.format_for_phase2(tool_result)` 只包含最后一轮结果。如果第一轮搜索成功但第二轮获取失败，Agent 3 看不到搜索成功的数据。
-- **崩溃条件**：多轮 Agent 2 调用，第一轮有结果但后一轮覆盖
-- **修复**：`_run_agent3` 改为接收 `all_tool_records` 字符串（已在 `handle_message` 中累积），不再依赖 `tool_result` 参数
-- **影响文件**：`message_handler.py`（`_run_agent3` 签名 + `handle_message` 传参）
-- **副作用**：prompt 增大（多轮结果累积）。加 3000 字符截断保护。
-- **验证**：现有测试 + 新增多轮结果测试
-- **GitHub**：#205
+- **修复**：`_run_agent3` 新增 `tool_records` 参数，handle_message 传入累积结果
+- **commit**：c4cc233
+- **GitHub**：#205 (closed)
 
-### #206 — Personality.save() 多线程竞态
+### #206 — Personality.save() 多线程竞态 ✅
 
 - **文件**：`core/personality.py:125-135`
-- **当前行为**：`save()` 写入固定临时文件 `personality.json.tmp`，然后 `os.replace()` 到正式文件。多个线程同时写同一个 `.tmp` → 数据交错损坏。
-- **崩溃条件**：Web 模式多 session 同时调用 save（proactive 回复 + 用户消息同时触发）
-- **修复**：唯一临时文件名：`f"{path}.tmp.{os.getpid()}.{time.time_ns()}"`
-- **影响文件**：`personality.py:128`（仅改 tmp 文件名生成）
-- **副作用**：可能残留 `.tmp` 文件（上次崩溃留下的）。加启动时清理。
-- **验证**：现有测试通过
-- **GitHub**：#206
+- **修复**：唯一临时文件名 `{path}.tmp.{pid}.{time_ns()}`
+- **commit**：c4cc233
+- **GitHub**：#206 (closed)
 
-### #207 — FactChecker.resolve 同步调 async — 静默无操作
+### #207 — FactChecker.resolve 同步调 async — 静默无操作 ✅
 
 - **文件**：`memory/fact_checker.py:88-104`、`memory/consolidation.py:189-193`
-- **当前行为**：`resolve()` 是 sync 方法，调用 `repo.deactivate_fact()` 和 `repo.update_fact_confidence()` 而不 `await`。返回 coroutine 对象，实际 SQL 从未执行。矛盾检测完全无效。
-- **崩溃条件**：不会崩溃。矛盾检测静默失效，虚假记忆从未被修正。
-- **修复**：`resolve()` 改为接收 `ltm`（LongTermMemory）而非 `repo`，调用 sync 包装器 `ltm.deactivate_fact()` 和 `ltm.update_fact_confidence()`
-- **影响文件**：`fact_checker.py:88`（resolve 参数改 ltm）、`consolidation.py:190`（传入 ltm 而非 ltm.repo）
-- **副作用**：无。sync 包装器走现有的 `run_async` 路径。
-- **验证**：`test_fact_checker.py` 更新 mock + 新增真实 DB 测试
-- **GitHub**：#207
+- **修复**：resolve 接收 ltm（LongTermMemory），调 sync 包装器 `ltm.deactivate_fact()` / `ltm.update_fact_confidence()`
+- **commit**：c4cc233
+- **GitHub**：#207 (closed)
+
+---
+
+## Day 3-4：安全关键 P1（9 个）⏸ 待排期
+
+*以下 issue 视单人场景优先级重新评估后决定是否修*
+
+| # | 问题 | 单人影响 |
+|---|------|---------|
+| #209 | 符号链接白名单绕过 | 低 — 本地文件操作 |
+| #210 | ReDoS grep 超时 | 低 — 正则由 LLM 生成 |
+| #235 | WebSocket Origin 绕过 | 无 — 单人 localhost |
+| #212 | lifespan shutdown 空操作 | 中 — 优雅关闭 |
+| #241 | web_tools 协议检查 | 低 |
+| #233 | 前端 Cookie 安全标志 | 低 — 单人 |
+| #211 | WebSocket 多标签页竞争 | 无 — 单人 |
+| #234 | REST API 阻塞事件循环 | 低 — 单人 |
 
 ---
 
