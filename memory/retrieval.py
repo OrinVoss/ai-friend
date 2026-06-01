@@ -48,6 +48,10 @@ class MemoryRetriever:
             if selected_indices is not None:
                 candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
 
+        # Truncate to 15 if no rerank was applied (or rerank failed)
+        if len(candidates) > 15:
+            candidates = candidates[:15]
+
         selected_facts = candidates[:10]
 
         # Search experiences (semantic if available)
@@ -107,7 +111,7 @@ class MemoryRetriever:
 
     # ── Hybrid scoring ──
 
-    def _hybrid_score(self, query: str, candidates: list[UserFact], keywords: list) -> list:  # #189: explicit type
+    def _hybrid_score(self, query: str, candidates: list[UserFact], keywords: list) -> list[UserFact]:  # #189
         """Hybrid scoring: semantic (0.6) + keyword (0.4)."""
         SEMANTIC_WEIGHT = 0.6
         KEYWORD_WEIGHT = 0.4
@@ -143,7 +147,7 @@ class MemoryRetriever:
         all_exp = self.ltm.search_experiences(keywords, limit=30)  # #190: wider candidate pool
         combined = self._merge_unique_experiences(all_exp, recent)
         if not combined or not self._embed:
-            return all_exp
+            return []  # #194: no keyword fallback — may be irrelevant
 
         try:
             query_vec = self._embed.encode_single(query)

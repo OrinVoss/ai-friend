@@ -32,7 +32,7 @@ class EmbeddingEngine:
         vecs = []
         uncached = []
         for i, text in enumerate(texts):
-            cached = self._cache.get(text)
+            cached = self._cache.get(text, expected_dim=self._dim)
             if cached is not None:
                 vecs.append((i, cached))
             else:
@@ -49,6 +49,16 @@ class EmbeddingEngine:
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                api_dim = len(data["data"][0]["embedding"])
+                if api_dim != self._dim:
+                    logger.warning(
+                        f"[embed] API returned dim={api_dim}, expected {self._dim}; "
+                        f"resetting cache and discarding old-dimension vectors"
+                    )
+                    self._cache.clear()
+                    self._dim = api_dim
+                    # P0: drop old-dimension cached vectors to avoid np.stack crash
+                    vecs = [(i, v) for i, v in vecs if len(v) == api_dim]
                 new_vecs = np.array(
                     [item["embedding"] for item in data["data"]],
                     dtype=np.float32,
@@ -62,12 +72,10 @@ class EmbeddingEngine:
                 elapsed = (time.time() - t0) * 1000
                 logger.debug(f"[embed] encoded {len(uncached)} texts in {elapsed:.0f}ms")
         except Exception as e:
-            # #197: graceful fallback — use cached results for uncached texts
-            logger.warning(f"[embed] API failed: {e}, using partial cache")
+            # P0: API failed — skip uncached texts, use only cached results
+            logger.warning(f"[embed] API failed: {e}, using {len(vecs)}/{len(texts)} cached")
             if not vecs:
                 raise  # nothing cached, must fail
-            for idx, text in uncached:
-                logger.debug(f"[embed] no cache for: {text[:40]}")
 
         if not vecs:
             return np.empty((0, self._dim), dtype=np.float32)
@@ -130,11 +138,19 @@ class EmbeddingCache:
     def _hash(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    def get(self, text: str) -> np.ndarray | None:
+    def get(self, text: str, expected_dim: int | None = None) -> np.ndarray | None:
         key = self._hash(text)
         if key in self._cache:
             self._cache.move_to_end(key)
-            return self._cache[key].copy()
+            vec = self._cache[key]
+            if expected_dim is not None and len(vec) != expected_dim:
+                logger.warning(
+                    f"[embed_cache] dimension mismatch: cached={len(vec)}, expected={expected_dim}; "
+                    f"evicting stale entry"
+                )
+                del self._cache[key]
+                return None
+            return vec.copy()
         return None
 
     def set(self, text: str, vec: np.ndarray):
@@ -148,6 +164,9 @@ class EmbeddingCache:
     def invalidate(self, text: str):
         key = self._hash(text)
         self._cache.pop(key, None)
+
+    def clear(self):
+        self._cache.clear()
 
     def __len__(self) -> int:
         return len(self._cache)

@@ -117,18 +117,13 @@ class MemoryConsolidator:
 
         if errors:
             logger.warning(f"Consolidation partial: {len(errors)} step(s) failed: {errors}")
-            # #199: only clear pending on zero errors (full success)
-            # With 5 steps, any failure means buffer should be retained for retry
-            if len(errors) == 0:
-                self._pending_buffer.clear()
-                self._seen_ids.clear()
-                logger.info(f"Consolidation complete (full success).")
-            else:
-                logger.info(f"Consolidation partial ({len(errors)} errors), buffer retained for retry.")
-                return
+            # P1: clear buffer on any error to avoid re-processing already-extracted facts
+            self._pending_buffer.clear()
+            self._seen_ids.clear()
+            return
+
         self._pending_buffer.clear()
         self._seen_ids.clear()
-        logger.info("Consolidation complete.")
         logger.info("Consolidation complete.")
 
     def analyze_sentiment(self, text: str) -> tuple[float, bool, float]:

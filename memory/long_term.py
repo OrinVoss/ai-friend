@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from models.memory import UserFact, Experience, Reflection
@@ -87,7 +88,8 @@ class LongTermMemory:
 
     async def _build_context(self, query: str = "") -> MemoryContext:
         facts = await self._search_facts(query, limit=10)
-        keywords = [w for w in query.split() if len(w) > 1] if query else []
+        keywords = re.findall(r'[\w一-鿿]+', query.lower())
+        keywords = [w for w in keywords if len(w) > 1] if query else []
         experiences = await self._search_experiences(keywords, limit=5)
         # #194: don't fall back to recent experiences — they may be irrelevant
         reflections = await self._get_recent_reflections(limit=3)
