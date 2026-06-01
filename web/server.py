@@ -54,6 +54,21 @@ async def chat_api(body: dict):
     }
 
 
+@app.get("/api/status")
+async def status_api(session_id: str = "default"):
+    """Return relationship metrics + history (#132)."""
+    _, agent = session_manager.get_or_create(session_id)
+    ag = agent.agent
+    rel = ag.ltm.get_relationship()
+    history = ag.ltm.get_relationship_history(days=7)
+    return {
+        "turn": ag.turn_count,
+        "emotion": agent.emotion,
+        "relationship": rel,
+        "relationship_history": history,
+    }
+
+
 def _calc_delay(emotion: str, seg_len: int) -> float:
     base = {
         "excited": 0.7, "joyful": 0.9, "trusting": 1.1, "surprised": 0.8,

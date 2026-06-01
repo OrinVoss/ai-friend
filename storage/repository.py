@@ -259,13 +259,15 @@ class Repository:
     # ── Conversation Turns ──
 
     async def insert_turn(self, turn_number: int, role: str, content: str,
-                          emotional_state: Optional[str] = None) -> int:
-        logger.info(f"[db] insert_turn: turn={turn_number} role={role} len={len(content)}")
+                          emotional_state: Optional[str] = None,
+                          is_tool_claim: bool = False) -> int:  # #130
+        logger.info(f"[db] insert_turn: turn={turn_number} role={role} len={len(content)} claim={is_tool_claim}")
         async with self.db.cursor() as c:
             await c.execute("""
-                INSERT INTO conversation_turns (turn_number, role, content, emotional_state)
-                VALUES (?, ?, ?, ?)
-            """, (turn_number, role, content, emotional_state))
+                INSERT INTO conversation_turns (turn_number, role, content, emotional_state, is_tool_claim)
+                VALUES (?, ?, ?, ?, ?)
+            """, (turn_number, role, content, emotional_state, int(is_tool_claim)))
+            await self.db.commit()
             return c.lastrowid
 
     async def get_recent_turns(self, limit: int = 30) -> list[dict]:

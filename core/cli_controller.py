@@ -324,6 +324,17 @@ class CliController:
             a.ui.display.print_system(f"轮次: {a.turn_count} | 事实: {len(a.ltm.get_all_active_facts())}")
             for k, v in rel.items():
                 a.ui.display.print_system(f"  {k}: {v:.2f}")
+            # #132: show relationship trend from snapshots
+            history = a.ltm.get_relationship_history(days=7)
+            if history:
+                by_dim = {}
+                for h in history:
+                    by_dim.setdefault(h["dimension"], []).append(h["value"])
+                for dim, values in by_dim.items():
+                    if len(values) >= 2:
+                        delta = values[-1] - values[0]
+                        arrow = "↑" if delta > 0.01 else "↓" if delta < -0.01 else "→"
+                        a.ui.display.print_system(f"  {dim} 趋势(7d): {values[0]:.2f}→{values[-1]:.2f} {arrow}")
         elif cmd == "/forget":
             a.short_term.clear()
             if a.ui:
