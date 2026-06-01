@@ -146,20 +146,25 @@ _proactive_loop (15s tick)
     │    │ neutral 360s, sad 900s, angry 480s
     │    │ resentment 额外 +300s
     │    │
-    │    └── random < score?
+    │    └── random < score? (Stage 1 轻量预筛选)
     │         │
-    │         ├── 40% → process_explore()
-    │         │    │ _check_rate_limit("explore") → 1/hr
-    │         │    │ prompt: explore_mode=True
-    │         │    │ AI 自主: web_search, web_fetch, music_list...
-    │         │    │ 有趣的? → 返回分享消息
-    │         │    │ 没趣的? → 返回 None (安静)
-    │         │
-    │         └── 60% → process_proactive()
-    │              │ _check_rate_limit("chat") → 2/hr
-    │              │ prompt: is_proactive=True
-    │              │ 主动搭话, 调侃, 分享日常
-    │              │ add_to_history=False (不发到短期记忆)
+    │         └── InnerDrive Agent 1 决策 (Stage 2 LLM推理, #125)
+    │              │ assess_proactive(idle) → ProactiveIntent
+    │              │
+    │              ├── action="chat" → process_proactive(intent=intent)
+    │              │    │ _check_rate_limit("chat") → 2/hr
+    │              │    │ prompt: is_proactive=True
+    │              │    │ 主动搭话, 调侃, 分享日常
+    │              │    │ add_to_history=False (不发到短期记忆)
+    │              │
+    │              ├── action="explore" → process_explore(intent=intent)
+    │              │    │ _check_rate_limit("explore") → 1/hr
+    │              │    │ prompt: explore_mode=True
+    │              │    │ AI 自主: web_search, web_fetch, music_list...
+    │              │    │ 有趣的? → 返回分享消息
+    │              │    │ 没趣的? → 返回 None (安静)
+    │              │
+    │              └── action="silent" → 不操作 (不消耗频率限制)
     │
     └── 未命中 → await asyncio.sleep(15)
 ```
@@ -425,6 +430,9 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │       ├── ▶ LLM 抽取 facts               │
     │       │    → FACT|identity|名字|小陈|0.9  │
     │       │    → upsert user_facts           │
+    │       │    → FactChecker 矛盾检测 (#6)   │
+    │       │      同 key 不同 value → 衰减旧事实│
+    │       │      语义相似 >0.65 → 矛盾处理   │
     │       │                                  │
     │       ├── ▶ LLM 总结体验                 │
     │       │    → SUMMARY|温暖|分享宠物趣事   │

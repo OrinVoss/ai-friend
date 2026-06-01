@@ -42,8 +42,9 @@ main.py / web_main.py
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
     │   ├── long_term.py ────── LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
     │   ├── embeddings.py ───── EmbeddingEngine（llama-server API）+ EmbeddingCache（LRU）
+    │   ├── fact_checker.py ──── FactChecker：矛盾检测 + 置信度衰减 + 用户纠正 (#6)
     │   ├── retrieval.py ────── 三层检索 + 混合评分（语义 0.6 + 关键词 0.4）+ LLM 重排序
-    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + 自动嵌入编码）
+    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + FactChecker 集成 + 自动嵌入编码）
     │
     ├── tools/
     │   ├── traits.py ──────── Tool 基类（含 to_json_schema()）+ ToolRegistry
@@ -54,7 +55,7 @@ main.py / web_main.py
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（171 用例）
+    ├── tests/ ───────────────── 单元测试（222 用例）
     │
     ├── storage/
     │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ Schema + WAL 模式
@@ -404,10 +405,16 @@ pending_turns
     │   → TYPE|CONTENT|SIGNIFICANCE
     │   → insert reflections
     │
-    └ Step 4: 更新 relationship
+    ├ Step 4: 更新 relationship
         → familiarity += 0.02
         → if sentiment > 0.3: trust += sentiment × 0.05
         → if personal_sharing: intimacy += 0.03
+
+    └ Step 5: FactChecker 矛盾检测 (#6)
+        → 同 (category, key) 不同 value → 直接矛盾
+        → 嵌入相似度 > 0.65 且 value 不同 → 语义矛盾
+        → 矛盾事实: confidence × 0.4
+        → 衰减后 < 0.2 → 软删除 (is_active=0)
 ```
 
 ### 4.4 记忆生命周期
@@ -473,6 +480,27 @@ pending_turns
 - 嵌入服务不可用时（health_check 失败/网络错误），自动回退到纯关键词评分
 - 不影响记忆合并和基本检索功能
 - 启动期间无需等待嵌入服务
+
+### 4.7 虚假记忆修正 (#6)
+
+**FactChecker** (`memory/fact_checker.py`) 在 consolidation 时自动运行：
+
+**矛盾检测**：
+1. 同 (category, fact_key) 不同 fact_value → 直接矛盾
+2. 嵌入余弦相似度 > 0.65 且 value 不同 → 语义矛盾
+3. 嵌入引擎不可用时自动跳过语义检测
+
+**置信度衰减**：
+- 被矛盾的事实：confidence × 0.4
+- 衰减后 < 0.2 → 软删除（is_active=0, composite_score=0）
+
+**检索过滤**：
+- `search_facts` / `get_active_facts` 自动过滤 `confidence < 0.2` 的事实
+- `_keyword_score_single` 评分中加入 confidence × 0.15 权重
+
+**用户纠正**：
+- `RememberTool` 设置 `correct=true` → 旧事实软删除，新事实 confidence=1.0, importance=0.9
+- confidence=1.0 确保纠正不会被后续 upsert 覆盖
 
 ---
 
@@ -549,8 +577,8 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 | grep | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Agent 2 |
 | music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile | Agent 2 |
 | notify | Windows toast 桌面通知（独立线程，不阻塞） | title, message, duration | PowerShell WinRT | Agent 2 |
-| recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 | Agent 1,3 |
-| remember | 记住用户重要信息 | category, key, value, importance | SQLite upsert | Agent 1,3 |
+| recall | 回忆用户信息或共同经历 | query: str | SQLite 三层检索 + confidence>=0.2 过滤 | Agent 1,3 |
+| remember | 记住用户重要信息（支持 correct=true 纠正旧事实） | category, key, value, importance, correct | SQLite upsert (correct 走 correct_fact) | Agent 1,3 |
 
 #### 工具别名归一化
 
@@ -628,40 +656,26 @@ _proactive_loop (15s tick)
     │    │   - short_penalty (短回复 每句 -0.08)
     │    │   capped at [0, 0.8]
     │    │
-    │    └── random() < score? → 触发!
+    │    └── random() < score? → 触发! (Stage 1 轻量预筛选)
     │         │
-    │         ├── 40% → process_explore()
-    │         │    │ _check_rate_limit("explore"): 距上次 < 1hr → 拒绝
-    │         │    │
-    │         │    │ prompt: explore_mode=True
-    │         │    │ "你现在闲着，可以做点感兴趣的事"
-    │         │    │ "用 web_search 搜好奇的东西"
-    │         │    │ "如果发现了特别有意思的想分享，说出来"
-    │         │    │ "没什么特别就回复'.'或'没啥'"
-    │         │    │
-    │         │    │ _react_loop(messages, add_to_history=False)
-    │         │    │ AI 可自由调用 web_search/web_fetch/music_list 等
-    │         │    │
-    │         │    │ 返回值:
-    │         │    │   len > 30 且非工具输出 → 视为分享 → 发送消息
-    │         │    │   否则 → 返回 None (安静)
-    │         │    │
-    │         │    └── 发送? → cooldown=12 (3min), reset last_activity_time
-    │         │
-    │         └── 60% → process_proactive()
-    │              │ _check_rate_limit("chat"): 距上次 < 30min → 拒绝
+    │         └── InnerDrive Agent 1 决策 (Stage 2 LLM推理, #125)
+    │              │ assess_proactive(idle) → ProactiveIntent
+    │              │   action: "chat" | "explore" | "silent"
+    │              │   topic_hint + reasoning → Agent 3 上下文
     │              │
-    │              │ prompt: is_proactive=True
-    │              │ "用户有一会儿没说话了。嘴贱一下开启话题"
-    │              │ "调侃一句/分享一下你在想啥/说好无聊"
+    │              ├── action="chat" → process_proactive(intent=intent)
+    │              │    │ _check_rate_limit("chat"): 距上次 < 30min → 拒绝
+    │              │    │ prompt: is_proactive=True + inner_drive_summary
+    │              │    │ topic 由 inner drive 推理而非随机选择
+    │              │    │ _react_loop(messages, add_to_history=False)
     │              │
-    │              │ topic: _pick_proactive_topic()
-    │              │   最近体验/用户事实/通用话题 随机选一
+    │              ├── action="explore" → process_explore(intent=intent)
+    │              │    │ _check_rate_limit("explore"): 距上次 < 1hr → 拒绝
+    │              │    │ prompt: explore_mode=True + inner_drive_summary
+    │              │    │ AI 可自由调用 web_search/web_fetch
+    │              │    │ 返回值: len > 30 且非工具输出 → 分享, 否则 None
     │              │
-    │              │ _react_loop(messages, add_to_history=False)
-    │              │ (主动回复不进入短期记忆)
-    │              │
-    │              └── 发送 → cooldown=12, reset last_activity_time
+    │              └── action="silent" → 不操作 (不消耗频率限制)
     │
     └── 未触发 → await sleep(15), continue
 ```
@@ -677,6 +691,8 @@ _proactive_loop (15s tick)
 | `ToolAttemptTracker` | core/tool_agent.py | 3 retries/round × 3 rounds max = 9 总尝试，失败回报 Agent 1 |
 | `_get_sleep_state()` | core/agent.py | 返回 (should_sleep, message_or_None) |
 | `_generate_dream()` | core/agent.py | LLM 生成 1-2 句碎片化梦境 |
+| `decide_proactive_action(idle)` | core/agent.py | Agent 1 InnerDrive LLM 决策主动行为: chat/explore/silent (#125) |
+| `assess_proactive(idle)` | core/inner_drive.py | InnerDrive 主动决策 prompt → ProactiveIntent |
 | `_check_rate_limit(action)` | core/agent.py | explore: 3600s 间隔, chat: 1800s 间隔 |
 | `_calculate_proactivity(idle)` | core/agent.py | 返回 0.0~0.8 的触发概率 |
 | `_pick_proactive_topic()` | core/agent.py | 从经历/事实/通用中随机选话题 |
@@ -692,19 +708,13 @@ self._proactive._last_explore_time: float  # 上次探索时间戳 (ProactivityM
 self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityManager)
 ```
 
-### 5.6 虚假操作检测（已由三层架构根治）
+### 5.6 虚假记忆修正（#6 已根治）
 
-三层架构从根本上解决了模型虚构工具调用的问题：
-- Agent 2 ToolAgent 仅负责工具执行，不在 prompt 中包含 personality 或对话历史，temperature=0.3 确保结果稳定，通过 `response_format={"type": "json_object"}` 启用 JSON mode 结构化输出
-- Agent 3 Roleplay Agent 的 prompt 中已完全移除外部工具指令（仅保留 recall/remember 两个内部工具）
-- dispatcher 三层解析（JSON 数组 / XML 正则 / 裸 JSON）确保工具调用可靠提取，模型不再有虚构工具行为的动机和空间
-
-```python
-def contains_fake_action(text):
-    # 旧版检测（三层架构下此问题已根本解决）
-    # 检测 LLM 声称执行了操作但未调工具
-    keywords = ["已发送", "已通知", "已记住", ...]
-```
+三层架构解决了工具调用虚构问题，**FactChecker (#6)** 进一步解决了事实层面的虚假记忆：
+- 矛盾检测（直接 + embedding 语义相似度）
+- 置信度衰减（×0.4 on contradiction，<0.2 软删除）
+- 用户纠正（RememberTool `correct=true` → confidence=1.0）
+- 检索过滤（confidence >= 0.2 SQL 过滤 + 评分权重）
 
 ---
 
@@ -842,9 +852,11 @@ _proactive_loop (15s tick)
     ├─ 空闲 < 30s? → skip
     │
     ├─ 空闲 > 情绪阈值?
-    │   └─ 随机命中?
-    │       ├─ 40% 探索 (1/hr limit) → 自由工具 → 有趣才分享
-    │       └─ 60% 聊天 (2/hr limit) → 主动搭话
+    │   └─ 随机命中? (Stage 1)
+    │       └─ InnerDrive 决策 (Stage 2, #125)
+    │           ├─ chat → 主动搭话 (2/hr)
+    │           ├─ explore → 自由工具 (1/hr)
+    │           └─ silent → 不操作
     └─ 未命中 → 等15s
 ```
 
@@ -904,9 +916,10 @@ history: list[str]      # 最近 10 轮情绪标签
 category: str           # preference/identity/event/relationship/routine
 fact_key: str
 fact_value: str
-confidence: float       # 0~1
+confidence: float       # 0~1, <0.2 检索时自动过滤, 0=虚假记忆
 importance: float       # 0~1（0.3 临时, 0.6 长期, 1.0 永久）
 composite_score: float  # 综合评分用于检索排序
+is_active: bool         # False=软删除（矛盾检测/用户纠正触发）
 ```
 
 ### 8.3 Experience
