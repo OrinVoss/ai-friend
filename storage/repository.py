@@ -6,19 +6,9 @@ from typing import Optional
 
 from models.memory import UserFact, Experience, Reflection
 from storage.database import Database
+from core.async_utils import run_async
 
 logger = logging.getLogger(__name__)
-
-
-def _run_sync(coro):
-    """Run coroutine in a thread-safe way for sync callers."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor() as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 
 class Repository:
@@ -26,8 +16,8 @@ class Repository:
         self.db = db
 
     # ── Sync wrappers ──
-    def insert_turn_sync(self, *a, **kw): return _run_sync(self.insert_turn(*a, **kw))
-    def get_recent_turns_sync(self, *a, **kw): return _run_sync(self.get_recent_turns(*a, **kw))
+    def insert_turn_sync(self, *a, **kw): return run_async(self.insert_turn(*a, **kw))
+    def get_recent_turns_sync(self, *a, **kw): return run_async(self.get_recent_turns(*a, **kw))
 
     # ── User Facts ──
 
@@ -77,6 +67,7 @@ class Repository:
                     SELECT * FROM user_facts
                     WHERE is_active = 1
                       AND confidence >= 0.2
+                      AND fact_type = 'user_fact'
                       AND (fact_key LIKE ? OR fact_value LIKE ? OR category LIKE ?)
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
@@ -98,6 +89,7 @@ class Repository:
                 SELECT * FROM user_facts
                 WHERE is_active = 1
                   AND confidence >= 0.2
+                  AND fact_type = 'user_fact'
                 ORDER BY composite_score DESC, recall_count DESC
                 LIMIT ?
             """, (limit,))
@@ -251,6 +243,18 @@ class Repository:
                 VALUES (?, ?)
             """, (dimension, value))
             await self.db.commit()
+
+    async def get_relationship_history(self, days: int = 30) -> list[dict]:
+        """Get relationship metric time-series for the last N days. (#132)"""
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT dimension, value, created_at
+                FROM relationship_snapshots
+                WHERE created_at >= datetime('now', ?)
+                ORDER BY created_at ASC
+            """, (f'-{days} days',))
+            return [{"dimension": r["dimension"], "value": r["value"],
+                     "created_at": r["created_at"]} for r in await c.fetchall()]
 
     # ── Conversation Turns ──
 

@@ -145,10 +145,17 @@ class MemoryConsolidator:
                                 importance = float(parts[5])
                             except ValueError:
                                 pass
+                        fact_type = "user_fact"  # default
+                        if len(parts) >= 7:
+                            fact_type = parts[6].strip() or "user_fact"
                         try:
                             confidence = float(conf_str)
                         except ValueError:
                             confidence = 0.5
+                        # #127: only store user_fact, skip agent_fact/system_fact
+                        if fact_type != "user_fact":
+                            logger.debug(f"Skipped non-user fact: {key} type={fact_type}")
+                            continue
                         if confidence > 0.3:
                             category = category.strip()
                             key = key.strip()

@@ -276,6 +276,11 @@ class MessageHandler:
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
         for t in a.short_term.get_all_reversed():
+            # #130: skip turns with stage directions / fake tool claims
+            if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
+                continue
+            if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
+                continue
             role = "assistant" if t.role == "assistant" else "user"
             if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
                 overflow = True

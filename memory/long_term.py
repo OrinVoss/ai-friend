@@ -5,6 +5,7 @@ from typing import Optional
 from models.memory import UserFact, Experience, Reflection
 from storage.repository import Repository
 from models.conversation import MemoryContext
+from core.async_utils import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -12,22 +13,11 @@ logger = logging.getLogger(__name__)
 class LongTermMemory:
     def __init__(self, repo: Repository):
         self.repo = repo
-        self._loop = None
 
-    @staticmethod
-    def _run_sync(coro):
-        """Run coroutine in a thread-safe way for sync callers. (#134)"""
-        try:
-            loop = asyncio.get_running_loop()
-            # Already in event loop: use run_in_executor to avoid nested event loop
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result(timeout=60)
-        except RuntimeError:
-            return asyncio.run(coro)
+    # ── Sync compatibility layer ──
+    # All sync callers use run_async from core/async_utils.py (#134)
 
-    # ── Async methods (primary) ──
+    def store_fact(self, *a, **kw): return run_async(self._store_fact(*a, **kw))
 
     async def _store_fact(self, category: str, key: str, value: str,
                          confidence: float = 1.0,
@@ -113,17 +103,18 @@ class LongTermMemory:
     # All existing sync callers use these proxies, no code changes needed.
 
     def store_fact(self, *a, **kw): return self._run_sync(self._store_fact(*a, **kw))
-    def search_facts(self, *a, **kw): return self._run_sync(self._search_facts(*a, **kw))
-    def get_all_active_facts(self, *a, **kw): return self._run_sync(self._get_all_active_facts(*a, **kw))
-    def store_experience(self, *a, **kw): return self._run_sync(self._store_experience(*a, **kw))
-    def search_experiences(self, *a, **kw): return self._run_sync(self._search_experiences(*a, **kw))
-    def get_recent_experiences(self, *a, **kw): return self._run_sync(self._get_recent_experiences(*a, **kw))
-    def store_reflection(self, *a, **kw): return self._run_sync(self._store_reflection(*a, **kw))
-    def get_recent_reflections(self, *a, **kw): return self._run_sync(self._get_recent_reflections(*a, **kw))
-    def get_relationship(self): return self._run_sync(self._get_relationship())
-    def update_relationship(self, *a, **kw): return self._run_sync(self._update_relationship(*a, **kw))
-    def build_context(self, *a, **kw): return self._run_sync(self._build_context(*a, **kw))
-    def deactivate_fact(self, *a, **kw): return self._run_sync(self._deactivate_fact(*a, **kw))
-    def update_fact_confidence(self, *a, **kw): return self._run_sync(self._update_fact_confidence(*a, **kw))
-    def correct_fact(self, *a, **kw): return self._run_sync(self._correct_fact(*a, **kw))
-    def get_similar_facts(self, *a, **kw): return self._run_sync(self.repo.get_similar_facts(*a, **kw))
+    def search_facts(self, *a, **kw): return run_async(self._search_facts(*a, **kw))
+    def get_all_active_facts(self, *a, **kw): return run_async(self._get_all_active_facts(*a, **kw))
+    def store_experience(self, *a, **kw): return run_async(self._store_experience(*a, **kw))
+    def search_experiences(self, *a, **kw): return run_async(self._search_experiences(*a, **kw))
+    def get_recent_experiences(self, *a, **kw): return run_async(self._get_recent_experiences(*a, **kw))
+    def store_reflection(self, *a, **kw): return run_async(self._store_reflection(*a, **kw))
+    def get_recent_reflections(self, *a, **kw): return run_async(self._get_recent_reflections(*a, **kw))
+    def get_relationship(self): return run_async(self._get_relationship())
+    def update_relationship(self, *a, **kw): return run_async(self._update_relationship(*a, **kw))
+    def build_context(self, *a, **kw): return run_async(self._build_context(*a, **kw))
+    def deactivate_fact(self, *a, **kw): return run_async(self._deactivate_fact(*a, **kw))
+    def update_fact_confidence(self, *a, **kw): return run_async(self._update_fact_confidence(*a, **kw))
+    def correct_fact(self, *a, **kw): return run_async(self._correct_fact(*a, **kw))
+    def get_similar_facts(self, *a, **kw): return run_async(self.repo.get_similar_facts(*a, **kw))
+    def get_relationship_history(self, *a, **kw): return run_async(self.repo.get_relationship_history(*a, **kw))
