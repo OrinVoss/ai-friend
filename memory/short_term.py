@@ -18,7 +18,12 @@ class ConversationBuffer:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self):
-        self._turns = deque(maxlen=self.maxlen)
+        # #140: only re-create deque if empty (preserve existing if data passed)
+        if not self._turns or len(self._turns) == 0:
+            self._turns = deque(maxlen=self.maxlen)
+        else:
+            old = list(self._turns)
+            self._turns = deque(old[-self.maxlen:], maxlen=self.maxlen)
 
     def add_turn(self, role: str, content: str,
                  metadata: Optional[dict] = None) -> Turn:

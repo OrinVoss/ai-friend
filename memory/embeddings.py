@@ -72,10 +72,21 @@ class EmbeddingEngine:
         return vec.astype(np.float32).tobytes()
 
     def health_check(self) -> bool:
-        """Check if embedding server is reachable."""
+        """Check if embedding server is reachable. Compatible with llama-server
+        and OpenAI-compatible APIs (text-embeddings-inference, etc.). (#139)"""
         try:
-            resp = self._session.get(
-                self._endpoint.replace("/embeddings", "/health"),
+            # Try /health endpoint first (llama-server)
+            health_url = self._endpoint.rsplit("/", 1)[0] + "/health"
+            resp = self._session.get(health_url, timeout=3)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+        # Fallback: try the embeddings endpoint directly
+        try:
+            resp = self._session.post(
+                self._endpoint,
+                json={"input": ["test"]},
                 timeout=5,
             )
             return resp.status_code == 200

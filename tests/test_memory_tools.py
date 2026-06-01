@@ -20,7 +20,7 @@ class TestRememberTool(unittest.TestCase):
         })
         self.assertTrue(result.success)
         self.ltm.store_fact.assert_called_once_with(
-            "preference", "最爱颜色", "蓝色", confidence=0.9, importance=0.6,
+            "preference", "最爱颜色", "蓝色", confidence=0.9, importance=0.6, fact_type="user_fact",
         )
 
     def test_execute_correction(self):

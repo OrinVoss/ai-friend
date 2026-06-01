@@ -52,33 +52,64 @@ class MemoryConsolidator:
                     max_experiences: int = 100,
                     max_reflections: int = 50) -> None:
         if not self._pending_buffer:
-            # Still prune even without new turns
             self._prune(max_facts, max_experiences, max_reflections)
             return
 
         turn_text = self._format_turns(self._pending_buffer)
         logger.info(f"Consolidating {len(self._pending_buffer)} turns...")
 
+        # #136: step-by-step with error isolation — each step independent
+        errors = []
+
         # Step 1: Extract user facts
-        self._extract_facts(turn_text)
+        try:
+            self._extract_facts(turn_text)
+        except Exception as e:
+            logger.warning(f"Fact extraction failed: {e}")
+            errors.append("facts")
 
         # Step 2: Summarize experiences
         if len(turn_text) > 200:
-            self._summarize_experience(turn_text, short_term)
+            try:
+                self._summarize_experience(turn_text, short_term)
+            except Exception as e:
+                logger.warning(f"Experience summarization failed: {e}")
+                errors.append("experiences")
 
-        # Step 3: Generate reflection (every consolidation)
-        self._generate_reflection(personality)
+        # Step 3: Generate reflection
+        try:
+            self._generate_reflection(personality)
+        except Exception as e:
+            logger.warning(f"Reflection generation failed: {e}")
+            errors.append("reflections")
 
-        # Step 4: Update relationship (lightweight, no LLM)
-        self._update_relationship(personality)
+        # Step 4: Update relationship
+        try:
+            self._update_relationship(personality)
+        except Exception as e:
+            logger.warning(f"Relationship update failed: {e}")
+            errors.append("relationship")
 
-        # Step 5: Prune to limits
-        self._prune(max_facts, max_experiences, max_reflections)
+        # Step 5: Prune
+        try:
+            self._prune(max_facts, max_experiences, max_reflections)
+        except Exception as e:
+            logger.warning(f"Pruning failed: {e}")
 
-        # Step 5.5: Batch encode new items for semantic search
-        self._embed_new_items()
+        # Step 6: Embed new items
+        try:
+            self._embed_new_items()
+        except Exception as e:
+            logger.warning(f"Embedding failed: {e}")
 
-        # Step 6: Clear pending
+        if errors:
+            logger.warning(f"Consolidation partial: {len(errors)} step(s) failed: {errors}")
+            # #136: only clear pending on full success, keep partial for retry
+            # But to avoid infinite loops, clear if all steps failed
+            if len(errors) < 4:
+                self._pending_buffer.clear()
+                logger.info(f"Consolidation partial ({len(errors)} errors), buffer retained for retry.")
+                return
         self._pending_buffer.clear()
         logger.info("Consolidation complete.")
 
@@ -104,7 +135,7 @@ class MemoryConsolidator:
             new_facts = []
             for line in result.strip().split("\n"):
                 line = line.strip()
-                if line.startswith("FACT|"):
+                if re.match(r'FACT\s*\|', line):  # #141: tolerate whitespace around |
                     parts = line.split("|")
                     if len(parts) >= 5:
                         _, category, key, value, conf_str = parts[:5]
@@ -125,6 +156,7 @@ class MemoryConsolidator:
                             self.ltm.store_fact(
                                 category, key, value,
                                 confidence, importance=importance,
+                                fact_type="user_fact",  # #127
                             )
                             logger.debug(f"Stored fact: {key} = {value} (imp={importance})")
                             new_facts.append((category, key, value, confidence))

@@ -16,14 +16,16 @@ class LongTermMemory:
 
     @staticmethod
     def _run_sync(coro):
-        """Run coroutine in a thread-safe way for sync callers."""
+        """Run coroutine in a thread-safe way for sync callers. (#134)"""
         try:
             loop = asyncio.get_running_loop()
+            # Already in event loop: use run_in_executor to avoid nested event loop
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result(timeout=60)
         except RuntimeError:
             return asyncio.run(coro)
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            return pool.submit(asyncio.run, coro).result()
 
     # ── Async methods (primary) ──
 
@@ -31,10 +33,11 @@ class LongTermMemory:
                          confidence: float = 1.0,
                          source_turn: Optional[int] = None,
                          importance: float = 0.5,
+                         fact_type: str = "user_fact",
                          embedding: Optional[bytes] = None) -> int:
-        logger.debug(f"[mem] store_fact: {category}/{key}")
+        logger.debug(f"[mem] store_fact: {category}/{key} type={fact_type}")
         return await self.repo.upsert_fact(category, key, value, confidence, source_turn,
-                                          importance, embedding)
+                                          importance, fact_type, embedding)
 
     async def _search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
         return await self.repo.search_facts(query, limit)

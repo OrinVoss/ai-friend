@@ -31,12 +31,16 @@ class Database:
             c = await self.conn.cursor()
             try:
                 yield c
-                await self.conn.commit()
             except aiosqlite.Error:
                 await self.conn.rollback()
                 raise
             finally:
                 await c.close()
+
+    async def commit(self) -> None:
+        """Explicit commit for write operations. (#142)"""
+        if self.conn:
+            await self.conn.commit()
 
     def get_connection(self):
         """Return connection for direct use (bulk operations). Caller must manage locking."""
@@ -113,6 +117,13 @@ class Database:
                     ('familiarity', 0.3),
                     ('intimacy', 0.3),
                     ('playfulness', 0.3);
+
+                CREATE TABLE IF NOT EXISTS relationship_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dimension TEXT NOT NULL,
+                    value REAL DEFAULT 0.3,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
 
             for table, column, col_type, default_val in [
@@ -125,6 +136,8 @@ class Database:
                 ("experiences", "embedding_version", "INTEGER", "0"),
                 ("reflections", "embedding", "BLOB", "NULL"),
                 ("reflections", "embedding_version", "INTEGER", "0"),
+                ("user_facts", "fact_type", "TEXT", "'user_fact'"),   # #127
+                ("conversation_turns", "is_tool_claim", "INTEGER", "0"),  # #130
             ]:
                 await c.execute(f"PRAGMA table_info({table})")
                 rows = await c.fetchall()

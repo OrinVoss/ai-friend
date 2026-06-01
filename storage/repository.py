@@ -34,14 +34,15 @@ class Repository:
     async def upsert_fact(self, category: str, key: str, value: str,
                           confidence: float = 1.0, source_turn: Optional[int] = None,
                           importance: float = 0.5,
+                          fact_type: str = "user_fact",
                           embedding: Optional[bytes] = None) -> int:
-        logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f}")
+        logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f} type={fact_type}")
         async with self.db.cursor() as c:
             if embedding is not None:
                 await c.execute("""
-                    INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance,
+                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
                                            source_turn, embedding, embedding_version, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
                     ON CONFLICT(category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
@@ -51,12 +52,12 @@ class Repository:
                         embedding = excluded.embedding,
                         embedding_version = 1,
                         updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, confidence, importance, source_turn, embedding))
+                """, (category, key, value, fact_type, confidence, importance, source_turn, embedding))
             else:
                 await c.execute("""
-                    INSERT INTO user_facts (category, fact_key, fact_value, confidence, importance,
+                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
                                            source_turn, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
@@ -64,7 +65,8 @@ class Repository:
                         importance = MAX(user_facts.importance, excluded.importance),
                         recall_count = user_facts.recall_count + 1,
                         updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, confidence, importance, source_turn))
+                """, (category, key, value, fact_type, confidence, importance, source_turn))
+            await self.db.commit()
             return c.lastrowid
 
     async def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
@@ -243,6 +245,12 @@ class Repository:
                 ON CONFLICT(dimension) DO UPDATE SET
                     value = ?, updated_at = CURRENT_TIMESTAMP
             """, (dimension, value, value))
+            # #132: insert snapshot for time-series tracking
+            await c.execute("""
+                INSERT INTO relationship_snapshots (dimension, value)
+                VALUES (?, ?)
+            """, (dimension, value))
+            await self.db.commit()
 
     # ── Conversation Turns ──
 
@@ -277,15 +285,17 @@ class Repository:
             if count <= max_count:
                 return 0
             excess = count - max_count
-            logger.info(f"[db] prune_facts: pruning {excess} of {count}")
+            logger.info(f"[db] prune_facts: degrading {excess} of {count}")
+            # #135: degrade score instead of deactivating — pruned facts can still be found
             await c.execute("""
-                UPDATE user_facts SET is_active = 0, composite_score = 0
+                UPDATE user_facts SET composite_score = composite_score * 0.1
                 WHERE id IN (
                     SELECT id FROM user_facts WHERE is_active = 1
                     ORDER BY composite_score ASC, recall_count ASC
                     LIMIT ?
                 )
             """, (excess,))
+            await self.db.commit()
             return c.rowcount
 
     async def prune_experiences(self, max_count: int) -> int:
@@ -330,11 +340,15 @@ class Repository:
     def _row_to_fact(self, r) -> UserFact:
         return UserFact(
             id=r["id"], category=r["category"], fact_key=r["fact_key"],
-            fact_value=r["fact_value"], confidence=r["confidence"],
+            fact_value=r["fact_value"],
+            fact_type=r["fact_type"] if "fact_type" in r.keys() else "user_fact",
+            confidence=r["confidence"],
             importance=r["importance"],
             source_turn=r["source_turn"], created_at=r["created_at"],
             updated_at=r["updated_at"], recall_count=r["recall_count"],
             is_active=bool(r["is_active"]), composite_score=r["composite_score"],
+            embedding=r["embedding"] if "embedding" in r.keys() else None,
+            embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
         )
 
     def _row_to_experience(self, r) -> Experience:

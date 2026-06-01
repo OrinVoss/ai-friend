@@ -101,13 +101,19 @@ class RememberTool(Tool):
                 },
                 "importance": {
                     "type": "number",
-                    "description": "重要性 0~1，0.3以下=临时 0.6=长期 1.0=永久（默认0.6）",
+                    "description": "重要性 0~1",
                     "default": 0.6,
                 },
                 "correct": {
                     "type": "boolean",
-                    "description": "如果是在纠正之前记住的错误信息，设为 true（默认 false）",
+                    "description": "纠正之前记住的错误信息",
                     "default": False,
+                },
+                "fact_type": {
+                    "type": "string",
+                    "enum": ["user_fact", "agent_fact", "system_fact"],
+                    "description": "事实主体类型（#127），默认 user_fact",
+                    "default": "user_fact",
                 },
             },
             "required": ["category", "key", "value"],
@@ -119,12 +125,12 @@ class RememberTool(Tool):
         value = args.get("value", "").strip()
         importance = float(args.get("importance", 0.6))
         is_correction = args.get("correct", False)
+        fact_type = args.get("fact_type", "user_fact")  # #127
 
         if not key or not value:
             return ToolResult.fail("请提供关键词和具体内容")
 
         if is_correction:
-            # Find and deactivate old conflicting facts with same category+key
             similar = self.ltm.search_facts(key, limit=5)
             old_id = None
             for f in similar:
@@ -132,9 +138,10 @@ class RememberTool(Tool):
                     old_id = f.id
                     break
             self.ltm.correct_fact(category, key, value, old_fact_id=old_id)
-            logger.info(f"Corrected fact: {category}/{key} = {value} (old_id={old_id})")
+            logger.info(f"Corrected fact: {category}/{key} = {value}")
             return ToolResult.ok(f"已纠正: {key} = {value}")
         else:
-            self.ltm.store_fact(category, key, value, confidence=0.9, importance=importance)
-            logger.info(f"Remembered: {category}/{key} = {value} (imp={importance})")
+            self.ltm.store_fact(category, key, value, confidence=0.9,
+                               importance=importance, fact_type=fact_type)
+            logger.info(f"Remembered: {category}/{key} = {value} type={fact_type}")
             return ToolResult.ok(f"已记住: {key} = {value}")

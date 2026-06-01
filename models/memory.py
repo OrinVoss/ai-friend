@@ -8,14 +8,17 @@ class UserFact:
     category: str = ""
     fact_key: str = ""
     fact_value: str = ""
+    fact_type: str = "user_fact"    # user_fact | agent_fact | system_fact (#127)
     confidence: float = 1.0
-    importance: float = 0.5       # 0~1: 这条信息多久后还有用
+    importance: float = 0.5
     source_turn: Optional[int] = None
     created_at: str = ""
     updated_at: str = ""
     recall_count: int = 0
     is_active: bool = True
     composite_score: float = 1.0
+    embedding: Optional[bytes] = None        # (#138)
+    embedding_version: int = 0               # (#138)
 
 
 @dataclass
