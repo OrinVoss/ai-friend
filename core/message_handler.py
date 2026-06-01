@@ -151,6 +151,17 @@ class MessageHandler:
             total = sum(r.total_calls for r in all_tool_results)
             ok = sum(r.success_count for r in all_tool_results)
             logger.info(f"[msg] agent2: {len(all_tool_results)} rounds, {total} calls, {ok} ok")
+            # Sync Agent 2 results to tool_call_history so prompt can show them
+            for r in all_tool_results:
+                for rec in r.records:
+                    a._tool_call_history.append({
+                        "name": rec.name,
+                        "success": rec.success,
+                        "output": rec.output[:200],
+                        "time": time.time(),
+                    })
+            if len(a._tool_call_history) > 20:
+                a._tool_call_history = a._tool_call_history[-20:]
 
         # ── Agent 3: Emotional expression ──
         return self._run_agent3(user_input, drive_result, tool_result, on_token=on_token)
@@ -206,6 +217,14 @@ class MessageHandler:
         explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容。用 web_search 和 web_fetch。"
         tool_result = self._tool_agent.run(explore_prompt)
         tool_records = self._tool_agent.format_for_phase2(tool_result)
+        # Sync Agent 2 explore results to tool_call_history
+        for rec in tool_result.records:
+            a._tool_call_history.append({
+                "name": rec.name, "success": rec.success,
+                "output": rec.output[:200], "time": time.time(),
+            })
+        if len(a._tool_call_history) > 20:
+            a._tool_call_history = a._tool_call_history[-20:]
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,

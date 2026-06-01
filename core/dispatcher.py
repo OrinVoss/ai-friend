@@ -1,6 +1,7 @@
 """Parse <tool_call> XML tags from LLM responses and execute tools."""
 
 import json
+import inspect
 import logging
 import re
 from typing import Optional
@@ -125,11 +126,10 @@ def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[d
             })
             continue
 
-        import asyncio
         try:
-            import inspect
+            from core.async_utils import run_async
             if inspect.iscoroutinefunction(tool.execute):
-                result: ToolResult = asyncio.run(tool.execute(args))
+                result: ToolResult = run_async(tool.execute(args))
             else:
                 result: ToolResult = tool.execute(args)
             results.append({
