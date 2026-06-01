@@ -29,3 +29,13 @@
 
 ## 测试
 272 passed
+
+## 追加修复：3 个交叉调用链 bug
+
+| # | 问题 | 文件 | 修复 |
+|---|------|------|------|
+| 1 | `asyncio.run()` 在事件循环中崩溃 | `core/dispatcher.py:132` | 改用 `run_async()` |
+| 2 | Agent 2 工具结果未写入 `_tool_call_history` | `core/message_handler.py:156` | 同步所有 Agent 2 records |
+| 3 | `handle_explore` 同理 | `core/message_handler.py:218` | 探索模式也同步 |
+
+**根因**：AI 逐文件修改时，调用链上其他文件仍然用旧代码，数据流断裂。
