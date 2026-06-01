@@ -303,8 +303,9 @@ Agent 1 重新评估 → 调整策略或放弃外部工具
     │    Block 6 — 对话示例                     │
     │    Block 7 — 最近对话 + 指令              │
     │                                          │
-    │ ② 构建 messages 数组                      │
+    │ ② 构建 messages 数组（#130 跳过舞台指示）  │
     │    [system_prompt, 历史对话..., 当前输入]  │
+    │    跳过"（调用..."等 AI 表演型工具调用     │
     │    动态算 token，塞到 80% 阈值             │
     │                                          │
     │ ③ POST https://api.deepseek.com/...      │
@@ -427,10 +428,11 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │  ③ 记忆合并检查                          │
     │     should_consolidate() → True?          │
     │       │                                  │
-    │       ├── ▶ LLM 抽取 facts               │
-    │       │    → FACT|identity|名字|小陈|0.9  │
-    │       │    → upsert user_facts           │
-    │       │    → FactChecker 矛盾检测 (#6)   │
+    │       ├── ▶ LLM 抽取 facts (#127)         │
+    │       │    → FACT|cat|key|val|conf|imp|type │
+    │       │    → 只存 user_fact，跳过非用户事实│
+    │       │    → upsert user_facts             │
+    │       │    → FactChecker 矛盾检测 (#6)     │
     │       │      同 key 不同 value → 衰减旧事实│
     │       │      语义相似 >0.65 → 矛盾处理   │
     │       │                                  │

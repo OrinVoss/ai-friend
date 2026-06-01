@@ -36,6 +36,7 @@ main.py / web_main.py
     │   ├── message_handler.py ── 消息入口（process_* 三方法）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
     │   ├── provider.py ───────── LLM API 客户端（OpenAI 兼容，流式，response_format JSON mode）
+    │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
     │   └── dispatcher.py ─────── tool_call 三层解析（JSON 数组 / XML / 裸 JSON）+ 工具调度
     │
     ├── memory/
@@ -393,8 +394,9 @@ prompt 注入：
 ```
 pending_turns
     │
-    ├ Step 1: LLM 抽取 facts
-    │   → FACT|category|key|value|confidence|importance
+    ├ Step 1: LLM 抽取 facts（#127 只提取 user_fact）
+    │   → FACT|category|key|value|confidence|importance|fact_type
+    │   → 跳过 agent_fact / system_fact（AI 行为/系统属性不入库）
     │   → upsert user_facts（UNIQUE(category, key)）
     │
     ├ Step 2: LLM 总结 experience

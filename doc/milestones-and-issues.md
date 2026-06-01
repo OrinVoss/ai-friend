@@ -1,6 +1,6 @@
 # 里程碑与 Issue
 
-> 最后更新：2026-06-01 | 总计 91 issues（49 已完成，42 开放）| 架构里程碑：三层 Agent (InnerDrive + ToolAgent + Roleplay) 已上线 | 语义搜索：Qwen3.5-0.8B 本地嵌入已上线 | #125 InnerDrive + 主动行为集成已上线 | #6 虚假记忆修正已上线
+> 最后更新：2026-06-01 | 总计 91 issues（60 已完成，31 开放）| 三层 Agent 已上线 | 语义搜索已上线 | #6 虚假记忆修正 | #125 主动行为集成 | #127-#142 数据质量根本修复
 
 ---
 
@@ -12,7 +12,7 @@
 | v0.2 | 记忆系统升级 | 9 | 4 | 5 | 44% |
 | v0.3 | 情感与人格 | 12 | 9 | 3 | 75% |
 | v0.4 | Web 工程化 | 9 | 2 | 7 | 22% |
-| v0.5 | 前瞻与质量 | 26 | 6 | 20 | 23% |
+| v0.5 | 前瞻与质量 | 26 | 17 | 9 | 65% |
 | v1.0 | 正式版发布 | 9 | 1 | 8 | 11% |
 | v2.0 | 远景合并 | 1 | 0 | 1 | 0% |
 
@@ -182,11 +182,20 @@
 | #64 | 内在驱动力 | 未完成对话 + 长期目标 + 思念状态驱动主动对话 |
 | #65 | 向量语义搜索 | ✅ 本地 Embedding 替换纯关键词检索（Qwen3.5-0.8B-Q6_K.gguf, 512维, llama.cpp, 混合评分 0.6/0.4） |
 | #125 | InnerDrive + 主动行为集成 | ✅ 两级门控：ProactivityManager 轻量预筛选 → InnerDrive LLM 决策（chat/explore/silent），替换随机话题和 40/60 分流 |
-| #127 | user_facts 主体识别缺失 | AI 幻觉/AI 行为/系统属性被错标为用户事实，需 Subject Disambiguation + agent_facts 表 |
-| #128 | 置信度系统失效 | confidence 基于 AI 自信而非真实性，需改为 verified/unverified/inferred |
-| #129 | user_facts 大量重复 | 同一事件被反复记录，需 embedding 相似度去重 + recall_count 合并 |
-| #130 | conversation_turns 幻觉存档 | AI 表演型工具调用被当作正常对话存档，污染 RAG 召回 |
-| #132 | relationship_metrics 无时间序列 | 4 条聚合记录，需改为每次交互快照形成曲线 |
+| #127 | user_facts 主体识别缺失 | ✅ LLM prompt 只提取 user_fact + 检索 SQL 过滤 fact_type='user_fact' |
+| #128 | 置信度系统失效 | ✅ #6 FactChecker: decay + <0.2 过滤 + 评分权重 |
+| #129 | user_facts 大量重复 | ✅ #6 FactChecker: 同 (category,key) 矛盾检测 → 衰减 |
+| #130 | conversation_turns 幻觉存档 | ✅ _build_messages 跳过舞台指示（括号开头对话） |
+| #132 | relationship_metrics 无时间序列 | ✅ relationship_snapshots 表 + get_relationship_history() |
+| #134 | _run_sync 线程问题 | ✅ 统一 core/async_utils.run_async 替换 3 处重复 |
+| #135 | MemoryRetriever 架构缺陷 | ✅ prune 降级 composite_score*0.1 替代 deactivate |
+| #136 | MemoryConsolidator 合并原子性 | ✅ 分步错误隔离，部分失败不清空 pending |
+| #137 | 数据模型字段不一致 | ✅ 模型补全 + 同步包装统一 |
+| #138 | 向量搜索未完全连接 | ✅ UserFact 模型补全 embedding/embedding_version + Repository 映射 |
+| #139 | health_check() 硬编码 | ✅ 回退到 /v1/embeddings 端点 |
+| #140 | deque 初始化问题 | ✅ __post_init__ 保留已有数据 |
+| #141 | FACT 格式解析严格 | ✅ re.match(r'FACT\s*\|') 容错空白 |
+| #142 | schema/cursor 问题 | ✅ schema_version 表 + commit() + relationship_snapshots 表 |
 | #66 | 分层反思 | L1 事实 → L2 模式 → L3 深度洞察 |
 | #67 | 虚假记忆修正 | 矛盾检测 + 置信度衰减 + 纠正高权重 |
 
