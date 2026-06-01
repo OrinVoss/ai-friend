@@ -75,6 +75,23 @@ class LongTermMemory:
     async def _update_relationship(self, dimension: str, value: float) -> None:
         await self.repo.upsert_relationship(dimension, value)
 
+    async def _deactivate_fact(self, fact_id: int) -> None:
+        await self.repo.deactivate_fact(fact_id)
+
+    async def _update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
+        await self.repo.update_fact_confidence(fact_id, new_confidence)
+
+    async def _correct_fact(self, category: str, key: str, value: str,
+                           old_fact_id: Optional[int] = None) -> int:
+        """User-corrected fact: deactivate old version, store new with confidence=1.0."""
+        logger.info(f"[mem] correct_fact: {category}/{key} = {value} (old_id={old_fact_id})")
+        if old_fact_id:
+            await self.repo.deactivate_fact(old_fact_id)
+        return await self.repo.upsert_fact(
+            category, key, value,
+            confidence=1.0, importance=0.9,
+        )
+
     async def _build_context(self, query: str = "") -> MemoryContext:
         facts = await self._search_facts(query, limit=10)
         keywords = [w for w in query.split() if len(w) > 1] if query else []
@@ -103,3 +120,7 @@ class LongTermMemory:
     def get_relationship(self): return self._run_sync(self._get_relationship())
     def update_relationship(self, *a, **kw): return self._run_sync(self._update_relationship(*a, **kw))
     def build_context(self, *a, **kw): return self._run_sync(self._build_context(*a, **kw))
+    def deactivate_fact(self, *a, **kw): return self._run_sync(self._deactivate_fact(*a, **kw))
+    def update_fact_confidence(self, *a, **kw): return self._run_sync(self._update_fact_confidence(*a, **kw))
+    def correct_fact(self, *a, **kw): return self._run_sync(self._correct_fact(*a, **kw))
+    def get_similar_facts(self, *a, **kw): return self._run_sync(self.repo.get_similar_facts(*a, **kw))

@@ -74,6 +74,7 @@ class Repository:
                 await c.execute("""
                     SELECT * FROM user_facts
                     WHERE is_active = 1
+                      AND confidence >= 0.2
                       AND (fact_key LIKE ? OR fact_value LIKE ? OR category LIKE ?)
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
@@ -82,6 +83,7 @@ class Repository:
                 await c.execute("""
                     SELECT * FROM user_facts
                     WHERE is_active = 1
+                      AND confidence >= 0.2
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
                 """, (limit,))
@@ -93,6 +95,7 @@ class Repository:
             await c.execute("""
                 SELECT * FROM user_facts
                 WHERE is_active = 1
+                  AND confidence >= 0.2
                 ORDER BY composite_score DESC, recall_count DESC
                 LIMIT ?
             """, (limit,))
@@ -107,6 +110,34 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ?",
                             (fact_id,))
+
+    async def deactivate_fact(self, fact_id: int) -> None:
+        """Soft-delete a fact (set is_active=0). Used when a fact is contradicted."""
+        logger.info(f"[db] deactivate_fact id={fact_id}")
+        async with self.db.cursor() as c:
+            await c.execute(
+                "UPDATE user_facts SET is_active = 0, composite_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (fact_id,))
+
+    async def update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
+        """Lower a fact's confidence (unlike upsert which only takes MAX)."""
+        logger.info(f"[db] update_fact_confidence id={fact_id} confidence={new_confidence:.2f}")
+        async with self.db.cursor() as c:
+            await c.execute(
+                "UPDATE user_facts SET confidence = ?, composite_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_confidence, new_confidence * 0.7, fact_id))
+
+    async def get_similar_facts(self, category: str, key: str, limit: int = 5) -> list[UserFact]:
+        """Find facts with similar category or key for contradiction checking."""
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM user_facts
+                WHERE is_active = 1
+                  AND (category = ? OR fact_key LIKE ?)
+                ORDER BY composite_score DESC
+                LIMIT ?
+            """, (category, f"%{key}%", limit))
+            return [self._row_to_fact(r) for r in await c.fetchall()]
 
     # ── Experiences ──
 

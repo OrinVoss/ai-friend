@@ -164,9 +164,11 @@ class MemoryRetriever:
 
     @staticmethod
     def _keyword_score_single(f: UserFact, keywords: list[str], query: str) -> float:
-        """Score a single fact by keyword match."""
+        """Score a single fact by keyword match. Low-confidence facts are penalized."""
         score = f.composite_score * 0.2
         score += f.importance * 0.3
+        # Confidence boost: higher confidence = higher score
+        score += f.confidence * 0.15
         keyword_hits = sum(1 for kw in keywords
                            if kw in f.fact_key.lower()
                            or kw in f.fact_value.lower()

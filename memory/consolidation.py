@@ -24,6 +24,8 @@ class MemoryConsolidator:
         self._embed = embedding_engine
         self._pending_buffer: list = []
         self._consolidation_count = 0
+        from memory.fact_checker import FactChecker
+        self._fact_checker = FactChecker(embedding_engine)
 
     def should_consolidate(self, turn_count: int, emotional_intensity: float,
                            idle_duration: float, config) -> bool:
@@ -99,6 +101,7 @@ class MemoryConsolidator:
         try:
             prompt = FACT_EXTRACTION_PROMPT.format(text=turn_text)
             result = self.llm(prompt, temperature=0.2)
+            new_facts = []
             for line in result.strip().split("\n"):
                 line = line.strip()
                 if line.startswith("FACT|"):
@@ -116,11 +119,25 @@ class MemoryConsolidator:
                         except ValueError:
                             confidence = 0.5
                         if confidence > 0.3:
+                            category = category.strip()
+                            key = key.strip()
+                            value = value.strip()
                             self.ltm.store_fact(
-                                category.strip(), key.strip(), value.strip(),
+                                category, key, value,
                                 confidence, importance=importance,
                             )
                             logger.debug(f"Stored fact: {key} = {value} (imp={importance})")
+                            new_facts.append((category, key, value, confidence))
+
+            # FactChecker: check new facts against existing ones for contradictions
+            if self._fact_checker and new_facts:
+                for cat, key, val, conf in new_facts:
+                    similar = self.ltm.get_similar_facts(cat, key, limit=5)
+                    from models.memory import UserFact
+                    new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
+                    old_f = self._fact_checker.detect_contradiction(new_f, similar)
+                    if old_f:
+                        self._fact_checker.resolve(new_f, old_f, self.ltm.repo)
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
 

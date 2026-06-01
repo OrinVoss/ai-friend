@@ -295,7 +295,7 @@ ai-friend/
 │   ├── message-flow.md        消息流转流程
 │   └── milestones-and-issues.md 里程碑 + 90 issue
 │
-├── tests/                     单元测试（200 用例）
+├── tests/                     单元测试（222 用例）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
@@ -308,7 +308,9 @@ ai-friend/
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
 │   ├── test_message_handler.py 消息处理测试（10 用例）
-│   └── test_agent_proactive.py Agent 主动行为测试（6 用例）
+│   ├── test_agent_proactive.py Agent 主动行为测试（6 用例）
+│   ├── test_fact_checker.py   FactChecker 矛盾检测测试（16 用例）
+│   └── test_memory_tools.py   记忆工具测试（6 用例）
 │
 ├── core/                      核心引擎（8 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
