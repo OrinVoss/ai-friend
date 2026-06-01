@@ -50,14 +50,17 @@ class FactChecker:
             new_text = f"{new_fact.category} {new_fact.fact_key} {new_fact.fact_value}"
             try:
                 new_vec = self._embed.encode([new_text])[0]
+                # Batch encode all existing facts to avoid N+1
+                old_texts = [
+                    f"{f.category} {f.fact_key} {f.fact_value}"
+                    for f in existing_facts
+                ]
+                old_vecs = self._embed.encode(old_texts)
                 best_sim = 0.0
                 best_match = None
-                for f in existing_facts:
-                    old_text = f"{f.category} {f.fact_key} {f.fact_value}"
-                    old_vec = self._embed.encode([old_text])[0]
-                    sim = self._cosine_sim(new_vec, old_vec)
+                for i, f in enumerate(existing_facts):
+                    sim = self._cosine_sim(new_vec, old_vecs[i])
                     if sim > best_sim and sim > SIMILARITY_THRESHOLD:
-                        # Check if values differ meaningfully
                         if f.fact_value.strip() != new_fact.fact_value.strip():
                             best_sim = sim
                             best_match = f
@@ -76,12 +79,8 @@ class FactChecker:
         self,
         new_fact: UserFact,
         old_fact: UserFact,
-        repo,
+        ltm,  # #207: LongTermMemory, not repo — use sync wrappers
     ) -> bool:
-        """Resolve a contradiction: lower old fact confidence, log the conflict.
-
-        Returns True if old fact was deactivated (confidence too low).
-        """
         new_conf = old_fact.confidence * CONTRADICTION_DECAY
         if new_conf < MIN_CONFIDENCE_FILTER:
             logger.warning(
@@ -89,7 +88,7 @@ class FactChecker:
                 f"'{old_fact.fact_key} = {old_fact.fact_value}' "
                 f"contradicted by '{new_fact.fact_key} = {new_fact.fact_value}'"
             )
-            repo.deactivate_fact(old_fact.id)
+            ltm.deactivate_fact(old_fact.id)  # sync wrapper
             return True
         else:
             logger.info(
@@ -97,7 +96,7 @@ class FactChecker:
                 f"{old_fact.confidence:.2f} -> {new_conf:.2f} "
                 f"(contradicted by '{new_fact.fact_key} = {new_fact.fact_value}')"
             )
-            repo.update_fact_confidence(old_fact.id, new_conf)
+            ltm.update_fact_confidence(old_fact.id, new_conf)  # sync wrapper
             return False
 
     @staticmethod

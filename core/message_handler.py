@@ -30,13 +30,15 @@ class MessageHandler:
         if self._inner_drive is None:
             from core.inner_drive import InnerDriveAgent
             a = self.a
+            # #203: create isolated registry for Agent 1 (recall/remember only)
+            isolated = self._make_internal_registry()
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,
                 personality=a.personality,
                 ltm=a.ltm,
                 retriever=a.retriever,
                 short_term=a.short_term,
-                tool_registry=a._tool_registry,
+                tool_registry=isolated,
             )
 
     def ensure_inner_drive(self):
@@ -94,14 +96,15 @@ class MessageHandler:
         all_tool_results = []  # accumulate results from all rounds
         tool_records = ""
         round_num = 0
+        tracker = ToolAttemptTracker()  # #204: create outside loop, increment per round
 
         while round_num < MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
             round_num += 1
+            tracker.round_number = round_num  # #204
             request_text = drive_result.tool_requests[0].description if drive_result.tool_requests else user_input
             logger.info(f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, request={request_text[:80]}")
 
             # Execute with retry
-            tracker = ToolAttemptTracker()
             tool_result = self._tool_agent.run_with_request(request_text)
             tracker.total_attempts += 1
             track_failures(tracker, tool_result)
@@ -164,7 +167,8 @@ class MessageHandler:
                 a._tool_call_history = a._tool_call_history[-20:]
 
         # ── Agent 3: Emotional expression ──
-        return self._run_agent3(user_input, drive_result, tool_result, on_token=on_token)
+        return self._run_agent3(user_input, drive_result, tool_result,
+                               tool_records=tool_records, on_token=on_token)
 
     def handle_proactive(self, on_token=None, intent=None) -> str:
         from prompts.system import build_system_prompt
@@ -260,7 +264,7 @@ class MessageHandler:
         return None
 
     def _run_agent3(self, user_input: str, drive_result, tool_result,
-                    on_token=None) -> str:
+                    on_token=None, tool_records: str = "") -> str:
         """Run Agent 3: emotional expression with inner drive + tool results."""
         from prompts.system import build_system_prompt
         a = self.a
@@ -271,7 +275,9 @@ class MessageHandler:
                                str(a.personality.emotion.to_dict()))
 
         conv_hist = a.short_term.format_for_prompt(max_chars=3000)
-        tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
+        # #205: use accumulated tool_records if provided, otherwise fall back to last round
+        if not tool_records:
+            tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,

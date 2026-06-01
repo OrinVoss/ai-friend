@@ -61,9 +61,8 @@ class TestConsolidationFactChecker(unittest.TestCase):
 
         # Old fact has low confidence (0.5), decayed to 0.2 → deactivated
         self.ltm.store_fact.assert_called_once()
-        # The resolve should have called deactivate_fact on repo
-        # (repo is accessed via self.ltm.repo)
-        self.ltm.repo.deactivate_fact.assert_called_once_with(99)
+        # The resolve should have called deactivate_fact on ltm (sync wrapper)
+        self.ltm.deactivate_fact.assert_called_once_with(99)
 
     def test_extract_facts_no_contradiction(self):
         """When new fact matches old, no deactivation needed."""

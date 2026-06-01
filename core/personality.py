@@ -123,13 +123,13 @@ class Personality:
         return cls(config, emotion)
 
     def save(self, path: str) -> None:
-        # #153: atomic write — write to .tmp then os.replace
-        import os
-        tmp = path + ".tmp"
+        # #153: atomic write with unique tmp name (#206: prevent concurrent write races)
+        import os, time
+        tmp = f"{path}.tmp.{os.getpid()}.{time.time_ns()}"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
-            os.replace(tmp, path)  # atomic on same filesystem
+            os.replace(tmp, path)
             logger.info(f"[personality] saved to: {path}")
         except Exception as e:
             logger.warning(f"[personality] save failed: {e}")

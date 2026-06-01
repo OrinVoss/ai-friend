@@ -191,7 +191,7 @@ class MemoryConsolidator:
                     new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
                     old_f = self._fact_checker.detect_contradiction(new_f, similar)
                     if old_f:
-                        self._fact_checker.resolve(new_f, old_f, self.ltm.repo)
+                        self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
 
