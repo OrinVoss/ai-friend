@@ -3,12 +3,16 @@ import fnmatch
 import logging
 import os
 import re
+import signal
 from typing import Any
 
 from tools.file_tools import _get_allowed_roots
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# #150: regex timeout to prevent ReDoS
+GREP_TIMEOUT = 5  # seconds per file match
 
 
 def _resolve_search_path(search_path: str) -> str | None:
@@ -156,7 +160,14 @@ class GrepTool(Tool):
             return ToolResult.fail(f"路径不在可访问范围内: {search_path}")
 
         try:
-            regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
+            # #150: validate regex doesn't have catastrophic backtracking patterns
+            if len(pattern) > 500:  # unreasonably long regex
+                return ToolResult.fail("正则表达式过长")
+            flags = re.IGNORECASE if ignore_case else 0
+            regex = re.compile(pattern, flags)
+            # Quick ReDoS check: reject nested quantifiers like (a+)+
+            if re.search(r'\(\s*[^)]+[\*\+]\s*\)[\*\+]', pattern):
+                return ToolResult.fail("正则表达式包含潜在的 ReDoS 模式，请简化")
         except re.error as e:
             return ToolResult.fail(f"正则表达式错误: {e}")
 

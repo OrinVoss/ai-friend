@@ -213,6 +213,14 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # #158: validate Origin header to prevent cross-origin WebSocket attacks
+    origin = websocket.headers.get("origin", "")
+    allowed = {"http://localhost:8000", "http://127.0.0.1:8000", "null"}
+    if origin and origin not in allowed and not origin.startswith("http://localhost"):
+        logger.warning(f"[ws] rejected origin: {origin}")
+        await websocket.close(code=4003)
+        return
+
     await websocket.accept()
     logger.info(f"[ws] accepted: {websocket.client.host}:{websocket.client.port}")
     session_id = None
@@ -220,6 +228,10 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             raw = await websocket.receive_text()
+            # #176: message size limit — 100KB
+            if len(raw) > 102400:
+                await websocket.send_text(json.dumps({"type": "error", "content": "消息过长（最大100KB）"}))
+                continue
             data = json.loads(raw)
             msg_type = data.get("type", "")
 

@@ -1,3 +1,4 @@
+import time
 import uuid
 import logging
 from threading import Lock
@@ -168,9 +169,26 @@ class SessionManager:
         """Get the currently active WebSocket for a session."""
         return self._active_ws.get(session_id)
 
-    def cleanup_old(self, max_sessions: int = 50) -> None:
+    def cleanup_old(self, max_sessions: int = 50, ttl_seconds: int = 86400) -> None:
+        """Remove idle sessions beyond max or TTL. (#148: 24h TTL)"""
+        now = time.time()
         with self._lock:
+            expired = [
+                sid for sid, agent in self._sessions.items()
+                if now - agent.agent.last_activity_time > ttl_seconds
+            ]
+            for sid in expired:
+                self._sessions.pop(sid, None)
+                task = self._proactive_tasks.pop(sid, None)
+                if task:
+                    task.cancel()
+                self._active_ws.pop(sid, None)
+                logger.info(f"Session expired (TTL): {sid}")
             while len(self._sessions) > max_sessions:
                 oldest = next(iter(self._sessions))
+                task = self._proactive_tasks.pop(oldest, None)
+                if task:
+                    task.cancel()
                 self._sessions.pop(oldest)
+                self._active_ws.pop(oldest, None)
                 logger.info(f"Session evicted: {oldest}")

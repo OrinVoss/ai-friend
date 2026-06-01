@@ -44,6 +44,10 @@ class NotifyTool(Tool):
         if not title or not message:
             return ToolResult.fail("标题和内容不能为空")
 
+        # #150: escape PowerShell injection characters
+        esc_title = title.replace('$', '`$').replace('"', '`"').replace("'", "`'")
+        esc_msg = message.replace('$', '`$').replace('"', '`"').replace("'", "`'")
+
         import subprocess, threading
 
         def _show():
@@ -51,8 +55,8 @@ class NotifyTool(Tool):
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null
 $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
 $textNodes = $template.GetElementsByTagName('text')
-$textNodes.Item(0).AppendChild($template.CreateTextNode('{title}')) > $null
-$textNodes.Item(1).AppendChild($template.CreateTextNode('{message}')) > $null
+$textNodes.Item(0).AppendChild($template.CreateTextNode('{esc_title}')) > $null
+$textNodes.Item(1).AppendChild($template.CreateTextNode('{esc_msg}')) > $null
 $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AI Friend').Show($toast)
 '''

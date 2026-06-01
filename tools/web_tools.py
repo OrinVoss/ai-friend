@@ -1,8 +1,11 @@
 """Web search and fetch tools using AnySearch API."""
+import ipaddress
 import json
 import logging
 import os
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -11,6 +14,41 @@ from tools.traits import Tool, ToolResult
 logger = logging.getLogger(__name__)
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
+
+# #155: private/loopback IP ranges to block for SSRF prevention
+_BLOCKED_CIDRS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _is_safe_url(url: str) -> bool:
+    """Check URL doesn't point to internal/private network. (#155)"""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        # Block raw IPs to private ranges
+        try:
+            addr = ipaddress.ip_address(hostname)
+            for cidr in _BLOCKED_CIDRS:
+                if addr in cidr:
+                    logger.warning(f"[web] blocked internal IP: {hostname}")
+                    return False
+        except ValueError:
+            pass  # hostname, not IP — check below
+        # Block localhost variants
+        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def _anysearch_api(tool_name: str, arguments: dict) -> dict:
@@ -126,6 +164,10 @@ class WebFetchTool(Tool):
 
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
+
+        # #155: SSRF prevention — block internal/private URLs
+        if not _is_safe_url(url):
+            return ToolResult.fail(f"出于安全原因，不能访问内网地址: {url}")
 
         logger.info(f"[tool] web_fetch url={url[:80]}")
         try:

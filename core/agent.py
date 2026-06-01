@@ -69,6 +69,7 @@ class Agent:
         self._proactive = ProactivityManager(
             personality=personality, ltm=ltm, short_term=short_term,
         )
+        self._tool_failures: int = 0  # #165: degradation counter
         e = self.personality.emotion
         neg_score = max(e.anger, e.sadness, e.disgust)
         if neg_score > 0.8:
@@ -158,6 +159,16 @@ class Agent:
             tools_were_called = True
             messages.append({"role": "assistant", "content": resp})
             results = execute_tool_calls(registry, calls)
+            # #165: degradation tracking — 3 consecutive failures → degrade
+            all_failed = all(not r["success"] for r in results)
+            if all_failed:
+                self._tool_failures += 1
+                if self._tool_failures >= 3:
+                    logger.warning(f"[react] degradation: {self._tool_failures} consecutive tool failures, skipping tools")
+                    final_text = "抱歉，我暂时无法获取外部信息，让我直接回复你吧。"
+                    break
+            else:
+                self._tool_failures = 0  # reset on success
             for r in results:
                 self._tool_call_history.append({
                     "name": r["name"],
