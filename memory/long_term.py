@@ -89,8 +89,7 @@ class LongTermMemory:
         facts = await self._search_facts(query, limit=10)
         keywords = [w for w in query.split() if len(w) > 1] if query else []
         experiences = await self._search_experiences(keywords, limit=5)
-        if not experiences:
-            experiences = await self._get_recent_experiences(limit=3)
+        # #194: don't fall back to recent experiences — they may be irrelevant
         reflections = await self._get_recent_reflections(limit=3)
         relationship = await self._get_relationship()
         logger.debug(f"[mem] context built: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
@@ -99,10 +98,9 @@ class LongTermMemory:
             reflections=reflections, relationship=relationship,
         )
 
-    # ── Sync compatibility layer ──
-    # All existing sync callers use these proxies, no code changes needed.
+    # ── Sync wrappers ──
 
-    def store_fact(self, *a, **kw): return self._run_sync(self._store_fact(*a, **kw))
+    def store_fact(self, *a, **kw): return run_async(self._store_fact(*a, **kw))  # #193: single definition
     def search_facts(self, *a, **kw): return run_async(self._search_facts(*a, **kw))
     def get_all_active_facts(self, *a, **kw): return run_async(self._get_all_active_facts(*a, **kw))
     def store_experience(self, *a, **kw): return run_async(self._store_experience(*a, **kw))
@@ -116,5 +114,7 @@ class LongTermMemory:
     def deactivate_fact(self, *a, **kw): return run_async(self._deactivate_fact(*a, **kw))
     def update_fact_confidence(self, *a, **kw): return run_async(self._update_fact_confidence(*a, **kw))
     def correct_fact(self, *a, **kw): return run_async(self._correct_fact(*a, **kw))
-    def get_similar_facts(self, *a, **kw): return run_async(self.repo.get_similar_facts(*a, **kw))
-    def get_relationship_history(self, *a, **kw): return run_async(self.repo.get_relationship_history(*a, **kw))
+    def get_similar_facts(self, category: str, key: str, limit: int = 5):  # #195: explicit params
+        return run_async(self.repo.get_similar_facts(category, key, limit))
+    def get_relationship_history(self, days: int = 30):  # #195: explicit params
+        return run_async(self.repo.get_relationship_history(days))

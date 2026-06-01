@@ -92,7 +92,11 @@ class MemoryRetriever:
             parts.append("相关反思：")
             for r in reflections:
                 parts.append(f"- {r.content}")
-        return "\n".join(parts) if parts else None
+        result = "\n".join(parts) if parts else None
+        # #192: limit total output to 2000 chars to avoid context bloat
+        if result and len(result) > 2000:
+            result = result[:2000] + "\n...[省略更多回忆]"
+        return result
 
     def check_recall_tag(self, response_text: str) -> Optional[str]:
         """Check if AI response contains [回忆:] and return query."""
@@ -103,7 +107,7 @@ class MemoryRetriever:
 
     # ── Hybrid scoring ──
 
-    def _hybrid_score(self, query: str, candidates: list, keywords: list) -> list:
+    def _hybrid_score(self, query: str, candidates: list[UserFact], keywords: list) -> list:  # #189: explicit type
         """Hybrid scoring: semantic (0.6) + keyword (0.4)."""
         SEMANTIC_WEIGHT = 0.6
         KEYWORD_WEIGHT = 0.4
@@ -136,7 +140,7 @@ class MemoryRetriever:
     def _search_experiences_semantic(self, query: str, recent: list,
                                      keywords: list) -> list:
         """Semantic + keyword hybrid experience search."""
-        all_exp = self.ltm.search_experiences(keywords, limit=15)
+        all_exp = self.ltm.search_experiences(keywords, limit=30)  # #190: wider candidate pool
         combined = self._merge_unique_experiences(all_exp, recent)
         if not combined or not self._embed:
             return all_exp

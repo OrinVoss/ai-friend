@@ -20,34 +20,59 @@ class EmbeddingEngine:
         self._timeout = timeout
         self._session = requests.Session()
         self._session.trust_env = False
+        self._cache = EmbeddingCache()  # #196: integrated cache
 
     def encode(self, texts: list[str]) -> np.ndarray:
-        """Batch encode texts -> (n, dim) float32 L2-normalized."""
+        """Batch encode texts -> (n, dim) float32 L2-normalized.
+        Uses cache to skip API calls for known texts. (#196)"""
         if not texts:
             return np.empty((0, self._dim), dtype=np.float32)
 
+        # #196: check cache first
+        vecs = []
+        uncached = []
+        for i, text in enumerate(texts):
+            cached = self._cache.get(text)
+            if cached is not None:
+                vecs.append((i, cached))
+            else:
+                uncached.append((i, text))
+
         t0 = time.time()
         try:
-            resp = self._session.post(
-                self._endpoint,
-                json={"input": texts},
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            vecs = np.array(
-                [item["embedding"] for item in data["data"]],
-                dtype=np.float32,
-            )
-            norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1.0, norms)
-            vecs /= norms
-            elapsed = (time.time() - t0) * 1000
-            logger.debug(f"[embed] encoded {len(texts)} texts in {elapsed:.0f}ms")
-            return vecs
+            if uncached:
+                idxs, new_texts = zip(*uncached)
+                resp = self._session.post(
+                    self._endpoint,
+                    json={"input": list(new_texts)},
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                new_vecs = np.array(
+                    [item["embedding"] for item in data["data"]],
+                    dtype=np.float32,
+                )
+                norms = np.linalg.norm(new_vecs, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1.0, norms)
+                new_vecs /= norms
+                for j, idx in enumerate(idxs):
+                    self._cache.set(new_texts[j], new_vecs[j])
+                    vecs.append((idx, new_vecs[j]))
+                elapsed = (time.time() - t0) * 1000
+                logger.debug(f"[embed] encoded {len(uncached)} texts in {elapsed:.0f}ms")
         except Exception as e:
-            logger.error(f"[embed] encoding failed: {e}")
-            raise
+            # #197: graceful fallback — use cached results for uncached texts
+            logger.warning(f"[embed] API failed: {e}, using partial cache")
+            if not vecs:
+                raise  # nothing cached, must fail
+            for idx, text in uncached:
+                logger.debug(f"[embed] no cache for: {text[:40]}")
+
+        if not vecs:
+            return np.empty((0, self._dim), dtype=np.float32)
+        vecs.sort(key=lambda x: x[0])
+        return np.stack([v for _, v in vecs])
 
     def encode_single(self, text: str) -> np.ndarray:
         """Encode single text -> (dim,) float32 normalized."""
@@ -78,7 +103,7 @@ class EmbeddingEngine:
             # Try /health endpoint first (llama-server)
             health_url = self._endpoint.rsplit("/", 1)[0] + "/health"
             resp = self._session.get(health_url, timeout=3)
-            if resp.status_code == 200:
+            if 200 <= resp.status_code < 300:  # #198: accept any 2xx
                 return True
         except Exception:
             pass

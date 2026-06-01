@@ -117,17 +117,24 @@ class MemoryConsolidator:
 
         if errors:
             logger.warning(f"Consolidation partial: {len(errors)} step(s) failed: {errors}")
-            # #136: only clear pending on full success, keep partial for retry
-            # But to avoid infinite loops, clear if all steps failed
-            if len(errors) < 4:
+            # #199: only clear pending on zero errors (full success)
+            # With 5 steps, any failure means buffer should be retained for retry
+            if len(errors) == 0:
                 self._pending_buffer.clear()
+                self._seen_ids.clear()
+                logger.info(f"Consolidation complete (full success).")
+            else:
                 logger.info(f"Consolidation partial ({len(errors)} errors), buffer retained for retry.")
                 return
         self._pending_buffer.clear()
+        self._seen_ids.clear()
+        logger.info("Consolidation complete.")
         logger.info("Consolidation complete.")
 
     def analyze_sentiment(self, text: str) -> tuple[float, bool, float]:
-        """Returns (sentiment, personal_sharing, topic_energy)"""
+        """Returns (sentiment, personal_sharing, topic_energy).
+        #200: on failure, returns (0.0, False, 0.5) — safe neutral fallback
+        that skips intimacy updates in _update_relationship."""
         try:
             prompt = EMOTION_ANALYSIS_PROMPT.format(text=text)
             result = self.llm(prompt, temperature=0.2)
