@@ -6,6 +6,10 @@
 - **memory/fact_checker.py** — FactChecker 类，embedding 语义相似度矛盾检测 + 置信度衰减/软删除
 - **tests/test_fact_checker.py** — 16 个单元测试（初始化/矛盾检测/解决/余弦相似度/常量）
 - **tests/test_memory_tools.py** — 6 个单元测试（RememberTool 存储/纠正/缺失参数）
+- **tests/test_repository.py** — 10 个单元测试（upsert/deactivate/update_confidence/get_similar/confidence过滤）
+- **tests/test_retrieval.py** — 8 个单元测试（keyword_score 置信度权重/recall惩罚/关键词提取）
+- **tests/test_web_agent.py** — 4 个单元测试（process_proactive/explore with/without intent）
+- **tests/test_consolidation.py** — 5 个单元测试（FactChecker 集成/矛盾检测/低置信度跳过）
 
 ### 修改
 - **storage/repository.py** — 新增 `deactivate_fact()`, `update_fact_confidence()`, `get_similar_facts()`；search_facts 和 get_active_facts 加 `confidence >= 0.2` 过滤
@@ -13,6 +17,10 @@
 - **memory/long_term.py** — 新增 `correct_fact()`（confidence=1.0+importance=0.9）+ 同步包装器
 - **tools/memory_tools.py** — RememberTool 新增 `correct` 参数，纠正模式走 correct_fact 路径
 - **memory/retrieval.py** — `_keyword_score_single` 加入 confidence 权重（0.15）
+- **README.md** — 测试数更新（222→250），新增 4 个测试文件
+- **doc/technical.md** — 新增 4.7 虚假记忆修正章节、fact_checker.py 模块、UserFact 模型更新
+- **doc/message-flow.md** — REFLECT 增加 FactChecker 矛盾检测步骤
+- **doc/milestones-and-issues.md** — #6 标记已完成，v0.2 4/9
 
 ## 核心机制
 
@@ -31,4 +39,4 @@
 - confidence=1.0 确保纠正不会被后续 upsert 覆盖
 
 ## 测试
-222 passed (+22), 8 skipped
+250 passed (+50), 8 skipped
