@@ -102,11 +102,13 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("UPDATE user_facts SET composite_score = ? WHERE id = ?",
                             (score, fact_id))
+            await self.db.commit()
 
     async def increment_fact_recall(self, fact_id: int) -> None:
         async with self.db.cursor() as c:
             await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ?",
                             (fact_id,))
+            await self.db.commit()
 
     async def deactivate_fact(self, fact_id: int) -> None:
         """Soft-delete a fact (set is_active=0). Used when a fact is contradicted."""
@@ -115,6 +117,7 @@ class Repository:
             await c.execute(
                 "UPDATE user_facts SET is_active = 0, composite_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (fact_id,))
+            await self.db.commit()
 
     async def update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
         """Lower a fact's confidence (unlike upsert which only takes MAX)."""
@@ -123,6 +126,7 @@ class Repository:
             await c.execute(
                 "UPDATE user_facts SET confidence = ?, composite_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_confidence, new_confidence * 0.7, fact_id))
+            await self.db.commit()
 
     async def get_similar_facts(self, category: str, key: str, limit: int = 5) -> list[UserFact]:
         """Find facts with similar category or key for contradiction checking."""
@@ -151,6 +155,7 @@ class Repository:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """, (summary, tone, significance, importance, json.dumps(tags, ensure_ascii=False),
                   turn_start, turn_end, embedding))
+            await self.db.commit()
             return c.lastrowid
 
     async def search_experiences(self, keywords: list[str] | None = None,
@@ -190,6 +195,7 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("UPDATE experiences SET composite_score = ? WHERE id = ?",
                             (score, exp_id))
+            await self.db.commit()
 
     # ── Reflections ──
 
@@ -203,6 +209,7 @@ class Repository:
                                          embedding, embedding_version)
                 VALUES (?, ?, ?, ?, ?, 1)
             """, (content, insight_type, json.dumps(related_ids), significance, embedding))
+            await self.db.commit()
             return c.lastrowid
 
     async def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
@@ -316,6 +323,7 @@ class Repository:
                 return 0
             excess = count - max_count
             logger.info(f"[db] prune_exps: pruning {excess} of {count}")
+            await self.db.commit()
             await c.execute("""
                 UPDATE experiences SET is_archived = 1
                 WHERE id IN (
@@ -324,6 +332,7 @@ class Repository:
                     LIMIT ?
                 )
             """, (excess,))
+            await self.db.commit()
             return c.rowcount
 
     async def prune_reflections(self, max_count: int) -> int:
@@ -342,6 +351,7 @@ class Repository:
                     LIMIT ?
                 )
             """, (excess,))
+            await self.db.commit()
             return c.rowcount
 
     # ── Helpers ──

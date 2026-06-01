@@ -44,9 +44,9 @@ class NotifyTool(Tool):
         if not title or not message:
             return ToolResult.fail("标题和内容不能为空")
 
-        # #150: escape PowerShell injection characters
-        esc_title = title.replace('$', '`$').replace('"', '`"').replace("'", "`'")
-        esc_msg = message.replace('$', '`$').replace('"', '`"').replace("'", "`'")
+        # #150: escape PowerShell injection — double single-quote in single-quoted strings
+        esc_title = title.replace("'", "''")
+        esc_msg = message.replace("'", "''")
 
         import subprocess, threading
 
@@ -65,8 +65,10 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
                     ['powershell', '-NoProfile', '-Command', ps],
                     capture_output=True, timeout=10,
                 )
-            except Exception:
+            except subprocess.TimeoutExpired:
                 pass
+            except Exception:
+                logger.warning(f"Notification failed: {title}")
 
         threading.Thread(target=_show, daemon=True).start()
         logger.info(f"Notification sent: {title}")

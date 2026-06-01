@@ -23,14 +23,14 @@ class ConversationBuffer:
 
     def add_turn(self, role: str, content: str,
                  metadata: Optional[dict] = None) -> Turn:
-        turn = Turn(
-            turn_id=self._next_id,
-            role=role,
-            content=content,
-            timestamp=datetime.now(),
-            metadata=metadata or {},
-        )
-        with self._lock:
+        with self._lock:  # #245: lock before Turn construction for atomic ID+append
+            turn = Turn(
+                turn_id=self._next_id,
+                role=role,
+                content=content,
+                timestamp=datetime.now(),
+                metadata=metadata or {},
+            )
             self._next_id += 1
             self._turns.append(turn)
         logger.debug(f"[mem] short_term add: role={role} len={len(content)} total={len(self._turns)}")

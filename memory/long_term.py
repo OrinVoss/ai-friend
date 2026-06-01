@@ -15,10 +15,7 @@ class LongTermMemory:
     def __init__(self, repo: Repository):
         self.repo = repo
 
-    # ── Sync compatibility layer ──
-    # All sync callers use run_async from core/async_utils.py (#134)
-
-    def store_fact(self, *a, **kw): return run_async(self._store_fact(*a, **kw))
+    # ── Async methods ──
 
     async def _store_fact(self, category: str, key: str, value: str,
                          confidence: float = 1.0,
