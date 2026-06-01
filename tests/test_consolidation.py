@@ -81,6 +81,40 @@ class TestConsolidationFactChecker(unittest.TestCase):
         self.ltm.repo.deactivate_fact.assert_not_called()
         self.ltm.repo.update_fact_confidence.assert_not_called()
 
+    # ── P1: error handling clears buffer ──
+
+    def test_consolidate_partial_failure_clears_buffer(self):
+        """P1: on any error, pending_buffer and seen_ids should be cleared."""
+        from models.conversation import Turn
+        t = Turn(turn_id=1, role="user", content="hello")
+        self.consolidator._pending_buffer = [t]
+        self.consolidator._seen_ids = {(1, "user")}
+
+        # Simulate fact extraction failure
+        self.consolidator._extract_facts = MagicMock(side_effect=Exception("LLM error"))
+        self.consolidator.consolidate(MagicMock(), MagicMock())
+
+        self.assertEqual(len(self.consolidator._pending_buffer), 0)
+        self.assertEqual(len(self.consolidator._seen_ids), 0)
+
+    def test_consolidate_full_success_clears_buffer(self):
+        """On full success, buffer should also be cleared."""
+        from models.conversation import Turn
+        t = Turn(turn_id=1, role="user", content="hello")
+        self.consolidator._pending_buffer = [t]
+        self.consolidator._seen_ids = {(1, "user")}
+        self.consolidator._extract_facts = MagicMock()
+        self.consolidator._summarize_experience = MagicMock()
+        self.consolidator._generate_reflection_l1 = MagicMock()
+        self.consolidator._update_relationship = MagicMock()
+        self.consolidator._prune = MagicMock()
+        self.consolidator._embed_new_items = MagicMock()
+
+        self.consolidator.consolidate(MagicMock(), MagicMock())
+
+        self.assertEqual(len(self.consolidator._pending_buffer), 0)
+        self.assertEqual(len(self.consolidator._seen_ids), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
