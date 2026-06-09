@@ -23,7 +23,9 @@ async def lifespan(app: FastAPI):
     logger.info("Server starting...")
     await session_manager.open()
     yield
+    # #212: graceful shutdown — save all sessions, close DB, checkpoint WAL
     logger.info("Server shutting down...")
+    await session_manager.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)

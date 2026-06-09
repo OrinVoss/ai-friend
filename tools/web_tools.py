@@ -162,7 +162,13 @@ class WebFetchTool(Tool):
         if not url:
             return ToolResult.fail("请提供URL")
 
+        # #241: proper URL validation — reject non-http schemes, fix protocol-relative URLs
+        if url.startswith("//"):
+            url = "https:" + url
         if not url.startswith(("http://", "https://")):
+            parsed = urlparse(url)
+            if parsed.scheme and parsed.scheme not in ("http", "https"):
+                return ToolResult.fail(f"不支持的协议: {parsed.scheme}，仅支持 http/https")
             url = "https://" + url
 
         # #155: SSRF prevention — block internal/private URLs

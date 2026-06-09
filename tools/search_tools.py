@@ -16,11 +16,12 @@ GREP_TIMEOUT = 5  # seconds per file match
 
 
 def _resolve_search_path(search_path: str) -> str | None:
-    """Resolve a search path, return absolute if within any allowed root."""
-    resolved = os.path.abspath(search_path)
+    """Resolve a search path, return realpath if within any allowed root. (#209)"""
+    resolved = os.path.realpath(search_path)
     for root in _get_allowed_roots():
         try:
-            if resolved.startswith(os.path.abspath(root)):
+            root_real = os.path.realpath(root)
+            if resolved.startswith(root_real + os.sep) or resolved == root_real:
                 return resolved
         except Exception:
             pass

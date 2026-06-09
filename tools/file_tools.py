@@ -49,11 +49,12 @@ def _get_allowed_roots() -> list[str]:
 
 
 def _path_in_allowed(filepath: str) -> str | None:
-    """Resolve and check path is in an allowed directory. Returns absolute path or None."""
-    resolved = os.path.abspath(filepath)
+    """Resolve and check path is in an allowed directory. Returns real path or None."""
+    resolved = os.path.realpath(filepath)  # #209: resolve symlinks/junctions
     for root in _get_allowed_roots():
         try:
-            if resolved.startswith(os.path.abspath(root)):
+            root_real = os.path.realpath(root)
+            if resolved.startswith(root_real + os.sep) or resolved == root_real:  # #209: boundary check
                 return resolved
         except Exception as e:
             logger.debug(f"Path check failed for root {root}: {e}")

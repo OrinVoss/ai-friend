@@ -192,3 +192,17 @@ class SessionManager:
                 self._sessions.pop(oldest)
                 self._active_ws.pop(oldest, None)
                 logger.info(f"Session evicted: {oldest}")
+
+    async def shutdown(self) -> None:
+        """Graceful shutdown: save all sessions, cancel tasks. (#212)"""
+        logger.info("Shutting down sessions...")
+        for sid, agent in list(self._sessions.items()):
+            try:
+                agent.agent.personality.save(agent.agent.config.personality_file)
+            except Exception as e:
+                logger.warning(f"Failed to save personality for {sid}: {e}")
+        self._sessions.clear()
+        for task in self._proactive_tasks.values():
+            task.cancel()
+        self._proactive_tasks.clear()
+        self._active_ws.clear()
