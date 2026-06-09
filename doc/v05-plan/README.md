@@ -6,7 +6,7 @@
 
 | 周 | 重点 | 状态 | P0/P1 closed |
 |----|------|------|-------------|
-| [第1周](week-1-hemostasis.md) | P0 + 安全关键 | ✅ P0 完成 | 6 P0 closed |
+| [第1周](week-1-hemostasis.md) | P0 + 安全关键 | ✅ 全部完成 | 9 issues closed |
 | [第2周](week-2-stabilization.md) | 核心可靠 | 待开始 | — |
 | [第3周](week-3-completion.md) | 质量补全 | 待开始 | — |
 | [第4周](week-4-finalize.md) | 收尾加固 | 待开始 | — |

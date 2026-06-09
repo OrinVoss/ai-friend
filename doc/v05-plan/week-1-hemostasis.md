@@ -1,8 +1,12 @@
-# 第1周：止血（P0 + 安全关键，15 个）✅ P0 已完成
+# 第1周：止血（全部完成 ✅）
 
 **目标**：消除所有已知的数据丢失、运行时崩溃、可被利用的安全漏洞。
 
-## 状态：P0 6/6 完成
+## 状态：全部完成 ✅ | P0 6/6 | P1 3/3 | 共 9 issues closed
+
+---
+
+## Day 1-2：P0 收尾（6 个）✅
 
 ---
 
@@ -51,20 +55,41 @@
 
 ---
 
-## Day 3-4：安全关键 P1（9 个）⏸ 待排期
+## Day 3-4：安全关键 P1（3 个）✅
 
-*以下 issue 视单人场景优先级重新评估后决定是否修*
+### #209 — 符号链接白名单绕过 ✅
 
-| # | 问题 | 单人影响 |
-|---|------|---------|
-| #209 | 符号链接白名单绕过 | 低 — 本地文件操作 |
-| #210 | ReDoS grep 超时 | 低 — 正则由 LLM 生成 |
-| #235 | WebSocket Origin 绕过 | 无 — 单人 localhost |
-| #212 | lifespan shutdown 空操作 | 中 — 优雅关闭 |
-| #241 | web_tools 协议检查 | 低 |
-| #233 | 前端 Cookie 安全标志 | 低 — 单人 |
-| #211 | WebSocket 多标签页竞争 | 无 — 单人 |
-| #234 | REST API 阻塞事件循环 | 低 — 单人 |
+- **文件**：`tools/file_tools.py:51-58`、`tools/search_tools.py:14-23`
+- **修复**：`os.path.abspath` → `os.path.realpath`，前缀匹配追加 `os.sep`
+- **commit**：9a9b40e
+- **GitHub**：#209 (closed)
+
+### #241 — web_tools URL 协议验证 ✅
+
+- **文件**：`tools/web_tools.py:165-170`
+- **修复**：`urlparse` 解析后检查 scheme，拒绝非 http/https，修复 `//example.com` 协议相对 URL
+- **commit**：9a9b40e
+- **GitHub**：#241 (closed)
+
+### #212 — lifespan shutdown 优雅关闭 ✅
+
+- **文件**：`web/server.py:22-27`、`web/session.py`（新增 `shutdown()`）
+- **修复**：shutdown 时保存所有 personality、cancel proactive tasks、清空 sessions
+- **commit**：9a9b40e
+- **GitHub**：#212 (closed)
+
+---
+
+## 已跳过（单人场景不适用）
+
+| # | 问题 | 原因 |
+|---|------|------|
+| #202 | repo.session_id 竞态 | 单人使用无跨 session |
+| #211 | WebSocket 多标签页竞争 | 单人使用 |
+| #233 | 前端 Cookie 安全标志 | 单人 localhost |
+| #234 | REST API 阻塞事件循环 | 单人不影响 |
+| #235 | WebSocket Origin 绕过 | 单人 localhost |
+| #210 | ReDoS grep 超时 | 正则由 LLM 生成，可信任 |
 
 ---
 
