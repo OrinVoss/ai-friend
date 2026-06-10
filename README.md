@@ -297,7 +297,7 @@ ai-friend/
 │   ├── api.md                  WebSocket/REST API 文档
 │   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
 │
-├── tests/                     单元测试（274 用例）
+├── tests/                     单元测试（290 用例）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
