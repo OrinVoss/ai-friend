@@ -49,6 +49,7 @@ class Database:
 
     def get_connection(self):
         """Return connection for direct use (bulk operations). Caller must manage locking."""
+        logger.warning("[db] get_connection() is deprecated — use cursor() instead")
         if self.conn is None:
             raise RuntimeError("Database not opened.")
         return self.conn

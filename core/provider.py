@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ class KimiProvider:
         self.timeout = timeout
         self.session = requests.Session()
         self.session.trust_env = False
+        # PR-002: connection pool with limited size
+        adapter = HTTPAdapter(pool_connections=5, pool_maxsize=10)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         self.session.headers.update({
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -65,6 +70,17 @@ class KimiProvider:
             except requests.exceptions.HTTPError as e:
                 last_error = e
                 if e.response.status_code < 500:
+                    # PR-004: parse Retry-After header for 429
+                    if e.response.status_code == 429:
+                        retry_after = e.response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                wait = int(retry_after)
+                            except ValueError:
+                                wait = 60
+                            logger.warning(f"[api] rate limited, waiting {wait}s (attempt {attempt+1}/3)")
+                            time.sleep(wait)
+                            continue
                     raise
                 wait = 2 ** attempt
                 logger.warning(f"[api] http error attempt={attempt+1}/3 retry_in={wait}s: {e}")
@@ -105,7 +121,11 @@ class KimiProvider:
             return content
 
         full_response = []
+        stream_deadline = time.time() + self.timeout
         for line in resp.iter_lines(decode_unicode=True):
+            if time.time() > stream_deadline:
+                logger.warning(f"[api] stream timeout after {self.timeout}s")
+                break
             if not line:
                 continue
             if line.startswith("data: "):

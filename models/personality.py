@@ -49,6 +49,10 @@ class EmotionalState:
     # Emotional inertia: 0 = instantly change, 1 = never change
     inertia: float = 0.3
 
+    # Default baseline: elastic anchor to prevent long-term drift (PS-014)
+    default_baseline_valence: float = 0.4
+    default_baseline_arousal: float = 0.3
+
     # Plutchik-inspired primary emotion dimensions (0.0 ~ 1.0)
     joy: float = 0.5
     trust: float = 0.5
@@ -68,6 +72,9 @@ class EmotionalState:
 
     # Recent emotion history for continuity
     history: list[str] = field(default_factory=lambda: ["neutral"] * 3)
+
+    # Break defense state: persisted across restarts
+    consecutive_negative: int = 0
 
     @property
     def dominant_emotion(self) -> str:
@@ -169,7 +176,7 @@ class EmotionalState:
 
         # Resentment caps joy ceiling
         if r > 0.2:
-            joy_ceiling = 1.0 - r * 0.5
+            joy_ceiling = max(0.0, 1.0 - r * 0.5)  # PS-009: guard against negative
             self.joy = min(self.joy, joy_ceiling)
 
     def shift(self, delta_v: float, delta_a: float,
@@ -191,8 +198,16 @@ class EmotionalState:
                     setattr(self, key, max(0.0, min(1.0, new_val)))
 
         # Accumulate resentment when anger peaks
+        # PS-012: forgiveness counter — 10 consecutive turns without anger halves resentment
         if self.anger > 0.6:
             self.resentment = min(1.0, self.resentment + self.anger * 0.15)
+            self._turns_without_anger = 0
+        else:
+            self._turns_without_anger = getattr(self, '_turns_without_anger', 0) + 1
+            if self._turns_without_anger >= 10 and self.resentment > 0.01:
+                self.resentment *= 0.5
+                self._turns_without_anger = 0
+                logger.info("[emotion] resentment halved by forgiveness (10 turns without anger)")
 
         # Cross-dimension modulation: emotions influence each other
         self._cross_modulate()
@@ -216,6 +231,9 @@ class EmotionalState:
         # Slow decay of baseline toward mood (hours-level)
         self.baseline_valence += (self.mood_valence - self.baseline_valence) * self.mood_decay_rate
         self.baseline_arousal += (self.mood_arousal - self.baseline_arousal) * self.mood_decay_rate
+        # PS-014: elastic pull toward default baseline to prevent long-term drift
+        self.baseline_valence += (self.default_baseline_valence - self.baseline_valence) * self.mood_decay_rate * 0.3
+        self.baseline_arousal += (self.default_baseline_arousal - self.baseline_arousal) * self.mood_decay_rate * 0.3
 
         # Decay primary emotions with per-emotion rates
         # Resentment slows anger and sadness decay

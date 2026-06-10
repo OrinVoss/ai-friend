@@ -9,6 +9,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# AU-001: module-level singleton executor
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
 
 def run_async(coro, timeout: float = 60.0):
     """Run an async coroutine from synchronous code safely.
@@ -23,10 +26,11 @@ def run_async(coro, timeout: float = 60.0):
         return asyncio.run(coro)
 
     # Already inside an event loop — use a thread to run the coroutine
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(asyncio.run, coro)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            logger.error(f"[async] coroutine timed out after {timeout}s")
-            raise
+    future = _EXECUTOR.submit(asyncio.run, coro)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        # AU-002: cancel future on timeout
+        future.cancel()
+        logger.error(f"[async] coroutine timed out after {timeout}s")
+        raise

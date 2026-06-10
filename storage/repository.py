@@ -79,6 +79,8 @@ class Repository:
                     SELECT * FROM user_facts
                     WHERE is_active = 1
                       AND confidence >= 0.2
+                      AND fact_type = 'user_fact'
+                      AND session_id = ?
                     ORDER BY composite_score DESC, recall_count DESC
                     LIMIT ?
                 """, (self.session_id, limit))
@@ -241,6 +243,7 @@ class Repository:
     async def upsert_relationship(self, dimension: str, value: float) -> None:
         logger.info(f"[db] upsert_rel: {dimension}={value:.2f}")
         async with self.db.cursor() as c:
+            await c.execute("BEGIN")
             await c.execute("""
                 INSERT INTO relationship_metrics (dimension, value, updated_at)
                 VALUES (?, ?, CURRENT_TIMESTAMP)

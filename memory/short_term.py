@@ -76,11 +76,3 @@ class ConversationBuffer:
     def is_full(self) -> bool:
         with self._lock:
             return len(self._turns) == self.maxlen  # #188: deque maxlen is a hard cap
-
-    @property
-    def last_n_turns_content(self) -> str:
-        with self._lock:
-            return "\n".join(
-                f"{'用户' if t.role == 'user' else '你'}: {t.content}"
-                for t in list(self._turns)[-5:]
-            )

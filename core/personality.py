@@ -102,6 +102,11 @@ class Personality:
             config = PersonalityConfig()
             return cls(config)
         try:
+            # PE-004: backup before reading
+            bak_path = path + ".bak"
+            if os.path.exists(path):
+                import shutil
+                shutil.copy2(path, bak_path)
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
@@ -112,7 +117,11 @@ class Personality:
         e_data = data.get("emotional_state", {})
 
         config = PersonalityConfig.from_dict(p_data)
-        emotion = EmotionalState.from_dict(e_data) if e_data else None
+        try:
+            emotion = EmotionalState.from_dict(e_data) if e_data else None
+        except Exception:
+            logger.warning(f"[personality] failed to parse emotional_state, using default")
+            emotion = None
         if emotion is None:
             emotion = EmotionalState(
                 baseline_valence=config.emotional_baseline.get("valence", 0.4),

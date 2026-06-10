@@ -70,14 +70,7 @@ class Agent:
             personality=personality, ltm=ltm, short_term=short_term,
         )
         self._tool_failures: int = 0  # #165: degradation counter
-        e = self.personality.emotion
-        neg_score = max(e.anger, e.sadness, e.disgust)
-        if neg_score > 0.8:
-            self._consecutive_negative = 4  # one push from breaking
-        elif neg_score > 0.5:
-            self._consecutive_negative = 2
-        else:
-            self._consecutive_negative = 0
+        self._consecutive_negative = self.personality.emotion.consecutive_negative
         self._prompt_shown: bool = False
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
@@ -127,58 +120,69 @@ class Agent:
         tools_were_called = False  # once real tools execute, "工具返回" in response is legitimate
         for _idx in range(self._max_tool_iterations):
             logger.debug(f"[react] iter={_idx+1}/{self._max_tool_iterations}")
-            resp = self.provider.generate(
-                messages, stream=False if _idx > 0 else True,
-                on_token=on_token if _idx == 0 else None,
-                max_tokens=max_tok if _idx == 0 else max(384, max_tok * 2 // 3),
-            )
-            cleaned, calls = parse_tool_calls(resp)
-            if not calls:
-                # Model produced no tool_call XML -- check if it's faking tool usage in prose.
-                # Only flag if no real tools were called yet in this loop; after real tool
-                # execution, phrases like "工具返回" are legitimate reporting, not fake.
-                if contains_fake_action(resp) and fake_action_count < 3 and not tools_were_called:
-                    fake_action_count += 1
-                    logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/3)")
-                    messages.append({"role": "assistant", "content": resp})
-                    messages.append({"role": "user", "content":
-                        "YOU DID NOT ACTUALLY CALL ANY TOOLS! "
-                        "You only described using tools in your text (like "
-                        '"calling web_fetch", "reading the link"), but you '
-                        "never output <tool_call> XML tags.\n\n"
-                        "If you need web content, search results, or file "
-                        "contents, you MUST output:\n"
-                        '<tool_call>\n{"name": "tool_name", "arguments": {...}}\n</tool_call>\n\n'
-                        "Tools will execute and return results to you. "
-                        "Answer again -- this time REALLY call the tools, "
-                        "do NOT describe calling them."
-                    })
-                    continue
-                final_text = cleaned
-                break
-            tools_were_called = True
-            messages.append({"role": "assistant", "content": resp})
-            results = execute_tool_calls(registry, calls)
-            # #165: degradation tracking — 3 consecutive failures → degrade
-            all_failed = all(not r["success"] for r in results)
-            if all_failed:
-                self._tool_failures += 1
-                if self._tool_failures >= 3:
-                    logger.warning(f"[react] degradation: {self._tool_failures} consecutive tool failures, skipping tools")
-                    final_text = "抱歉，我暂时无法获取外部信息，让我直接回复你吧。"
+            try:
+                resp = self.provider.generate(
+                    messages, stream=False if _idx > 0 else True,
+                    on_token=on_token if _idx == 0 else None,
+                    max_tokens=max_tok if _idx == 0 else max(384, max_tok * 2 // 3),
+                )
+                cleaned, calls = parse_tool_calls(resp)
+                if not calls:
+                    if contains_fake_action(resp) and fake_action_count < 3 and not tools_were_called:
+                        fake_action_count += 1
+                        logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/3)")
+                        messages.append({"role": "assistant", "content": resp})
+                        messages.append({"role": "user", "content":
+                            "YOU DID NOT ACTUALLY CALL ANY TOOLS! "
+                            "You only described using tools in your text (like "
+                            '"calling web_fetch", "reading the link"), but you '
+                            "never output <tool_call> XML tags.\n\n"
+                            "If you need web content, search results, or file "
+                            "contents, you MUST output:\n"
+                            '<tool_call>\n{"name": "tool_name", "arguments": {...}}\n</tool_call>\n\n'
+                            "Tools will execute and return results to you. "
+                            "Answer again -- this time REALLY call the tools, "
+                            "do NOT describe calling them."
+                        })
+                        continue
+                    final_text = cleaned
                     break
-            else:
-                self._tool_failures = 0  # reset on success
-            for r in results:
-                self._tool_call_history.append({
-                    "name": r["name"],
-                    "success": r["success"],
-                    "output": r["output"][:200],
-                    "time": time.time(),
-                })
-            if len(self._tool_call_history) > 20:
-                self._tool_call_history = self._tool_call_history[-20:]
-            messages.append({"role": "user", "content": format_tool_results(results)})
+                tools_were_called = True
+                messages.append({"role": "assistant", "content": resp})
+                results = execute_tool_calls(registry, calls)
+                # #165: degradation tracking — 3 consecutive failures → degrade
+                all_failed = all(not r["success"] for r in results)
+                if all_failed:
+                    self._tool_failures += 1
+                    if self._tool_failures >= 3:
+                        logger.warning(f"[react] degradation: {self._tool_failures} consecutive tool failures, skipping tools")
+                        final_text = "抱歉，我暂时无法获取外部信息，让我直接回复你吧。"
+                        break
+                else:
+                    self._tool_failures = 0  # reset on success
+                for r in results:
+                    self._tool_call_history.append({
+                        "name": r["name"],
+                        "success": r["success"],
+                        "output": r["output"][:200],
+                        "time": time.time(),
+                    })
+                if len(self._tool_call_history) > 20:
+                    self._tool_call_history = self._tool_call_history[-20:]
+                messages.append({"role": "user", "content": format_tool_results(results)})
+            except Exception:
+                logger.exception("[react] unexpected error in iteration")
+                if not final_text:
+                    final_text = "抱歉，我暂时无法处理，让我直接回复你吧。"
+                break
+
+        # AG-002: guard against empty response after loop exhaustion
+        if not final_text:
+            final_text = "抱歉，我暂时无法获取信息，让我直接回复你吧。"
+        # AG-005: hard fallback after 3 fake action corrections
+        if fake_action_count >= 3 and not tools_were_called:
+            final_text = "让我直接回复你吧。"
+        self._reset_react()
 
         if final_text:
             if add_to_history:
@@ -217,6 +221,8 @@ class Agent:
             self._consecutive_negative += 1
         elif sentiment > 0.1:
             self._consecutive_negative = max(0, self._consecutive_negative - 1)
+        # Persist to EmotionalState so personality.save() captures it
+        self.personality.emotion.consecutive_negative = self._consecutive_negative
 
         hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
         sentiment *= hurt_multiplier

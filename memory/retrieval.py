@@ -36,7 +36,8 @@ class MemoryRetriever:
 
         # Layer 2: hybrid or keyword scoring
         keywords = self._extract_keywords(query)
-        if self._embed and self._embed.health_check():
+        embed_ok = self._embed and self._embed.health_check()  # RT-003: cache result
+        if embed_ok:
             candidates = self._hybrid_score(query, hot_facts, keywords)
         else:
             candidates = self._score_facts(hot_facts, keywords, query)
@@ -55,7 +56,7 @@ class MemoryRetriever:
         selected_facts = candidates[:10]
 
         # Search experiences (semantic if available)
-        if self._embed and self._embed.health_check():
+        if embed_ok:
             keyword_experiences = self._search_experiences_semantic(
                 query, recent_experiences, keywords
             )
@@ -238,7 +239,7 @@ class MemoryRetriever:
         result = []
         for lst in lists:
             for e in lst:
-                if e.id not in seen:
+                if e.id is not None and e.id not in seen:
                     seen.add(e.id)
                     result.append(e)
         return result

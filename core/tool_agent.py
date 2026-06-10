@@ -169,21 +169,20 @@ class ToolAgent:
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
                 logger.info(f"[tool_agent] retry {attempt}/{max_retries}")
-                messages = [
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": (
-                        f"Agent 1 的内驱推理请求：\n{tool_request}\n\n"
-                        f"之前的尝试失败了（{last_failure}）。"
-                        "请调整方式后重新输出 JSON 格式的工具调用。"
-                    )},
-                ]
+                # TA-005: append failure context to existing messages instead of rebuilding
+                messages.append({"role": "assistant", "content": resp if 'resp' in dir() else ""})
+                messages.append({"role": "user", "content": (
+                    f"之前的尝试失败了（{last_failure}）。"
+                    "请调整方式后重新输出 JSON 格式的工具调用。"
+                )})
 
             resp = self._provider.generate(messages, stream=False, max_tokens=512,
                                           response_format=json_schema)
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
-                # Try parsing the response as a direct instruction
+                # TA-007: explicitly track parse failures
                 logger.debug("[tool_agent] no tool calls parsed from response")
+                last_failure = "解析失败：未能从响应中提取有效的工具调用"
                 continue
 
             messages.append({"role": "assistant", "content": resp})

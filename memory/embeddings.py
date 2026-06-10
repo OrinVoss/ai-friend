@@ -1,6 +1,7 @@
 """Local embedding engine via llama-server OpenAI-compatible API."""
 import hashlib
 import logging
+import threading
 import time
 from collections import OrderedDict
 
@@ -128,11 +129,12 @@ class EmbeddingEngine:
 
 
 class EmbeddingCache:
-    """LRU cache keyed by SHA-256 hash of input text."""
+    """LRU cache keyed by SHA-256 hash of input text. Thread-safe."""
 
     def __init__(self, max_size: int = 1000):
         self._max_size = max_size
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._lock = threading.Lock()
 
     @staticmethod
     def _hash(text: str) -> str:
@@ -140,33 +142,38 @@ class EmbeddingCache:
 
     def get(self, text: str, expected_dim: int | None = None) -> np.ndarray | None:
         key = self._hash(text)
-        if key in self._cache:
-            self._cache.move_to_end(key)
-            vec = self._cache[key]
-            if expected_dim is not None and len(vec) != expected_dim:
-                logger.warning(
-                    f"[embed_cache] dimension mismatch: cached={len(vec)}, expected={expected_dim}; "
-                    f"evicting stale entry"
-                )
-                del self._cache[key]
-                return None
-            return vec.copy()
-        return None
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                vec = self._cache[key]
+                if expected_dim is not None and len(vec) != expected_dim:
+                    logger.warning(
+                        f"[embed_cache] dimension mismatch: cached={len(vec)}, expected={expected_dim}; "
+                        f"evicting stale entry"
+                    )
+                    del self._cache[key]
+                    return None
+                return vec.copy()
+            return None
 
     def set(self, text: str, vec: np.ndarray):
         key = self._hash(text)
-        if key in self._cache:
-            self._cache.move_to_end(key)
-        self._cache[key] = vec.copy()
-        while len(self._cache) > self._max_size:
-            self._cache.popitem(last=False)
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = vec.copy()
+            while len(self._cache) > self._max_size:
+                self._cache.popitem(last=False)
 
     def invalidate(self, text: str):
         key = self._hash(text)
-        self._cache.pop(key, None)
+        with self._lock:
+            self._cache.pop(key, None)
 
     def clear(self):
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
     def __len__(self) -> int:
-        return len(self._cache)
+        with self._lock:
+            return len(self._cache)
