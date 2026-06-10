@@ -294,13 +294,14 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── models/                  数据模型
 ├── ui/                      CLI 界面
 └── web/                     Web 界面
-    ├── server.py            FastAPI + WebSocket
+    ├── server.py            FastAPI + WebSocket（详见 [API 文档](api.md)）
     ├── session.py           SessionManager
     └── static/              前端
 ```
 
 ## 相关链接
 
+- [API 文档](api.md)
 - [里程碑与 Issue](milestones-and-issues.md)
 - [技术文档](technical.md)
 - [消息流转](message-flow.md)

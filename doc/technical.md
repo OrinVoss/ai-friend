@@ -774,6 +774,8 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 
 ## 7. Web 界面
 
+> 完整 API 参考见 [API 文档](api.md)。
+
 ### 7.1 技术栈
 
 | 组件 | 技术 |
@@ -784,6 +786,8 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 | 运行 | Uvicorn（开发）/ 多 worker（生产） |
 
 ### 7.2 WebSocket 协议
+
+> 协议细节、消息格式、分段推送参数见 [API 文档](api.md#2-websocket-协议)。
 
 ```
 客户端 → 服务端:
