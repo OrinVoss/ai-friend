@@ -38,7 +38,7 @@ class Config:
     ])
     # Local embedding engine
     embedding_endpoint: str = "http://localhost:8080/v1/embeddings"
-    embedding_dim: int = 512
+    embedding_dim: int = 1024
     embedding_cache_size: int = 1000
 
 
