@@ -36,8 +36,8 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 ## 关键命令
 
 - `pip install -r requirements.txt` — 安装依赖
-- `python main.py` — CLI 模式启动
-- `python web_main.py` — Web 模式启动（http://localhost:8000）
+- `python main.py` — CLI 模式启动（自动启动嵌入服务器）
+- `python web_main.py` — Web 模式启动（http://localhost:8000，自动启动嵌入服务器）
 - 提交前运行 `python -m py_compile *.py core/*.py memory/*.py storage/*.py tools/*.py web/*.py models/*.py prompts/*.py` 检查语法
 
 ## Bug 修复流程
