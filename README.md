@@ -293,9 +293,11 @@ ai-friend/
 │   ├── architecture.md        架构总览 + 使用指南
 │   ├── technical.md           技术细节（全模块）
 │   ├── message-flow.md        消息流转流程
-│   └── milestones-and-issues.md 里程碑 + 90 issue
+│   ├── milestones-and-issues.md 里程碑 + 190 issue
+│   ├── api.md                  WebSocket/REST API 文档
+│   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
 │
-├── tests/                     单元测试（264 用例）
+├── tests/                     单元测试（274 用例）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
@@ -312,8 +314,10 @@ ai-friend/
 │   ├── test_repository.py    Repository 数据访问测试（10 用例）
 │   ├── test_retrieval.py      检索评分置信度测试（8 用例）
 │   ├── test_web_agent.py      WebAgent 主动行为测试（4 用例）
-│   ├── test_consolidation.py  记忆合并 FactChecker 集成测试（5 用例）
-│   └── test_v02_issues.py     v0.2 综合测试（14 用例）
+│   ├── test_consolidation.py  记忆合并 FactChecker 集成测试（7 用例）
+│   ├── test_v02_issues.py     v0.2 综合测试（14 用例）
+│   ├── test_fact_checker.py   矛盾检测测试（16 用例）
+│   └── test_memory_tools.py   记忆工具测试（6 用例）
 │
 ├── core/                      核心引擎（8 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
@@ -327,14 +331,16 @@ ai-friend/
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
 │   ├── provider.py             LLM API 客户端（OpenAI 兼容，trust_env=False，支持 response_format JSON mode）
 │   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
+│   ├── async_utils.py         异步→同步桥接 run_async()（线程池安全）
 │   └── dispatcher.py           tool_call 三层解析（JSON calls 数组 + XML 正则 + 裸 JSON）+ 执行 + 别名归一化
 │
 ├── memory/                    记忆系统
 │   ├── short_term.py           ConversationBuffer（deque, 线程安全, get_all_reversed）
 │   ├── long_term.py            LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
-│   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 512维, LRU cache）
-│   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4）
-│   └── consolidation.py        记忆合并（事实/体验/反思）+ 自动嵌入编码
+│   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 512维, LRU cache + 线程锁）
+│   ├── fact_checker.py         矛盾检测 + 置信度衰减 + 用户纠正（语义相似度→衰减→软删除）
+│   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
+│   └── consolidation.py        记忆合并（事实/体验/反思/分层反思L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
 │   ├── traits.py               Tool 基类 + to_json_schema() + ToolResult + ToolRegistry

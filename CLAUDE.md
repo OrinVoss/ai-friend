@@ -19,14 +19,18 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
                            │
 共享核心 ──────────────────┘
   三层 Agent 架构：Agent 1 InnerDrive → Agent 2 ToolAgent → Agent 3 Roleplay
-  core/inner_drive.py   Agent 1：自主推理 + 记忆检索 + 缺口决策（输出自然语言工具请求）
+  core/inner_drive.py   Agent 1：自主推理 + 记忆检索 + 缺口决策 + 主动行为决策（chat/explore/silent）
   core/tool_agent.py    Agent 2：外部工具执行 + ToolAttemptTracker（3retry×3round）
-  core/agent.py         Agent 3：ReAct Agent（状态机 + event-driven 双路径）
+  core/agent.py         Agent 3：ReAct Agent + 降级（3次工具失败→跳过）+ 破防机制
   core/personality.py   情绪引擎（四层：输入→调制+衰减→怨恨→事件记忆）
   core/provider.py      DeepSeek API 客户端（trust_env=False）
-  memory/               短期(LRU+Lock) / 长期(SQLite) / 检索(三层) / 合并
+  core/async_utils.py   异步→同步桥接（run_async，线程池安全，60s 超时）
+  memory/               短期(LRU+Lock) / 长期(SQLite) / FactChecker(矛盾+衰减) / 检索(三层)
+  storage/repository.py session_id 隔离 + commit 强制 + get_similar_facts
   tools/                Agent 1,3: recall/remember / Agent 2: web_fetch/web_search/read_file/glob/grep/music/notify
   models/personality.py EmotionalState（VAD + 8 Plutchik + resentment + emotion_events）
+  web/server.py         FastAPI + WebSocket + proactive_loop（作息/探索/聊天）
+  web/session.py        SessionManager（24h TTL + 引用计数 + shutdown 优雅关闭）
 ```
 
 ## 关键命令
