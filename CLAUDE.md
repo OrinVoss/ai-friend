@@ -51,7 +51,8 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 
 - 写技术文档时善于使用 ASCII 图（流程图、状态机、架构图、数据流图）来表达
 - 更新代码的同时更新对应的 doc、README、changes
-- README 和 doc/architecture.md 保持同步更新
+- README 和 doc/architecture.md、doc/api.md 保持同步更新
+- doc/ 下已有 12 份文档：architecture.md, technical.md, message-flow.md, api.md, config-reference.md, personality-guide.md, testing-guide.md, tool-development.md, prompt-reference.md, deployment.md, milestones-and-issues.md, db-report.html
 
 ## 代码规范
 

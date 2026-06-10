@@ -629,4 +629,6 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 - [架构总览](architecture.md)
 - [技术文档](technical.md)
 - [消息流转](message-flow.md)
+- [配置参考](config-reference.md)
+- [部署手册](deployment.md)
 - [里程碑与 Issue](milestones-and-issues.md)

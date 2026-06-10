@@ -302,6 +302,12 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ## 相关链接
 
 - [API 文档](api.md)
+- [配置参考](config-reference.md)
+- [人格定制指南](personality-guide.md)
+- [测试指南](testing-guide.md)
+- [工具开发指南](tool-development.md)
+- [Prompt 工程参考](prompt-reference.md)
+- [部署手册](deployment.md)
 - [里程碑与 Issue](milestones-and-issues.md)
 - [技术文档](technical.md)
 - [消息流转](message-flow.md)

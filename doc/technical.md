@@ -508,6 +508,8 @@ pending_turns
 
 ## 5. 工具系统
 
+> 工具开发指南见 [工具开发文档](tool-development.md)。
+
 ### 5.1 Tool 基类
 
 ```python
@@ -721,6 +723,8 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 ---
 
 ## 6. 提示词工程
+
+> 完整 Prompt 模板参考见 [Prompt 工程参考](prompt-reference.md)。
 
 ### 6.1 System Prompt 组装
 
@@ -1010,6 +1014,8 @@ class Database:
 
 ## 10. 配置系统
 
+> 完整配置字段说明见 [配置参考](config-reference.md) 和 [人格定制指南](personality-guide.md)。
+
 优先级：环境变量（计划中） > config.json > Config dataclass
 
 ```json
@@ -1040,6 +1046,8 @@ class Database:
 ---
 
 ## 11. 部署说明
+
+> 生产部署指南见 [部署手册](deployment.md)。
 
 ### 环境
 

@@ -295,6 +295,13 @@ ai-friend/
 │   ├── message-flow.md        消息流转流程
 │   ├── milestones-and-issues.md 里程碑 + 190 issue
 │   ├── api.md                  WebSocket/REST API 文档
+│   ├── config-reference.md    配置参考
+│   ├── personality-guide.md   人格定制指南
+│   ├── tool-development.md    工具开发指南
+│   ├── prompt-reference.md    Prompt 工程参考
+│   ├── testing-guide.md       测试指南
+│   ├── deployment.md          部署手册
+│   ├── db-report.html         数据库诊断报告
 │   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
 │
 ├── tests/                     单元测试（290 用例）
@@ -405,10 +412,18 @@ _proactive_loop (15s)
 
 ## 相关链接
 
-- [里程碑与 Issue](doc/milestones-and-issues.md) — 90 issue，7 个里程碑（v0.1~v2.0）
+- [架构文档](doc/architecture.md) — 快速开始与架构总览
+- [API 文档](doc/api.md) — WebSocket + REST API
 - [技术文档](doc/technical.md) — 完整技术细节
 - [消息流转](doc/message-flow.md) — CLI/Web/自主行为三路径详解
-- [架构文档](doc/architecture.md) — 快速开始与架构总览
+- [配置参考](doc/config-reference.md) — 全部配置项说明
+- [人格定制指南](doc/personality-guide.md) — 自定义 AI 人格
+- [工具开发指南](doc/tool-development.md) — 添加新工具
+- [Prompt 工程参考](doc/prompt-reference.md) — 提示词模板
+- [测试指南](doc/testing-guide.md) — 运行和编写测试
+- [部署手册](doc/deployment.md) — 生产环境部署
+- [里程碑与 Issue](doc/milestones-and-issues.md) — 189 issue，7 个里程碑（v0.1~v2.0）
+- [v0.5 修复计划](doc/v05-plan/README.md) — 178 Issue 一月修复计划
 
 ## License
 
