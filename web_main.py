@@ -24,21 +24,31 @@ def _auto_start_embedding(logger, endpoint="http://localhost:8080/v1/embeddings"
         pass
 
     project = os.path.dirname(os.path.abspath(__file__))
-    llama_server = os.path.join(project, "memory", "llama-bin", "llama-server.exe")
     model = os.path.join(project, "memory", "Qwen3.5-0.8B-Q6_K.gguf")
-    if not os.path.exists(llama_server) or not os.path.exists(model):
-        logger.info("[embed] binary or model not found, skipping auto-start")
+    if not os.path.exists(model):
+        logger.info("[embed] model not found, skipping auto-start")
         return
 
     logger.info("[embed] starting embedding server...")
     try:
-        subprocess.Popen(
-            [llama_server, "-m", model, "--embeddings", "--port", "8080",
-             "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
-             "--threads", "4", "--host", "127.0.0.1"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        for i in range(10):
+        bat_path = os.path.join(project, "start_embedding_server.bat")
+        if os.path.exists(bat_path):
+            subprocess.Popen(
+                [bat_path],
+                cwd=project,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                [os.path.join("memory", "llama-bin", "llama-server.exe"),
+                 "-m", os.path.join("memory", "Qwen3.5-0.8B-Q6_K.gguf"),
+                 "--embeddings", "--port", "8080",
+                 "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
+                 "--threads", "4", "--host", "127.0.0.1"],
+                cwd=project,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        for i in range(30):  # 640MB model may take 15-30s to load
             time.sleep(1)
             try:
                 resp = urllib.request.urlopen(endpoint, timeout=1)
