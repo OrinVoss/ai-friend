@@ -22,6 +22,9 @@ def setup_logging(level: str = "INFO") -> None:
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
+    # Remove existing handlers before adding new ones (prevent duplicates on re-setup)
+    root.handlers.clear()
+
     # File handler — full timestamp
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setFormatter(fmt)
