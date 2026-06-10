@@ -43,6 +43,10 @@
 
 ### storage/database.py
 - **S-005**: `get_connection()` 添加 `@deprecated` 警告
+- **DB锁修复**: `asyncio.Lock` 事件循环适配——session 重连后自动重建锁
+
+### core/sleep_manager.py
+- **SL-111**: 梦境生成后保存为 Experience（`store_experience`）
 
 ### memory/retrieval.py
 - **RT-003**: `health_check` 结果缓存变量（避免同次查询调用两次）

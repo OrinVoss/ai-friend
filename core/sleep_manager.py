@@ -112,8 +112,17 @@ class SleepManager:
                 trigger=f"梦: {dream.strip()[:100]}",
                 context=dream.strip()[:200],
             )
-            logger.info(f"[dream] generated: {dream.strip()[:60]}")
-            return dream.strip()
+            # SL-111: save dream as experience
+            dream_text = dream.strip()
+            if dream_text:
+                self._ltm.store_experience(
+                    summary=f"梦境：{dream_text}",
+                    tone=self._personality.emotion.dominant_emotion,
+                    significance=0.3,
+                    tags=["dream"],
+                )
+            logger.info(f"[dream] generated: {dream_text[:60]}")
+            return dream_text
         except Exception:
             logger.debug("[dream] generation failed")
             return ""

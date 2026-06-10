@@ -11,8 +11,17 @@ logger = logging.getLogger(__name__)
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._lock = asyncio.Lock()
+        self._lock_init: asyncio.Lock | None = None
+        self._lock_loop_id: int = 0
         self.conn: aiosqlite.Connection | None = None
+
+    async def _get_lock(self) -> asyncio.Lock:
+        """Return an asyncio.Lock bound to the current event loop."""
+        current_loop_id = id(asyncio.get_running_loop())
+        if self._lock_init is None or self._lock_loop_id != current_loop_id:
+            self._lock_init = asyncio.Lock()
+            self._lock_loop_id = current_loop_id
+        return self._lock_init
 
     async def open(self) -> None:
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
@@ -32,7 +41,8 @@ class Database:
     async def cursor(self):
         if self.conn is None:
             raise RuntimeError("Database not opened. Call await db.open() first.")
-        async with self._lock:
+        lock = await self._get_lock()
+        async with lock:
             c = await self.conn.cursor()
             try:
                 yield c
