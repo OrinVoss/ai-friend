@@ -3,6 +3,9 @@
 
 import asyncio
 import logging
+import os
+import subprocess
+import time
 
 from config import load_config
 from core.agent import Agent
@@ -25,11 +28,52 @@ from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
 
+def _auto_start_embedding(logger, endpoint="http://localhost:8080/v1/embeddings"):
+    """Start embedding server if not running. Non-blocking after launch."""
+    import urllib.request
+    try:
+        resp = urllib.request.urlopen(endpoint, timeout=2)
+        resp.read()
+        logger.info("[embed] server already running")
+        return
+    except Exception:
+        pass
+
+    project = os.path.dirname(os.path.abspath(__file__))
+    llama_server = os.path.join(project, "memory", "llama-bin", "llama-server.exe")
+    model = os.path.join(project, "memory", "Qwen3.5-0.8B-Q6_K.gguf")
+    if not os.path.exists(llama_server) or not os.path.exists(model):
+        logger.info("[embed] binary or model not found, skipping auto-start")
+        return
+
+    logger.info("[embed] starting embedding server...")
+    try:
+        subprocess.Popen(
+            [llama_server, "-m", model, "--embeddings", "--port", "8080",
+             "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
+             "--threads", "4", "--host", "127.0.0.1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        for i in range(10):
+            time.sleep(1)
+            try:
+                resp = urllib.request.urlopen(endpoint, timeout=1)
+                resp.read()
+                logger.info(f"[embed] server ready ({i+1}s)")
+                return
+            except Exception:
+                continue
+        logger.warning("[embed] server did not respond within 10s, falling back to keyword search")
+    except Exception as e:
+        logger.warning(f"[embed] failed to start: {e}")
+
+
 async def main():
     config = load_config()
     setup_logging(config.log_level)
     logger = logging.getLogger(__name__)
     logger.info(f"Starting AI Friend CLI: model={config.api_model} personality={config.personality_file} log_level={config.log_level}")
+    _auto_start_embedding(logger)
 
     # Initialize storage
     db = Database(config.db_path)
