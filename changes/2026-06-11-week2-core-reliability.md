@@ -27,7 +27,7 @@
 - **PR-008**: 流式响应超时保护
 
 ### core/context_manager.py
-- **CM-001**: `_MODEL_CONTEXT` 180000 → 131072（128K，与实际模型窗口一致）
+- **CM-001**: `_MODEL_CONTEXT` 180000 → 1000000（deepseek-v4-flash 实际 1M 上下文）
 
 ### core/async_utils.py
 - **AU-001**: 模块级单例 `ThreadPoolExecutor(max_workers=4)`

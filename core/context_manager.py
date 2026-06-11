@@ -4,7 +4,7 @@ import logging
 
 from memory.short_term import ConversationBuffer
 
-_MODEL_CONTEXT = 131_072  # deepseek-v4-flash实际窗口是128K
+_MODEL_CONTEXT = 1_000_000  # deepseek-v4-flash: 1M tokens
 COMPRESS_THRESHOLD = int(_MODEL_CONTEXT * 0.8)
 
 _TOKENIZER = None
