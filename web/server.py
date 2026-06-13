@@ -79,6 +79,20 @@ async def status_api(session_id: str = "default"):
     }
 
 
+@app.get("/api/chat/history")
+async def chat_history_api(session_id: str = "default"):
+    """Return recent conversation turns for UI display on reconnect."""
+    _, agent = session_manager.get_or_create(session_id)
+    ag = agent.agent
+    turns = []
+    for t in ag.short_term.get_all():
+        turns.append({
+            "role": t.role,
+            "content": t.content,
+        })
+    return {"turns": turns, "session_id": session_id}
+
+
 def _calc_delay(emotion: str, seg_len: int) -> float:
     base = {
         "excited": 0.7, "joyful": 0.9, "trusting": 1.1, "surprised": 0.8,

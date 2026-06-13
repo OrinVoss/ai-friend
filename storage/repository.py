@@ -283,12 +283,14 @@ class Repository:
             await self.db.commit()
             return c.lastrowid
 
-    async def get_recent_turns(self, limit: int = 30) -> list[dict]:
+    async def get_recent_turns(self, limit: int = 30, session_id: str | None = None) -> list[dict]:
         async with self.db.cursor() as c:
+            sid = session_id or self.session_id
             await c.execute("""
                 SELECT role, content FROM conversation_turns
+                WHERE session_id = ?
                 ORDER BY id DESC LIMIT ?
-            """, (limit,))
+            """, (sid, limit))
             rows = await c.fetchall()
         rows = list(rows)
         rows.reverse()

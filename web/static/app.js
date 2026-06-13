@@ -103,6 +103,7 @@ function connect() {
                     sessionId = data.session_id;
                     setCookie('session_id', sessionId);
                     showEmotion(data.emotion);
+                    loadHistory();
                     break;
                 case 'segment':
                     hideTyping();
@@ -125,10 +126,33 @@ function connect() {
 
     ws.onclose = function() {
         setStatus('disconnected'); hideTyping();
-        setTimeout(connect, 3000);
+        setTimeout(connect, 2000);
     };
 
     ws.onerror = function() { setStatus('error'); };
+
+    // Keepalive ping every 25s to prevent proxy timeout
+    setInterval(function() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+        }
+    }, 25000);
+}
+
+function loadHistory() {
+    var sid = getCookie('session_id');
+    if (!sid) return;
+    fetch('/api/chat/history?session_id=' + encodeURIComponent(sid))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var turns = data.turns || [];
+            for (var i = 0; i < turns.length; i++) {
+                var t = turns[i];
+                createMessage(t.role === 'user' ? 'user' : 'assistant', t.content);
+            }
+            scrollToBottom();
+        })
+        .catch(function(e) {});
 }
 
 function setStatus(s) {
