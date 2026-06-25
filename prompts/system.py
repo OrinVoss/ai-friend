@@ -219,7 +219,10 @@ def build_system_prompt(
     consecutive_negative: int = 0,
     tool_records: str = "",
     inner_drive_summary: str = "",
-    **kwargs,
+    idle_duration: float = 0,
+    tool_call_history: list | None = None,
+    explore_mode: bool = False,
+    demo_turns_remaining: int = 0,
 ) -> str:
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -382,7 +385,7 @@ def build_system_prompt(
 
     # Dreams
     dreams = [e for e in getattr(emotion, 'emotion_events', []) if '梦' in e.get('trigger', '')]
-    idle_duration = kwargs.get("idle_duration", 0)
+    idle_duration = idle_duration
     if dreams and idle_duration > 600:
         latest = dreams[-1]
         blocks.append(
@@ -422,11 +425,11 @@ def build_system_prompt(
                 )
 
     # Block 8: Tool call history (from current session)
-    tool_history = kwargs.get("tool_call_history", [])
+    tool_history = tool_call_history
     if tool_history:
         blocks.append("=== 你的工具调用记录 ===")
         for tc in tool_history[-5:]:
-            status = "✅" if tc["success"] else "❌"
+            status = "✅" if tc.get("success", False) else "❌"  # SY-012
             blocks.append(f"- {status} {tc['name']}: {tc['output'][:100]}")
 
     # Block 9: Recent Conversation
@@ -477,7 +480,6 @@ def build_system_prompt(
         )
 
     # Block 11: Instructions
-    explore_mode = kwargs.get("explore_mode", False)
     if explore_mode:
         blocks.append(
             f"""=== 自由探索模式 ===

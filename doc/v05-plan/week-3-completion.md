@@ -108,38 +108,38 @@
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| MM-001 | composite_score 语义混 | 添加 `runtime_score` 属性 |
-| MM-002 | 缺范围验证 | `__post_init__` 检查 confidence/importance 范围 |
-| MM-003 | fact_type 应 Literal | `Literal["user_fact", "agent_fact", "system_fact"]` |
-| MM-004/005 | Experience/Reflection 缺枚举 | `EmotionalTone`、`InsightType` 枚举 |
-| MM-006 | Reflection 缺 level/parent_ids | 添加字段（L1/L2/L3） |
+| MM-001 ✅ | composite_score 语义混 | 添加 `runtime_score` 属性 |
+| MM-002 ✅ | 缺范围验证 | `__post_init__` 检查 confidence/importance 范围 |
+| MM-003 ✅ | fact_type 应 Literal | `Literal["user_fact", "agent_fact", "system_fact"]` |
+| MM-004/005 ✅ | Experience/Reflection 缺枚举 | `EmotionalTone`、`InsightType` 枚举 |
+| MM-006 ✅ | Reflection 缺 level/parent_ids | 添加字段（L1/L2/L3） |
 
 ### models/conversation.py
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| MC-001 | Turn.timestamp 非 JSON 序列化 | `to_dict()` 转 ISO 8601 |
-| MC-002 | role 应 Literal | `Literal["user", "assistant"]` |
-| MC-003 | relationship 硬编码默认值 | 改为空 dict |
+| MC-001 ✅ | Turn.timestamp 非 JSON 序列化 | `to_dict()` 转 ISO 8601 |
+| MC-002 ✅ | role 应 Literal | `Literal["user", "assistant"]` |
+| MC-003 ✅ | relationship 硬编码默认值 | 改为空 dict |
 
 ### prompts/system.py
 
 | ID | 问题 | 修复 | 影响 |
 |----|------|------|------|
-| SY-002 | Agent 1 自然语言解析脆弱 | 切换到结构化 JSON 输出 | LLM 兼容性需验证 |
-| SY-003 | 8 个对话示例 ~600 tokens | 前 2 次注入后移除，或移到配置 | token 节省 |
-| SY-014 | **kwargs 隐藏参数 | 改为显式参数 `idle_duration`, `tool_call_history`, `explore_mode` | 函数签名清晰 |
-| SY-012 | `tc["success"]` KeyError | 改为 `.get("success", False)` | 不崩溃 |
+| SY-002 | Agent 1 自然语言解析脆弱 | 保留不修（风险高，现有方案稳定） | — |
+| SY-003 ✅ | 8 个对话示例 ~600 tokens | 前 2 次注入后移除，或移到配置 | token 节省 |
+| SY-014 ✅ | **kwargs 隐藏参数 | 改为显式参数 `idle_duration`, `tool_call_history`, `explore_mode` | 函数签名清晰 |
+| SY-012 ✅ | `tc["success"]` KeyError | 改为 `.get("success", False)` | 不崩溃 |
 
-**⚠ 风险**：SY-002 切换 JSON 输出需要 Agent 1 prompt 重写，LLM 可能不遵循新格式。在第一周保守处理：保留自然语言回退。
+**⚠ SY-002**：切换 JSON 输出需要 Agent 1 prompt 重写，LLM 可能不遵循新格式。现有自然语言解析工作正常，保留不修。
 
 ### prompts/templates.py
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| TM-001 | .format() 无 try/except | try/except KeyError + 日志 |
-| TM-005 | 情感分析 JSON 被 markdown 包裹 | `re.search(r'\{.*\}', result)` 提取 |
-| TM-006 | 死导入 | 删除未使用的 MemoryContext 等 |
+| TM-001 ✅ | .format() 无 try/except | try/except KeyError + 日志 |
+| TM-005 ✅ | 情感分析 JSON 被 markdown 包裹 | `re.search(r'\{.*\}', result)` 提取 |
+| TM-006 ✅ | 死导入 | 删除未使用的 MemoryContext 等 |
 
 ---
 

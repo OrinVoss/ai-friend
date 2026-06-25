@@ -1,6 +1,7 @@
+"""LLM API provider — kimi/deepseek-compatible chat completions."""
 import json
-import time
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -8,10 +9,13 @@ from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
 
+# PR-013: cap streamed response at 1 MB to prevent unbounded memory growth
+STREAM_MAX_BYTES = 1_048_576  # 1 MiB
+
 
 class KimiProvider:
     def __init__(self, endpoint: str, api_key: str, model: str,
-                 temperature: float = 0.8, max_tokens: int = 2048,
+                 temperature: float = 0.8, max_tokens: int = 512,
                  thinking: Optional[str] = None,
                  reasoning_effort: Optional[str] = None,
                  timeout: int = 180):
@@ -19,7 +23,7 @@ class KimiProvider:
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens   # PR-001: default aligned with config
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.timeout = timeout
@@ -97,7 +101,7 @@ class KimiProvider:
 
     def _do_request(self, url: str, payload: dict, stream: bool,
                     on_token: Optional[callable]) -> str:
-        t0 = time.time()
+        t0 = time.monotonic()  # PR-006
         input_chars = sum(len(m.get("content", "")) for m in payload.get("messages", []))
 
         resp = self.session.post(
@@ -112,7 +116,7 @@ class KimiProvider:
             data = resp.json()
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
             usage = data.get("usage", {})
-            elapsed = time.time() - t0
+            elapsed = time.monotonic() - t0  # PR-006
             logger.info(
                 f"[api] model={self.model} stream=off "
                 f"tok_in={usage.get('prompt_tokens', '?')} tok_out={usage.get('completion_tokens', '?')} "
@@ -121,9 +125,10 @@ class KimiProvider:
             return content
 
         full_response = []
-        stream_deadline = time.time() + self.timeout
+        stream_size = 0  # PR-013: accumulated bytes
+        stream_deadline = time.monotonic() + self.timeout  # PR-006
         for line in resp.iter_lines(decode_unicode=True):
-            if time.time() > stream_deadline:
+            if time.monotonic() > stream_deadline:  # PR-006
                 logger.warning(f"[api] stream timeout after {self.timeout}s")
                 break
             if not line:
@@ -142,11 +147,15 @@ class KimiProvider:
                     if token and on_token:
                         on_token(token)
                     full_response.append(token)
+                    stream_size += len(token.encode("utf-8"))
+                    if stream_size > STREAM_MAX_BYTES:
+                        logger.warning(f"[api] stream exceeded 1 MB, truncating")
+                        break
                 except json.JSONDecodeError:
                     continue
 
         content = "".join(full_response)
-        elapsed = time.time() - t0
+        elapsed = time.monotonic() - t0  # PR-006
         logger.info(
             f"[api] model={self.model} stream=on "
             f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"

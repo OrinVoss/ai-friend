@@ -2,6 +2,18 @@
 
 **目标**：整个项目达到生产标准。300+ 测试、文档同步、v0.5 发布。
 
+**状态：P2/P3 核心层已合并到 Week 3 完成 ✅**
+- `core/provider.py` PR-001/006/013 ✅
+- `core/dispatcher.py` DI-001/005/006/007 ✅
+- `models/personality.py` PS-003/008/013/015 ✅
+
+**保留不修**（低优先级或 Unix 特定）：
+- `storage/database.py` S-001~012（Unix 特定 chmod、WAL 定时 checkpoint）
+- `storage/repository.py` R 系列（已覆盖 Week 2）
+- `core/agent.py` AG 系列（已覆盖 Week 2）
+- `ui/display.py` DP 系列（已覆盖 Week 3）
+- `memory/consolidation.py` CO-001/004/007（late import/重复日志/关系衰减）
+
 ---
 
 ## Day 1-3：P2/P3 批量清理（40 个）

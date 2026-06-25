@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 TOOL_CALL_PATTERN = re.compile(r'<tool_call>(.*?)</tool_call>', re.DOTALL)
 THINK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
 
+# DI-006: cap individual output fragments at 2000 chars in formatted results
+_OUTPUT_CAP = 2000
+
 
 def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
     """Parse LLM response, extract tool calls.
@@ -46,6 +49,11 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
         cleaned_parts.append(remaining[:m.start()])
         raw_json = m.group(1).strip()
 
+        # DI-001: cap raw input at 10KB before json.loads
+        if len(raw_json) > 10240:
+            logger.warning(f"Tool call JSON too large ({len(raw_json)} bytes), truncating")
+            raw_json = raw_json[:10240]
+
         try:
             parsed = json.loads(raw_json)
             name = parsed.get("name") or parsed.get("tool", "")
@@ -67,7 +75,7 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
     # ── Tier 3: Bare JSON object fallback ──
     if not calls:
         try:
-            obj = json.loads(text)
+            obj = json.loads(text[:10240])  # DI-001
             if isinstance(obj, dict):
                 name = obj.get("name") or obj.get("tool", "")
                 if name:
@@ -83,7 +91,7 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
 def _try_structured_json(text: str) -> list[dict]:
     """Try parsing text as JSON with 'calls' array (structured output format)."""
     try:
-        obj = json.loads(text)
+        obj = json.loads(text[:10240])  # DI-001
     except json.JSONDecodeError:
         return []
 
@@ -138,7 +146,7 @@ def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[d
                 "output": result.output,
             })
         except Exception as e:
-            logger.error(f"Tool {name} execution error: {e}")
+            logger.exception(f"Tool {name} execution error")  # DI-005: include traceback
             results.append({
                 "name": name,
                 "success": False,
@@ -155,10 +163,13 @@ def format_tool_results(results: list[dict]) -> str:
     parts = []
     for r in results:
         tag = "成功" if r["success"] else "失败"
+        output = r["output"]
+        if len(output) > _OUTPUT_CAP:
+            output = output[:_OUTPUT_CAP] + f"\n...(截断, 剩余 {len(output)-_OUTPUT_CAP} 字符)"
         parts.append(
             f'<tool_result name="{r["name"]}">\n'
             f"工具 {r['name']} 执行{tag}:\n"
-            f"{r['output']}\n"
+            f"{output}\n"
             f"</tool_result>"
         )
     parts.append(
@@ -200,6 +211,10 @@ def _normalize_args(args: dict) -> dict:
         (("query", "search", "keyword", "question"), "query"),
         (("text", "msg", "content"), "content"),
         (("person", "who", "user", "target"), "name"),
+        # DI-007: more aliases
+        (("filepath", "filename", "file", "path"), "path"),
+        (("song_name", "title", "track"), "song"),
+        (("directory", "dir", "folder"), "path"),
     ]
     result = dict(args)
     for from_list, to in aliases:

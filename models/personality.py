@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
@@ -23,11 +24,22 @@ EMOTION_DECAY_RATES = {
 }
 RESENTMENT_DECAY = 0.03   # resentment decays ~3% per turn (~33 turns to clear)
 
+# PS-008: named constants for magic numbers
+ANGER_RESENTMENT_RATE = 0.15      # anger → resentment accumulation factor
+FORGIVENESS_THRESHOLD = 10        # consecutive turns without anger to trigger forgiveness
+FORGIVENESS_HALVING = 0.5         # resentment cut factor on forgiveness
+MAX_EMOTION_EVENTS = 20           # PS-013: max stored emotion events
+
 
 @dataclass
 class Trait:
     name: str
     value: float  # 0.0 to 1.0
+
+    def __post_init__(self) -> None:
+        """PS-003: clamp trait value to [0, 1]."""
+        if not 0.0 <= self.value <= 1.0:
+            self.value = max(0.0, min(1.0, self.value))
 
 
 @dataclass
@@ -68,7 +80,9 @@ class EmotionalState:
     resentment: float = 0.0
 
     # Emotion events: memory of significant emotional moments
-    emotion_events: list[dict] = field(default_factory=list)
+    # PS-013: bounded deque prevents unbounded growth and removes the manual
+    # population management that the old list + pop(0) pattern required.
+    emotion_events: deque = field(default_factory=lambda: deque(maxlen=MAX_EMOTION_EVENTS))
 
     # Recent emotion history for continuity
     history: list[str] = field(default_factory=lambda: ["neutral"] * 3)
@@ -198,14 +212,14 @@ class EmotionalState:
                     setattr(self, key, max(0.0, min(1.0, new_val)))
 
         # Accumulate resentment when anger peaks
-        # PS-012: forgiveness counter — 10 consecutive turns without anger halves resentment
+        # PS-012: forgiveness counter — FORGIVENESS_THRESHOLD consecutive turns without anger halves resentment
         if self.anger > 0.6:
-            self.resentment = min(1.0, self.resentment + self.anger * 0.15)
+            self.resentment = min(1.0, self.resentment + self.anger * ANGER_RESENTMENT_RATE)
             self._turns_without_anger = 0
         else:
             self._turns_without_anger = getattr(self, '_turns_without_anger', 0) + 1
-            if self._turns_without_anger >= 10 and self.resentment > 0.01:
-                self.resentment *= 0.5
+            if self._turns_without_anger >= FORGIVENESS_THRESHOLD and self.resentment > 0.01:
+                self.resentment *= FORGIVENESS_HALVING
                 self._turns_without_anger = 0
                 logger.info("[emotion] resentment halved by forgiveness (10 turns without anger)")
 
@@ -275,9 +289,7 @@ class EmotionalState:
         }
         self.emotion_events.append(event)
         logger.info(f"[emotion] event: {dom} intensity={primary_intensity:.2f} trigger={trigger[:60]}")
-        # Keep last 20 events
-        if len(self.emotion_events) > 20:
-            self.emotion_events.pop(0)
+        # PS-013: deque(maxlen=MAX_EMOTION_EVENTS) handles truncation automatically
 
     def get_recent_emotion_events(self, limit: int = 3, unresolved_only: bool = True) -> list[dict]:
         """Get recent emotion events for prompt injection."""
@@ -294,13 +306,16 @@ class EmotionalState:
     def to_dict(self) -> dict:
         result = asdict(self)
         result["dominant_emotion"] = self.dominant_emotion
+        # PS-015: convert deque to list for JSON serialization
+        result["emotion_events"] = list(self.emotion_events)
         return result
 
     @classmethod
     def from_dict(cls, d: dict) -> "EmotionalState":
-        # Handle history as list (new format) or fallback
         field_names = set(cls.__dataclass_fields__)
         filtered = {k: v for k, v in d.items() if k in field_names}
+        # PS-015: incoming data may have emotion_events as list; the deque
+        # field will accept any iterable on construction.
         return cls(**filtered)
 
 

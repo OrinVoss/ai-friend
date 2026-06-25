@@ -133,7 +133,12 @@ class MemoryConsolidator:
         try:
             prompt = EMOTION_ANALYSIS_PROMPT.format(text=text)
             result = self.llm(prompt, temperature=0.2)
-            data = json.loads(result.strip())
+            # TM-005: LLM may wrap JSON in markdown code fences; extract first
+            # valid JSON object before passing to json.loads.
+            import re
+            m = re.search(r'\{[^}]+\}', result.strip(), re.DOTALL)
+            raw = m.group(0) if m else result.strip()
+            data = json.loads(raw)
             return (
                 float(data.get("sentiment", 0)),
                 bool(data.get("personal_sharing", False)),
