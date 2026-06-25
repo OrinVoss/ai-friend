@@ -123,16 +123,17 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 ```
 _proactive_loop (15s tick)
     │
-    ├──▶ _get_sleep_state()
+    ├──▶ await _get_sleep_state()      # SL-002: asyncio.Lock 保护 _sleeping 过渡
     │    │ 检查是否在睡眠时间窗口
     │    │ 午睡: 12:00-13:00, 夜睡: 23:00-01:00
     │    │ 情绪驱动 sleepiness:
     │    │   sad/melancholy +0.4, low arousal +0.3
     │    │   excited/joyful -0.2, resentment +0.2
     │    │
-    │    ├── 触发入睡 → 发睡前消息 → _generate_dream()
+    │    ├── 触发入睡 → 发睡前消息 → await _generate_dream()   # SL-010: async, 非阻塞
     │    │   LLM: 基于事实+经历+情绪 → 碎片化梦境(1-2句)
-    │    │   存储: record_emotion_event("梦: ...")
+    │    │   存储: record_emotion_event("梦: ...") + store_experience("梦境: ...")
+    │    │   状态持久化: .sleep_state.{session_id} (SL-001 每会话一文件)
     │    │
     │    └── 触发醒来 → 发梦境分享消息
     │        午醒: 13:10-16:00, 晨醒: 7:00-10:00

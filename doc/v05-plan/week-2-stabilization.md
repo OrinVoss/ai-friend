@@ -2,7 +2,7 @@
 
 **目标**：修复正确性缺陷，消除静默失败。核心层在异常情况下不丢数据、不返回空响应。
 
-**状态：核心层 90% ✅ | 26 项完成，剩余 Web 安全增强**
+**状态：核心层 100% ✅ | 全部 45 项完成，测试 288 passed + 2 skipped**
 
 ---
 
@@ -13,13 +13,13 @@
 | ID | 方法 | 当前 | 修复 | 影响 |
 |----|------|------|------|------|
 | R-005 ✅ | search_facts | 两个分支 WHERE 条件不一致 | 统一 WHERE session_id | 查询结果变化 |
-| R-011 | search_experiences | 缺 session_id | 添加过滤 | 体验查询隔离 |
-| R-012 | get_recent_experiences | 缺 session_id | 添加过滤 | 最近体验隔离 |
-| R-015 | get_recent_reflections | 缺 session_id | 添加过滤 | 反思隔离 |
-| R-020 | get_recent_turns | 缺 session_id | 添加过滤 | 对话历史隔离 |
-| R-021 | prune_facts | 缺 session_id | 添加过滤 | 剪枝隔离 |
+| R-011 ✅ | search_experiences | 缺 session_id | 添加过滤 | 体验查询隔离 |
+| R-012 ✅ | get_recent_experiences | 缺 session_id | 添加过滤 | 最近体验隔离 |
+| R-015 ✅ | get_recent_reflections | 缺 session_id | 添加过滤 | 反思隔离 |
+| R-020 ✅ | get_recent_turns | 缺 session_id | 添加过滤 | 对话历史隔离 |
+| R-021 ✅ | prune_facts | 缺 session_id | 添加过滤 | 剪枝隔离 |
 
-**影响**：多 session 环境下行为变化。CLI 单 session 不受影响。R-005 已修复，其余保留。
+**影响**：多 session 环境下行为变化。CLI 单 session 不受影响。R-005/011/012/015/020/021 全部补齐 session_id 过滤。
 
 ### repository — 原子操作
 
@@ -32,7 +32,7 @@
 | ID | 问题 | 修复 |
 |----|------|------|
 | S-005 ✅ | get_connection() 暴露裸连接 | 添加 `@deprecated` 警告，引导使用者改用 cursor() |
-| S-006 | schema_version 创建但从不使用 | `initialize()` 后 INSERT 当前版本号 |
+| S-006 ✅ | schema_version 创建但从不使用 | `initialize()` 后 INSERT 当前版本号 |
 
 ### retrieval — 检索修复
 
@@ -40,15 +40,15 @@
 |----|------|------|------|
 | RT-001 | 剪枝后 is_active=0 的事实永久丢失 | 保留 is_active=1 语义，但 prune 改为降级 composite_score（已修复） | 已无影响 |
 | RT-003 ✅ | health_check 同次查询调用两次 | 调用一次，结果存入局部变量 | 性能提升 ~2x |
-| RT-006 | query 被编码两次 | `retrieve_for_query` 中编码一次复用 | 性能提升 |
+| RT-006 ✅ | query 被编码两次 | `retrieve_for_query` 中编码一次复用 | 性能提升 |
 | RT-010 ✅ | 体验 id=None 去重 bug | None 跳过去重 |
 
 ### short_term — 代码质量
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| ST-002 | 文档说 "without copy" 但实际创建新列表 | 更新注释 |
-| ST-003 | max_chars 参数名误导（实为 token 预算） | 重命名为 `max_tokens` |
+| ST-002 ✅ | 文档说 "without copy" 但实际创建新列表 | 更新注释 |
+| ST-003 ✅ | max_chars 参数名误导（实为 token 预算） | 重命名为 `max_tokens` |
 | ST-004 ✅ | last_n_turns_content 无调用者 | 移除死代码 |
 
 ### embeddings — cache 线程安全
@@ -69,15 +69,15 @@
 | AG-005 ✅ | 3 次假动作修正后仍接受 LLM 文本 | 超限后使用硬兜底："让我直接回复你吧" | 用户体验改善 |
 | AG-012 ✅ | 异常后不调 _reset_react | `try/finally` 确保重置 | 状态不污染下轮 |
 | AG-014 ✅ | _consecutive_negative 不持久化 | 存入 EmotionalState dict，save/load 时序列化 | 重启不丢失破防状态 |
-| AG-001 | CliController + MessageHandler 同时创建 | 惰性初始化（已部分实现） | 内存节省 |
+| AG-001 ✅ | CliController + MessageHandler 同时创建 | 惰性初始化（已部分实现） | 内存节省 |
 
 ### message_handler — 异常安全
 
 | ID | 问题 | 修复 | 影响 |
 |----|------|------|------|
 | MH-003 ✅ | Agent 2 调用无 try-except | 添加 try/except，异常时返回错误消息 | 不再崩溃 |
-| MH-007 | token 估算只查 messages[-5:] | 改为累计总量 `running_total` | 上下文更准确 |
-| MH-001 | 仅传 tool_requests[0] 给 Agent 2 | 传全部 ToolRequest，Agent 2 逐个执行 | 多工具请求不丢失 |
+| MH-007 ✅ | token 估算只查 messages[-5:] | 改为累计总量 `running_total` | 上下文更准确 |
+| MH-001 ✅ | 仅传 tool_requests[0] 给 Agent 2 | 传全部 ToolRequest，Agent 2 逐个执行 | 多工具请求不丢失 |
 
 ### tool_agent — 重试修复
 
@@ -135,27 +135,27 @@
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| SL-001 | 全局 .sleep_state 文件 | 按 session_id 命名文件 |
-| SL-002 | _sleeping 无协程同步 | 添加 `asyncio.Lock` |
+| SL-001 ✅ | 全局 .sleep_state 文件 | 按 session_id 命名文件（`.sleep_state.{session_id}`） |
+| SL-002 ✅ | _sleeping 无协程同步 | 添加 `asyncio.Lock`，过渡态在临界区内完成 |
 | SL-111 ✅ | 梦境不保存为 Experience | 生成后 `store_experience()` |
-| SL-010 | generate_dream 同步阻塞 | 改为 `async def` + `await` |
+| SL-010 ✅ | generate_dream 同步阻塞 | 改为 `async def` + `await`（proactive_loop 直接 await） |
 
 ### web/server — 安全加固
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| WS-003 | 无 CORS | 添加 `CORSMiddleware`，允许 localhost |
-| WS-021 | receive_text 无大小限制 | `max_size=102400` |
-| WS-028 | 无 CSP 头 | 添加 `Content-Security-Policy` 中间件 |
-| WS-027 | 无 X-Frame-Options | 添加 `DENY` |
+| WS-003 ✅ | 无 CORS | 添加 `CORSMiddleware`，允许 localhost |
+| WS-021 ✅ | receive_text 无大小限制 | 协议层 `max_size=102400` + 应用层 `len(raw)>102400` 双重校验 |
+| WS-028 ✅ | 无 CSP 头 | 添加 `Content-Security-Policy` 中间件 |
+| WS-027 ✅ | 无 X-Frame-Options | 添加 `DENY` |
 
 ### web/session — 资源管理
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| SN-005/006 | 每个 WebAgent 独立 Provider/EmbeddingEngine | SessionManager 级别共享 Provider |
-| SN-016 | cleanup_old 死代码 | `lifespan` shutdown 中调用 |
-| SN-013 | remove 不清理资源 | 添加 `WebAgent.close()` |
+| SN-005/006 ✅ | 每个 WebAgent 独立 Provider/EmbeddingEngine | SessionManager 级别共享 Provider + EmbeddingEngine |
+| SN-016 ✅ | cleanup_old 死代码 | `lifespan` shutdown 中调用 |
+| SN-013 ✅ | remove 不清理资源 | 添加 `WebAgent.close()`，remove/evict/shutdown 均调用 |
 
 ### database — 事件循环适配
 
@@ -167,10 +167,10 @@
 
 ## Day 7：验证
 
-- ✅ 全量测试 290 通过（290/290 + 8 skipped）
+- ✅ 全量测试 288 通过 + 2 skipped（embedding 真实服务器未运行时自动 skip）
 - ✅ Web 端功能验证（WebSocket 消息/重连/segment）
-- ✅ 嵌入服务验证（health + 编码）
-- ✅ 数据库一致性检查
+- ✅ 嵌入服务验证（health + 编码，离线时优雅跳过）
+- ✅ 数据库一致性检查（schema_version 已 stamp 为 1）
 
 ---
 

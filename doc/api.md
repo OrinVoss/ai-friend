@@ -508,8 +508,11 @@ class SessionManager:
 |----------|----------|
 | 独立 Personality | ✓ 每个 WebAgent 独立 Personality 实例 |
 | 独立 ConversationBuffer | ✓ 每个 WebAgent 独立短期记忆 |
-| 共享 SQLite | ✗ 无 session_id 过滤（`#154` 待修复） |
+| SQLite session_id 过滤 | ✓ R-005/011/012/015/020/021 全部补齐 |
+| 共享 Provider/Embedding | ✓ SN-005/006：SessionManager 级别共享 HTTP 会话 |
 | 共享 EmbeddingCache | ✓ 只读 LRU 无竞争 |
+| 睡眠状态隔离 | ✓ SL-001：`.sleep_state.{session_id}` 每会话一文件 |
+| WebAgent 资源释放 | ✓ SN-013：remove/evict/shutdown 调用 `close()` |
 
 ### 7.4 超时清理
 
@@ -519,6 +522,7 @@ session_manager.cleanup_old(max_sessions=50, ttl_seconds=86400)
 
 - 超过 24 小时无活动的 session 自动移除
 - 超过 50 个 session 时驱逐最旧的
+- SN-016：lifespan shutdown 阶段调用 `cleanup_old()`，消除死代码
 
 ---
 
@@ -588,13 +592,17 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 
 - FastAPI `StaticFiles` 无额外限制，仅供前端 HTML/CSS/JS
 
-### 9.5 已知安全缺口
+### 9.5 安全加固状态
 
-| # | 问题 | 当前风险 |
-|---|------|---------|
-| #155 | API Key 可能泄露到日志 | 低（单人） |
+| # | 问题 | 状态 |
+|---|------|------|
+| #158 | WebSocket Origin 校验 | ✅ 已加（仅 localhost） |
+| #176 | 消息大小 100KB 限制 | ✅ 协议层 + 应用层双重校验 |
+| WS-003 | CORS | ✅ CORSMiddleware（仅 localhost:8000/127.0.0.1:8000） |
+| WS-027 | X-Frame-Options | ✅ DENY |
+| WS-028 | Content-Security-Policy | ✅ 已加（含 frame-ancestors 'none'） |
+| #155 | API Key 可能泄露到日志 | 低（单人），待 #155 后续治理 |
 | #155 | Session ID 客户端可控 | 低（单人） |
-| #24 | 无 CORS + CSP 头 | 低（单人 localhost） |
 
 ---
 

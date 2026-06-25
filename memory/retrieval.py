@@ -37,8 +37,17 @@ class MemoryRetriever:
         # Layer 2: hybrid or keyword scoring
         keywords = self._extract_keywords(query)
         embed_ok = self._embed and self._embed.health_check()  # RT-003: cache result
+        # RT-006: encode the query exactly once and thread the vector through
+        # both the fact and experience scorers instead of re-encoding per call.
+        query_vec = None
         if embed_ok:
-            candidates = self._hybrid_score(query, hot_facts, keywords)
+            try:
+                query_vec = self._embed.encode_single(query)
+            except Exception as e:
+                logger.warning(f"[retrieval] query encode failed, keyword fallback: {e}")
+                embed_ok = False
+        if embed_ok:
+            candidates = self._hybrid_score(query, hot_facts, keywords, query_vec)
         else:
             candidates = self._score_facts(hot_facts, keywords, query)
         candidates = candidates[:30]
@@ -58,7 +67,7 @@ class MemoryRetriever:
         # Search experiences (semantic if available)
         if embed_ok:
             keyword_experiences = self._search_experiences_semantic(
-                query, recent_experiences, keywords
+                query, recent_experiences, keywords, query_vec
             )
         else:
             keyword_experiences = self.ltm.search_experiences(keywords, limit=5)
@@ -112,13 +121,18 @@ class MemoryRetriever:
 
     # ── Hybrid scoring ──
 
-    def _hybrid_score(self, query: str, candidates: list[UserFact], keywords: list) -> list[UserFact]:  # #189
-        """Hybrid scoring: semantic (0.6) + keyword (0.4)."""
+    def _hybrid_score(self, query: str, candidates: list[UserFact], keywords: list,
+                     query_vec=None) -> list[UserFact]:  # #189 #RT-006
+        """Hybrid scoring: semantic (0.6) + keyword (0.4).
+
+        query_vec is the pre-encoded query embedding; if None we encode here
+        (backward-compat for any direct caller).
+        """
         SEMANTIC_WEIGHT = 0.6
         KEYWORD_WEIGHT = 0.4
 
         try:
-            query_vec = self._embed.encode_single(query)
+            qvec = query_vec if query_vec is not None else self._embed.encode_single(query)
         except Exception as e:
             logger.warning(f"[retrieval] embed failed, fallback to keyword: {e}")
             return self._score_facts(candidates, keywords, query)
@@ -131,7 +145,7 @@ class MemoryRetriever:
             if hasattr(c, 'embedding') and c.embedding is not None:
                 try:
                     vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding))
-                    semantic = float(np.dot(vec, query_vec))
+                    semantic = float(np.dot(vec, qvec))
                 except Exception:
                     pass
 
@@ -143,15 +157,18 @@ class MemoryRetriever:
         return [c for c, _ in scores[:30]]
 
     def _search_experiences_semantic(self, query: str, recent: list,
-                                     keywords: list) -> list:
-        """Semantic + keyword hybrid experience search."""
+                                     keywords: list, query_vec=None) -> list:
+        """Semantic + keyword hybrid experience search.
+
+        query_vec is the pre-encoded query embedding (RT-006); encode here if None.
+        """
         all_exp = self.ltm.search_experiences(keywords, limit=30)  # #190: wider candidate pool
         combined = self._merge_unique_experiences(all_exp, recent)
         if not combined or not self._embed:
             return []  # #194: no keyword fallback — may be irrelevant
 
         try:
-            query_vec = self._embed.encode_single(query)
+            qvec = query_vec if query_vec is not None else self._embed.encode_single(query)
         except Exception:
             return all_exp
 
@@ -162,7 +179,7 @@ class MemoryRetriever:
             if hasattr(exp, 'embedding') and exp.embedding is not None:
                 try:
                     vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding))
-                    sim = float(np.dot(vec, query_vec))
+                    sim = float(np.dot(vec, qvec))
                 except Exception:
                     pass
             scored.append((exp, sim))

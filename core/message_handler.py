@@ -100,17 +100,32 @@ class MessageHandler:
             while round_num < MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
                 round_num += 1
                 tracker.round_number = round_num
-                request_text = drive_result.tool_requests[0].description if drive_result.tool_requests else user_input
-                logger.info(f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, request={request_text[:80]}")
-
-                tool_result = self._tool_agent.run_with_request(request_text)
+                # MH-001: pass ALL tool requests to Agent 2, executing each in
+                # turn. The old code only ever used tool_requests[0], so a
+                # multi-tool request from InnerDrive silently dropped the rest.
+                if drive_result.tool_requests:
+                    logger.info(
+                        f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, "
+                        f"requests={len(drive_result.tool_requests)} "
+                        f"first={drive_result.tool_requests[0].description[:80]}"
+                    )
+                    tool_result = self._tool_agent.run_with_requests(
+                        [req.description for req in drive_result.tool_requests]
+                    )
+                else:
+                    logger.info(f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, no request text")
+                    tool_result = self._tool_agent.run_with_request(user_input)
                 tracker.total_attempts += 1
                 track_failures(tracker, tool_result)
 
                 while tracker.can_retry_in_round and not tool_result.any_success:
                     tracker.retry_count += 1
                     logger.info(f"[msg] agent2: retry {tracker.retry_count}/3")
-                    tool_result = self._tool_agent.run_with_request(request_text)
+                    # MH-001: retry against the first request's description
+                    # (the one most likely to still be actionable mid-round).
+                    retry_req = (drive_result.tool_requests[0].description
+                                 if drive_result.tool_requests else user_input)
+                    tool_result = self._tool_agent.run_with_request(retry_req)
                     tracker.total_attempts += 1
                     track_failures(tracker, tool_result)
 
@@ -180,7 +195,7 @@ class MessageHandler:
             inner_drive_summary = ""
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
-        conv_hist = a.short_term.format_for_prompt(max_chars=3000)
+        conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
@@ -211,7 +226,7 @@ class MessageHandler:
             inner_drive_summary = ""
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
-        conv_hist = a.short_term.format_for_prompt(max_chars=3000)
+        conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
 
         self._ensure_tool_agent()
         explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容。用 web_search 和 web_fetch。"
@@ -270,7 +285,7 @@ class MessageHandler:
         a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
                                str(a.personality.emotion.to_dict()))
 
-        conv_hist = a.short_term.format_for_prompt(max_chars=3000)
+        conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
         # #205: use accumulated tool_records if provided, otherwise fall back to last round
         if not tool_records:
             tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
@@ -296,6 +311,11 @@ class MessageHandler:
         a = self.a
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
+        # MH-007: accumulate a running token total instead of re-scanning only
+        # the last 5 messages every loop. The old check under-counted early
+        # turns once the window slid past 5, so long histories silently grew
+        # past the compression threshold.
+        running_total = 0
         for t in a.short_term.get_all_reversed():
             # #130: skip turns with stage directions / fake tool claims
             if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
@@ -303,9 +323,11 @@ class MessageHandler:
             if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
                 continue
             role = "assistant" if t.role == "assistant" else "user"
-            if estimate_tokens(" ".join(m["content"][:200] for m in messages[-5:] if m["role"] != "system")) + estimate_tokens(t.content) > COMPRESS_THRESHOLD:
+            turn_tokens = estimate_tokens(t.content)
+            if running_total + turn_tokens > COMPRESS_THRESHOLD:
                 overflow = True
                 break
+            running_total += turn_tokens
             messages.insert(1, {"role": role, "content": t.content})
         if overflow and a._context.compressed_summary:
             messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {a._context.compressed_summary}"})

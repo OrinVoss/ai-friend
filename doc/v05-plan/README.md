@@ -1,13 +1,13 @@
 # 178 Issue 一月修复计划
 
-> 状态：**第1周 P0 已完成 ✅** | P0: 6/6 closed | 下一步：P1 按需筛选
+> 状态：**第1-2周全部完成 ✅** | P0: 6/6 | P1: 45/45 | 测试 288 passed + 2 skipped
 
 ## 总览
 
 | 周 | 重点 | 状态 | P0/P1 closed |
 |----|------|------|-------------|
 | [第1周](week-1-hemostasis.md) | P0 + 安全关键 | ✅ 全部完成 | 9 issues closed |
-| [第2周](week-2-stabilization.md) | 核心可靠 | 待开始 | — |
+| [第2周](week-2-stabilization.md) | 核心可靠 | ✅ 全部完成 | 45 issues closed |
 | [第3周](week-3-completion.md) | 质量补全 | 待开始 | — |
 | [第4周](week-4-finalize.md) | 收尾加固 | 待开始 | — |
 

@@ -121,16 +121,26 @@ class TestEmbeddingCache(unittest.TestCase):
 
 
 class TestEmbeddingSanity(unittest.TestCase):
-    """Quick sanity checks against live embedding server."""
+    """Quick sanity checks against a live embedding server.
+
+    These only run when the local llama-server is reachable; otherwise they
+    are skipped so the suite stays green in CI / offline environments. (#196)
+    """
+
+    def _engine(self):
+        from memory.embeddings import EmbeddingEngine
+        return EmbeddingEngine(endpoint="http://localhost:8080/v1/embeddings", dim=1024)
 
     def test_real_server_health(self):
-        from memory.embeddings import EmbeddingEngine
-        engine = EmbeddingEngine(endpoint="http://localhost:8080/v1/embeddings", dim=1024)
+        engine = self._engine()
+        if not engine.health_check():
+            self.skipTest("embedding server not running on :8080")
         self.assertTrue(engine.health_check())
 
     def test_real_server_encode(self):
-        from memory.embeddings import EmbeddingEngine
-        engine = EmbeddingEngine(endpoint="http://localhost:8080/v1/embeddings", dim=1024)
+        engine = self._engine()
+        if not engine.health_check():
+            self.skipTest("embedding server not running on :8080")
         vecs = engine.encode(["test"])
         self.assertEqual(vecs.shape, (1, 1024))
 

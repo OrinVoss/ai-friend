@@ -55,13 +55,16 @@ class Agent:
         self.current_response: str = ""
         self.current_memory_context: MemoryContext | None = None
         self._tool_call_history: list[dict] = []  # recent tool call records
-        # Sleep/wake cycle managed by SleepManager
-        sleep_file = os.path.join(
-            os.path.dirname(os.path.abspath(config.personality_file)), ".sleep_state"
-        )
+        # Sleep/wake cycle managed by SleepManager.
+        # SL-001: sleep state file is namespaced per session_id so concurrent
+        # sessions no longer share a single global .sleep_state.
+        sleep_dir = os.path.dirname(os.path.abspath(config.personality_file))
+        session_tag = getattr(config, "session_id", None) or "default"
+        sleep_file = os.path.join(sleep_dir, f".sleep_state.{session_tag}")
         self._sleep = SleepManager(
             sleep_state_file=sleep_file,
             personality=personality, ltm=ltm, provider=provider,
+            session_id=session_tag,
         )
 
         self._running = True
@@ -261,11 +264,11 @@ class Agent:
     def _sleeping(self) -> bool:
         return self._sleep.is_sleeping
 
-    def _get_sleep_state(self) -> tuple[bool, str | None]:
-        return self._sleep.get_sleep_state()
+    async def _get_sleep_state(self) -> tuple[bool, str | None]:
+        return await self._sleep.get_sleep_state()
 
-    def _generate_dream(self) -> str:
-        return self._sleep.generate_dream()
+    async def _generate_dream(self) -> str:
+        return await self._sleep.generate_dream()
 
     # ── Proactivity forwarding ──
 

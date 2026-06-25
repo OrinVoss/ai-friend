@@ -167,6 +167,15 @@ class Database:
                     await c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
                     logger.info(f"Schema migration: added {table}.{column}")
 
+            # S-006: schema_version table existed but was never populated, so it
+            # couldn't tell future migrations what state the DB was in. Stamp the
+            # current schema version (1 = baseline with session_id columns) so
+            # subsequent initialize() runs can detect/version-gate new migrations.
+            await c.execute(
+                "INSERT OR IGNORE INTO schema_version (version) VALUES (1)"
+            )
+        await self.commit()
+
     async def close(self) -> None:
         if self.conn:
             try:

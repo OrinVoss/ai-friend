@@ -69,7 +69,8 @@ class TestRealDream(RealAPITestCase):
                 ltm=ltm,
                 provider=self.provider,
             )
-            dream = sm.generate_dream()
+            import asyncio
+            dream = asyncio.run(sm.generate_dream())
             self.assertIsInstance(dream, str)
             self.assertGreater(len(dream.strip()), 0,
                               f"Expected non-empty dream, got '{dream}'")

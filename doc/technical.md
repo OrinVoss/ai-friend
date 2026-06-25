@@ -599,6 +599,10 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 
 所有自主行为由 `web/server.py:_proactive_loop` 后台协程驱动，15 秒轮询一次。
 
+> 注：SL-010 之后 `_get_sleep_state()` 与 `_generate_dream()` 均为 `async`，
+> proactive_loop 直接 `await`，不再经 `run_in_executor` 阻塞线程池；
+> `_sleeping` 过渡由 `SleepManager._lock`（asyncio.Lock）保护，避免并发 tick 竞态。
+
 #### 完整决策流程
 
 ```
@@ -691,10 +695,11 @@ _proactive_loop (15s tick)
 | `InnerDriveAgent.perceive_and_decide()` | core/inner_drive.py | Agent 1 自主推理：检索记忆 → 识别缺口 → 决策 → 输出自然语言请求或跳过 |
 | `build_inner_drive_prompt()` | prompts/system.py | Agent 1 system prompt：当前时间 + 身份 + 记忆 + 工具列表 |
 | `ToolAgent.run_with_request()` | core/tool_agent.py | Agent 2 接收自然语言请求，执行外部工具，ToolAttemptTracker 重试 |
+| `ToolAgent.run_with_requests()` | core/tool_agent.py | MH-001: 批量执行多个 ToolRequest，合并结果给 Agent 3 |
 | `ToolAgent._build_prompt()` | core/tool_agent.py | Agent 2 精简 prompt（无情绪/记忆/工具记录） |
 | `ToolAttemptTracker` | core/tool_agent.py | 3 retries/round × 3 rounds max = 9 总尝试，失败回报 Agent 1 |
-| `_get_sleep_state()` | core/agent.py | 返回 (should_sleep, message_or_None) |
-| `_generate_dream()` | core/agent.py | LLM 生成 1-2 句碎片化梦境 |
+| `_get_sleep_state()` | core/agent.py | async；返回 (should_sleep, message_or_None)，SL-002 锁保护 |
+| `_generate_dream()` | core/agent.py | async；LLM 生成 1-2 句碎片化梦境，SL-010 非阻塞 |
 | `decide_proactive_action(idle)` | core/agent.py | Agent 1 InnerDrive LLM 决策主动行为: chat/explore/silent (#125) |
 | `assess_proactive(idle)` | core/inner_drive.py | InnerDrive 主动决策 prompt → ProactiveIntent |
 | `_check_rate_limit(action)` | core/agent.py | explore: 3600s 间隔, chat: 1800s 间隔 |
@@ -702,7 +707,6 @@ _proactive_loop (15s tick)
 | `_pick_proactive_topic()` | core/agent.py | 从经历/事实/通用中随机选话题 |
 | `process_explore()` | core/agent.py | 探索模式: 自由工具调用, 有趣才分享 |
 | `process_proactive()` | core/agent.py | 主动搭话: 调侃/分享/找话题 |
-| `process_dream()` | core/agent.py | 旧版梦境生成 (已被 _generate_dream 替代) |
 
 #### 状态追踪
 

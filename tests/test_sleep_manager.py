@@ -1,4 +1,5 @@
-"""Tests for core/sleep_manager.py"""
+"""Tests for core/sleep_manager.py — async sleep state machine (SL-001/002/010)."""
+import asyncio
 import os
 import tempfile
 import unittest
@@ -43,23 +44,20 @@ class TestSleepManager(unittest.TestCase):
 
     def test_get_sleep_state_outside_window(self):
         sm = SleepManager(self.tmp.name, self.personality, self.ltm, self.provider)
-        # 15:00 is outside all sleep windows
         original = sm._sleeping
-        should_sleep, msg = sm.get_sleep_state()
-        # At 15:00 with neutral emotion, no sleep should trigger
+        should_sleep, msg = asyncio.run(sm.get_sleep_state())
         if should_sleep:
-            # Could happen if current time is in a sleep window
             pass
 
     def test_generate_dream_success(self):
         sm = SleepManager(self.tmp.name, self.personality, self.ltm, self.provider)
-        dream = sm.generate_dream()
+        dream = asyncio.run(sm.generate_dream())
         self.assertIn("flying", dream)
 
     def test_generate_dream_failure(self):
         self.provider.generate.side_effect = RuntimeError("API error")
         sm = SleepManager(self.tmp.name, self.personality, self.ltm, self.provider)
-        dream = sm.generate_dream()
+        dream = asyncio.run(sm.generate_dream())
         self.assertEqual(dream, "")
 
 

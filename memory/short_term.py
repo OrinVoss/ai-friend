@@ -45,11 +45,16 @@ class ConversationBuffer:
             return list(self._turns)
 
     def get_all_reversed(self) -> list[Turn]:
-        """Return turns in reverse order (newest first) without extra copy."""
+        """Return turns newest-first. #ST-002: builds a new list (reversed view
+        of the deque) — the old 'without copy' comment was inaccurate."""
         with self._lock:
             return list(reversed(self._turns))
 
-    def format_for_prompt(self, max_chars: int = 3000) -> str:
+    def format_for_prompt(self, max_tokens: int = 1800) -> str:
+        """#ST-003: param is a token budget, not a char count — renamed from
+        max_chars. Behavior preserved: the old max_chars=3000 with a *0.6
+        multiplier yielded a ~1800-token budget, so callers now pass tokens
+        directly."""
         from core.context_manager import estimate_tokens
         with self._lock:
             lines = []
@@ -57,9 +62,9 @@ class ConversationBuffer:
             for t in reversed(self._turns):
                 label = "你" if t.role == "assistant" else "用户"
                 line = f"{label}: {t.content}"
-                # #187: use token count instead of character count for accurate truncation
+                # #187: use token count for accurate truncation
                 total += estimate_tokens(line)
-                if total > max_chars * 0.6:  # ~60% of char budget as token budget
+                if total > max_tokens:
                     lines.append("...[省略更早对话]")
                     break
                 lines.append(line)

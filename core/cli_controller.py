@@ -160,7 +160,7 @@ class CliController:
             sys_prompt = build_system_prompt(
                 personality=a.personality.config, emotion=a.personality.emotion,
                 memory_context=a.current_memory_context,
-                conversation_history=a.short_term.format_for_prompt(max_chars=3000),
+                conversation_history=a.short_term.format_for_prompt(max_tokens=1800),
                 is_proactive=is_proactive, compressed_summary=a._context.compressed_summary,
                 tools=a._tool_registry,
                 consecutive_negative=a._consecutive_negative,

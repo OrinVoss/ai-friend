@@ -24,6 +24,7 @@ Thumbs.db
 
 # Runtime
 .sleep_state
+.sleep_state.*
 
 # Logs
 *.log

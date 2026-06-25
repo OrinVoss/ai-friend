@@ -64,7 +64,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_chars=2000)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
@@ -122,7 +122,7 @@ class InnerDriveAgent:
 
         now = datetime.now()
         mem_ctx = self._retriever.retrieve_for_query("")
-        conv_hist = self._short_term.format_for_prompt(max_chars=2000)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
 
         sys_prompt = build_inner_drive_proactive_prompt(
             personality=self._personality.config,
@@ -170,7 +170,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_chars=2000)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
 
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
@@ -220,7 +220,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_chars=2000)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
 
         # Build failure context
         fail_lines = ["=== 之前的工具调用全部失败 ==="]

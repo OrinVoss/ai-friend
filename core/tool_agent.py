@@ -222,6 +222,25 @@ class ToolAgent:
             )
         return result
 
+    def run_with_requests(self, tool_requests: list[str], max_retries: int = 3) -> ToolAgentResult:
+        """MH-001: execute a batch of tool requests sequentially and merge.
+
+        Each request is a natural-language tool need from Agent 1. They run as
+        independent ToolAgent rounds (each with its own retry budget) and the
+        records are collected into one merged ToolAgentResult for Agent 3.
+        """
+        merged = ToolAgentResult()
+        if not tool_requests:
+            return merged
+        t0 = time.time()
+        for req in tool_requests:
+            single = self.run_with_request(req, max_retries=max_retries)
+            merged.records.extend(single.records)
+            merged.total_calls += single.total_calls
+            merged.success_count += single.success_count
+        merged.elapsed_ms = (time.time() - t0) * 1000
+        return merged
+
     def format_for_phase2(self, result: ToolAgentResult) -> str:
         """Format Phase 2 results as a user message for Agent 3."""
         if not result.has_results:

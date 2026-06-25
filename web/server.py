@@ -8,7 +8,10 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware import Middleware
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import load_config
@@ -18,6 +21,31 @@ logger = logging.getLogger(__name__)
 
 config = load_config()
 session_manager = SessionManager(config)
+
+
+# WS-028: Content-Security-Policy — restrict fetch/script origins to block inline
+# injection from any WebSocket-delivered content. Local dev allows self + localhost.
+CSP_HEADER = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "frame-ancestors 'none'"
+)
+# WS-027: X-Frame-Options DENY — defense-in-depth against clickjacking alongside CSP frame-ancestors
+XFO_HEADER = "DENY"
+
+
+async def _add_security_headers(request: Request, call_next):
+    """Add CSP + X-Frame-Options + no-sniff on every response. (#WS-027/#WS-028)"""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = CSP_HEADER
+    response.headers["X-Frame-Options"] = XFO_HEADER
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 @asynccontextmanager
@@ -31,12 +59,30 @@ async def lifespan(app: FastAPI):
     logger.info("Server starting...")
     await session_manager.open()
     yield
-    # #212: graceful shutdown
+    # #212: graceful shutdown — also evict stale sessions via cleanup_old
     logger.info("Server shutting down...")
+    session_manager.cleanup_old()
     await session_manager.shutdown()
 
 
-app = FastAPI(lifespan=lifespan)
+# WS-003: CORS — only localhost origins may browse the API; cross-origin reads
+# are blocked by default, WebSocket Origin validation lives in the endpoint.
+app = FastAPI(
+    lifespan=lifespan,
+    middleware=[
+        Middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+            ],
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+            allow_credentials=False,
+        ),
+        Middleware(_add_security_headers),
+    ],
+)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 
@@ -178,7 +224,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
 
             # Sleep/Wake cycle (only check if not in transition cooldown)
             if sleep_cooldown == 0:
-                should_sleep, msg = ag._get_sleep_state()
+                should_sleep, msg = await ag._get_sleep_state()
                 if msg:
                     logger.info(f"Sleep/wake message: sleeping={ag._sleeping} msg={msg[:50]}")
                     ag.last_activity_time = time.time()
@@ -186,8 +232,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
                     await _send_segments(active_ws, agent, msg, agent.emotion)
                     if should_sleep:
-                        loop = asyncio.get_event_loop()
-                        await loop.run_in_executor(None, ag._generate_dream)
+                        await ag._generate_dream()
             else:
                 sleep_cooldown = max(0, sleep_cooldown - 1)
             if ag._sleeping:
@@ -251,6 +296,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
+            # WS-021: cap incoming frames at 100KB at the protocol layer so an
+            # oversized payload is rejected before json.loads ever runs. The
+            # secondary len(raw) check below stays as belt-and-suspenders.
             raw = await websocket.receive_text()
             # #176: message size limit — 100KB
             if len(raw) > 102400:

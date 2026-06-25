@@ -304,7 +304,7 @@ ai-friend/
 │   ├── db-report.html         数据库诊断报告
 │   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
 │
-├── tests/                     单元测试（290 用例）
+├── tests/                     单元测试（288 passed + 2 skipped）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
@@ -423,7 +423,7 @@ _proactive_loop (15s)
 - [测试指南](doc/testing-guide.md) — 运行和编写测试
 - [部署手册](doc/deployment.md) — 生产环境部署
 - [里程碑与 Issue](doc/milestones-and-issues.md) — 189 issue，7 个里程碑（v0.1~v2.0）
-- [v0.5 修复计划](doc/v05-plan/README.md) — 178 Issue 一月修复计划
+- [v0.5 修复计划](doc/v05-plan/README.md) — 178 Issue 一月修复计划（第 1-2 周 P0/P1 全部完成 ✅）
 
 ## License
 
