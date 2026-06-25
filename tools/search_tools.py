@@ -6,13 +6,23 @@ import re
 import signal
 from typing import Any
 
-from tools.file_tools import _get_allowed_roots
+from tools.file_tools import _get_allowed_roots, _is_binary
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 # #150: regex timeout to prevent ReDoS
 GREP_TIMEOUT = 5  # seconds per file match
+
+# SR-009: named constants instead of magic numbers
+GLOB_MAX_RESULTS = 200
+GREP_MAX_MATCHES_PER_FILE = 20
+GREP_RESULTS_LIMIT = 50
+WALK_FILE_LIMIT = 10_000
+MAX_RESULTS_DISPLAY = 50
+MAX_HEADER_LINES = 200
+SORTED_DIRS_MAX = 30
+SORTED_FILES_MAX = 50
 
 
 def _resolve_search_path(search_path: str) -> str | None:
@@ -26,6 +36,17 @@ def _resolve_search_path(search_path: str) -> str | None:
         except Exception:
             pass
     return None
+
+
+# SR-007: check directory name exactly against skip list instead of
+# substring-match on the whole path, which could match mid-segment.
+SKIP_DIR_COMPONENTS = {"__pycache__", ".git", "node_modules", ".venv", "data"}
+
+
+def _should_skip_dir(dirpath: str) -> bool:
+    """Return True if any path component matches a skip directory (SR-007)."""
+    parts = dirpath.replace(os.sep, "/").split("/")
+    return any(p in SKIP_DIR_COMPONENTS for p in parts)
 
 
 class GlobTool(Tool):
@@ -70,13 +91,15 @@ class GlobTool(Tool):
             return ToolResult.fail(f"路径不在可访问范围内: {search_root}")
 
         results = []
+        file_count = 0  # SR-003: guard against unbounded os.walk
         for dirpath, _, fnames in os.walk(root):
             rel_dir = os.path.relpath(dirpath, root)
             for fname in fnames:
+                file_count += 1
+                if file_count > WALK_FILE_LIMIT:
+                    break
                 rel_path = os.path.join(rel_dir, fname) if rel_dir != "." else fname
-                if fnmatch.fnmatch(rel_path, pattern):
-                    # Also match against just the filename for simple patterns
-                    pass
+                # SR-004: single check matching both full path and bare filename
                 if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(fname, pattern):
                     full_path = os.path.join(dirpath, fname)
                     try:
@@ -84,17 +107,21 @@ class GlobTool(Tool):
                     except OSError:
                         size = 0
                     results.append((rel_path, size))
+            if file_count > WALK_FILE_LIMIT:
+                logger.warning(f"[glob] file count limit ({WALK_FILE_LIMIT}) reached, truncating")
+                break
 
         if not results:
             return ToolResult.ok(f"未找到匹配 '{pattern}' 的文件")
 
-        # Sort by name, limit to 200
+        # Sort by name, limit to 200 (GLOB_MAX_RESULTS)
         results.sort()
+        header_items = min(len(results), GLOB_MAX_RESULTS)
         lines = [f"匹配 '{pattern}' 的文件 ({len(results)} 个):"]
-        for path, size in results[:200]:
+        for path, size in results[:header_items]:
             lines.append(f"  {path}  ({size:,} B)")
-        if len(results) > 200:
-            lines.append(f"  ... 还有 {len(results) - 200} 个文件未显示")
+        if len(results) > GLOB_MAX_RESULTS:
+            lines.append(f"  ... 还有 {len(results) - GLOB_MAX_RESULTS} 个文件未显示")
 
         return ToolResult.ok("\n".join(lines))
 
@@ -177,11 +204,15 @@ class GrepTool(Tool):
         if os.path.isfile(target):
             files = [target]
         else:
+            file_count = 0  # SR-003: limit total walked files
             for dirpath, _, fnames in os.walk(target):
-                # Skip hidden and cache dirs
-                if any(skip in dirpath for skip in ["__pycache__", ".git", "node_modules", ".venv", "data"]):
+                # SR-007: precise path component check instead of substring
+                if _should_skip_dir(dirpath):
                     continue
                 for fname in fnames:
+                    file_count += 1
+                    if file_count > WALK_FILE_LIMIT:
+                        break
                     full = os.path.join(dirpath, fname)
                     rel = os.path.relpath(full, target)
                     if fnmatch.fnmatch(fname, file_glob) or fnmatch.fnmatch(rel, file_glob):
@@ -190,6 +221,9 @@ class GrepTool(Tool):
                                 files.append(full)
                         except OSError:
                             pass
+                if file_count > WALK_FILE_LIMIT:
+                    logger.warning(f"[grep] file count limit ({WALK_FILE_LIMIT}) reached")
+                    break
 
         if not files:
             return ToolResult.ok(f"未找到匹配文件: {search_path} (glob: {file_glob})")
@@ -197,6 +231,10 @@ class GrepTool(Tool):
         results = []
         total_matches = 0
         for filepath in files:
+            # SR-008: skip binary files *before* opening with errors="ignore",
+            # which mangles binary data into garbage unicode silently.
+            if _is_binary(filepath):
+                continue
             try:
                 with open(filepath, encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
@@ -213,7 +251,7 @@ class GrepTool(Tool):
                 rel = os.path.relpath(filepath, target)
                 results.append(f"\n--- {rel} ({len(file_matches)} matches) ---")
                 shown = set()
-                for line_num in file_matches[:20]:
+                for line_num in file_matches[:GREP_MAX_MATCHES_PER_FILE]:
                     start = max(0, line_num - context_lines)
                     end = min(len(lines), line_num + context_lines + 1)
                     for ctx_line in range(start, end):

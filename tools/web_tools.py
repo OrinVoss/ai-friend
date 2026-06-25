@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import re
+import time
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -25,6 +27,30 @@ _BLOCKED_CIDRS = [
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
 ]
+
+# WT-001: module-level singleton session — reuse TCP connection + headers
+# across calls instead of opening a new Session (and a new TCP handshake + TLS)
+# every time _anysearch_api is called.
+_HTTP_SESSION: requests.Session | None = None
+_HTTP_SESSION_TS: float = 0.0
+_SESSION_TTL = 300  # recycle once every 5 minutes to pick up env var changes
+
+
+def _session() -> requests.Session:
+    """Lazy-init, periodically-recycled HTTP session (WT-001)."""
+    global _HTTP_SESSION, _HTTP_SESSION_TS
+    now = time.time()
+    if _HTTP_SESSION is None or (now - _HTTP_SESSION_TS) > _SESSION_TTL:
+        if _HTTP_SESSION is not None:
+            try:
+                _HTTP_SESSION.close()
+            except Exception:
+                pass
+        s = requests.Session()
+        s.trust_env = False
+        _HTTP_SESSION = s
+        _HTTP_SESSION_TS = now
+    return _HTTP_SESSION
 
 
 def _is_safe_url(url: str) -> bool:
@@ -51,26 +77,40 @@ def _is_safe_url(url: str) -> bool:
         return False
 
 
+# WT-004: valid freshness values
+_VALID_FRESHNESS = {"day", "week", "month", "year"}
+
+
 def _anysearch_api(tool_name: str, arguments: dict) -> dict:
-    """Call AnySearch JSON-RPC 2.0 API."""
+    """Call AnySearch JSON-RPC 2.0 API with retry (WT-003) and nonce ID (WT-002)."""
     api_key = os.environ.get("ANYSEARCH_API_KEY", "")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     payload = {
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": uuid.uuid4().hex,  # WT-002: non-fixed id
         "method": "tools/call",
         "params": {"name": tool_name, "arguments": arguments},
     }
-    session = requests.Session()
-    session.trust_env = False
-    resp = session.post(ANYSEARCH_ENDPOINT, json=payload, headers=headers, timeout=30)
-    resp.raise_for_status()
-    result = resp.json()
-    if "error" in result:
-        raise RuntimeError(result["error"].get("message", str(result["error"])))
-    return result.get("result", {})
+
+    # WT-003: exponential backoff, up to 3 retries
+    last_error: Exception | None = None
+    for attempt in range(4):
+        try:
+            session = _session()
+            resp = session.post(ANYSEARCH_ENDPOINT, json=payload, headers=headers, timeout=30)
+            resp.raise_for_status()
+            result = resp.json()
+            if "error" in result:
+                raise RuntimeError(result["error"].get("message", str(result["error"])))
+            return result.get("result", {})
+        except Exception as e:
+            last_error = e
+            logger.debug(f"[web] api call attempt {attempt+1} failed: {e}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)  # 1, 2, 4s
+    raise last_error or RuntimeError("unknown API error")
 
 
 class WebSearchTool(Tool):
@@ -115,7 +155,12 @@ class WebSearchTool(Tool):
         if not query:
             return ToolResult.fail("请提供搜索关键词")
 
-        logger.info(f"[tool] web_search query={query[:60]} n={max_results}")
+        # WT-004: validate freshness enum before passing to API
+        if freshness is not None and freshness not in _VALID_FRESHNESS:
+            logger.warning(f"[web] ignoring invalid freshness: {freshness}")
+            freshness = None
+
+        logger.info(f"[tool] web_search query={query[:60]} n={max_results} freshness={freshness}")
         try:
             arguments = {"query": query, "max_results": max_results}
             if freshness:

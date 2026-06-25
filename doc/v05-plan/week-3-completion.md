@@ -2,6 +2,8 @@
 
 **目标**：代码质量达到可维护标准。死代码、魔法数字、bare except 清零。
 
+**状态：Day 1-2 工具层 15/15 ✅**
+
 ---
 
 ## Day 1-2：工具层（15 个）
@@ -10,36 +12,36 @@
 
 | ID | 问题 | 修复 | 影响 |
 |----|------|------|------|
-| FL-001 | `logger.debug` 引用未定义变量 `path` | 改为 `filepath` | NameError 修复 |
-| FL-002 | `_get_allowed_roots` 每次检查都读文件 | 缓存 60s | 性能提升 |
-| FL-005 | 目录列表暴露隐藏文件 | 过滤 `.*` 开头文件 | 安全性 |
-| FL-007 | `f.readlines()` 全量加载 | `itertools.islice(f, limit)` | 大文件不 OOM |
+| FL-001 ✅ | `logger.debug` 引用未定义变量 `path` | 改为 `filepath` | NameError 修复 |
+| FL-002 ✅ | `_get_allowed_roots` 每次检查都读文件 | 缓存 60s | 性能提升 |
+| FL-005 ✅ | 目录列表暴露隐藏文件 | 过滤 `.*` 开头文件 | 安全性 |
+| FL-007 ✅ | `f.readlines()` 全量加载 | `itertools.islice(f, limit)` | 大文件不 OOM |
 
 ### search_tools — 代码清理
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| SR-003 | `os.walk` 无文件计数上限 | 超过 10000 文件停止 |
-| SR-004 | 死代码 `pass` + 重复条件 | 删除 |
-| SR-007 | `"data" in dirpath` 子字符串误杀 | `os.sep` 分割精确匹配 |
-| SR-008 | `errors="ignore"` 二进制文件误导 | 先 `_is_binary()` 检查 |
-| SR-009 | 魔法数字无注释 | 命名常量 `MAX_RESULTS` |
+| SR-003 ✅ | `os.walk` 无文件计数上限 | 超过 10000 文件停止 |
+| SR-004 ✅ | 死代码 `pass` + 重复条件 | 删除 |
+| SR-007 ✅ | `"data" in dirpath` 子字符串误杀 | `os.sep` 分割精确匹配 |
+| SR-008 ✅ | `errors="ignore"` 二进制文件误导 | 先 `_is_binary()` 检查 |
+| SR-009 ✅ | 魔法数字无注释 | 命名常量 `MAX_RESULTS` |
 
 ### music_tool — 安全
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| MU-002 | 遍历无上限 | 停止 10000 文件后 |
-| MU-004 | `os.startfile` 执行任意类型 | realpath 后 verify 扩展名 `.mp3/.wav/.flac` |
+| MU-002 ✅ | 遍历无上限 | 停止 10000 文件后 |
+| MU-004 ✅ | `os.startfile` 执行任意类型 | realpath 后 verify 扩展名 `.mp3/.wav/.flac` |
 
 ### web_tools — HTTP 优化
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| WT-001 | 每次新建 Session | 模块级单例 `_session` |
-| WT-003 | 无重试 | 指数退避 3 次 |
-| WT-002 | JSON-RPC id 固定 | `uuid.uuid4().hex` |
-| WT-004 | freshness 不校验 | 校验 enum，无效时忽略 |
+| WT-001 ✅ | 每次新建 Session | 模块级单例 `_session` |
+| WT-002 ✅ | JSON-RPC id 固定 | `uuid.uuid4().hex` |
+| WT-003 ✅ | 无重试 | 指数退避 3 次 |
+| WT-004 ✅ | freshness 不校验 | 校验 enum，无效时忽略 |
 
 ---
 

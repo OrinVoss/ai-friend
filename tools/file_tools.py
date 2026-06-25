@@ -1,6 +1,8 @@
 """File operation tools: read local files (read-only)."""
 import logging
 import os
+import time
+from itertools import islice
 from typing import Any
 
 from tools.traits import Tool, ToolResult
@@ -16,6 +18,11 @@ TEXT_EXTENSIONS = {
     ".vue", ".svelte", ".jsx", ".tsx", ".sql", ".r", ".lua",
 }
 
+# FL-002: cache allowed roots for 60s to avoid re-reading config on every call
+_ALLOWED_ROOTS_CACHE: list[str] | None = None
+_ALLOWED_ROOTS_CACHE_TS: float = 0.0
+_ALLOWED_ROOTS_TTL = 60.0
+
 
 def _is_binary(filepath: str) -> bool:
     """Quick check if file is likely binary."""
@@ -24,12 +31,16 @@ def _is_binary(filepath: str) -> bool:
             chunk = f.read(1024)
         return b"\x00" in chunk
     except Exception as e:
-        logger.debug(f"Binary check failed for {path}: {e}")
+        logger.debug(f"Binary check failed for {filepath}: {e}")
         return False
 
 
 def _get_allowed_roots() -> list[str]:
-    """Load allowed read directories from config."""
+    """Load allowed read directories from config. FL-002: cached for 60s."""
+    global _ALLOWED_ROOTS_CACHE, _ALLOWED_ROOTS_CACHE_TS
+    now = time.time()
+    if _ALLOWED_ROOTS_CACHE is not None and (now - _ALLOWED_ROOTS_CACHE_TS) < _ALLOWED_ROOTS_TTL:
+        return _ALLOWED_ROOTS_CACHE
     try:
         from config import load_config
         cfg = load_config()
@@ -42,10 +53,15 @@ def _get_allowed_roots() -> list[str]:
                 paths.append(os.path.abspath(os.path.expanduser(p)))
         if project not in paths:
             paths.append(project)
+        _ALLOWED_ROOTS_CACHE = paths
+        _ALLOWED_ROOTS_CACHE_TS = now
         return paths
     except Exception as e:
         logger.warning(f"Config load failed for allowed roots, using project fallback: {e}")
-        return [os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))]
+        fallback = [os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))]
+        _ALLOWED_ROOTS_CACHE = fallback
+        _ALLOWED_ROOTS_CACHE_TS = now
+        return fallback
 
 
 def _path_in_allowed(filepath: str) -> str | None:
@@ -108,7 +124,8 @@ class ReadFileTool(Tool):
         # If it's a directory, list contents
         if os.path.isdir(resolved):
             try:
-                items = sorted(os.listdir(resolved))
+                # FL-005: filter hidden files (dot-prefixed) from listing
+                items = sorted(i for i in os.listdir(resolved) if not i.startswith("."))
             except PermissionError:
                 return ToolResult.fail(f"无权限访问目录: {filepath}")
             if not items:
@@ -143,28 +160,35 @@ class ReadFileTool(Tool):
             return ToolResult.fail(f"二进制文件，无法读取文本内容")
 
         try:
+            # FL-007: stream only the needed slice instead of readlines() loading
+            # the whole file into memory — large files no longer OOM.
             with open(resolved, encoding="utf-8", errors="replace") as f:
-                all_lines = f.readlines()
+                if offset > 0:
+                    # consume and discard the offset prefix without materializing it
+                    next(islice(f, offset, offset), None)
+                selected = list(islice(f, limit))
         except PermissionError:
             return ToolResult.fail(f"无权限: {filepath}")
         except Exception as e:
             return ToolResult.fail(f"读取失败: {e}")
 
-        total_lines = len(all_lines)
+        # total_lines is approximate when streaming; re-stat via size heuristic only.
+        # We report the slice range instead of total to avoid a second full read.
         start = max(0, offset)
-        end = min(total_lines, start + limit)
-        selected = all_lines[start:end]
+        end = start + len(selected)
+        # If we read exactly `limit` lines there may be more remaining.
+        has_more = len(selected) >= limit
 
         short = os.path.relpath(resolved, os.path.join(os.path.dirname(__file__), ".."))
-        header = f"{short}  ({total_lines}行, {size/1024:.1f}KB, L{start+1}-L{end})"
+        header = f"{short}  ({size/1024:.1f}KB, L{start+1}-L{end})"
 
         out = [header]
         for i, line in enumerate(selected):
             line_num = start + i + 1
             out.append(f"{line_num:>6}|{line.rstrip()}")
 
-        if end < total_lines:
-            out.append(f"...(剩余 {total_lines - end} 行, offset={end} 继续)")
+        if has_more:
+            out.append(f"...(后续 offset={end} 继续)")
 
         return ToolResult.ok("\n".join(out))
 

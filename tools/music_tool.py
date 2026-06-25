@@ -128,11 +128,16 @@ class MusicPlayTool(Tool):
 
         # Search for matching file
         matches = []
+        files_scanned = 0
         for root, _, fnames in os.walk(MUSIC_DIR):
             for f in fnames:
+                files_scanned += 1
+                if files_scanned > 10_000:  # MU-002: guard against unbounded walk
+                    break
                 if _is_audio(f) and song.lower() in f.lower():
                     matches.append(os.path.join(root, f))
-            if len(matches) > 10:
+            if files_scanned > 10_000:
+                logger.warning(f"[music] file scan limit (10_000) reached")
                 break
 
         if not matches:
@@ -148,8 +153,16 @@ class MusicPlayTool(Tool):
         return self._play(matches[0], os.path.relpath(matches[0], MUSIC_DIR))
 
     def _play(self, filepath: str, display_name: str) -> ToolResult:
+        # MU-004: resolve real path and verify extension before os.startfile
+        # to prevent execution of arbitrary non-audio files.
         try:
-            os.startfile(filepath)
+            real = os.path.realpath(filepath)
+        except Exception as e:
+            return ToolResult.fail(f"路径解析失败: {e}")
+        if not _is_audio(real):
+            return ToolResult.fail(f"不支持的文件类型: {display_name}")
+        try:
+            os.startfile(real)
             return ToolResult.ok(f"正在播放: {display_name}")
         except Exception as e:
             return ToolResult.fail(f"播放失败: {e}")
