@@ -1,9 +1,31 @@
+"""Configuration loader — dataclass + JSON file + env var overrides + validation."""
 import json
 import logging
 import os
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+def _validate(cfg: "Config") -> None:
+    """CF-002: field-level validation — clamp out-of-range values on load."""
+    messages = []
+    if not 0.0 <= cfg.temperature <= 2.0:
+        messages.append(f"temperature {cfg.temperature} out of [0,2], clamped to 0.8")
+        cfg.temperature = 0.8
+    if not 0 < cfg.api_timeout <= 600:
+        messages.append(f"api_timeout {cfg.api_timeout} out of [1,600], clamped to 180")
+        cfg.api_timeout = 180
+    if not 0 < cfg.max_tokens <= 32768:
+        messages.append(f"max_tokens {cfg.max_tokens} out of [1,32768], clamped to 512")
+        cfg.max_tokens = 512
+    if not 0 < cfg.embedding_dim <= 4096:
+        messages.append(f"embedding_dim {cfg.embedding_dim} out of [1,4096], clamped to 1024")
+        cfg.embedding_dim = 1024
+    if cfg.api_key == "" and "DEEPSEEK_API_KEY" not in os.environ:
+        messages.append("DEEPSEEK_API_KEY not set — LLM calls will fail")
+    for msg in messages:
+        logger.warning(f"[config] validation: {msg}")
 
 
 @dataclass
@@ -31,8 +53,7 @@ class Config:
     log_level: str = "INFO"
     allowed_read_paths: list[str] = field(default_factory=lambda: [
         ".",
-        "D:\\音乐",
-        "D:\\桌面",
+        # CF-006: no hardcoded Windows paths — users set these in config.json
         "~/Documents",
         "~/Downloads",
     ])
@@ -60,12 +81,22 @@ def load_config(path: str = CONFIG_PATH) -> Config:
     else:
         logger.info(f"[config] no file at: {path}, using defaults")
 
-    # Environment variable overrides
+    # CF-009: complete env var map — every config field with an env override
     env_map = {
         "DEEPSEEK_API_KEY": "api_key",
         "DEEPSEEK_API_ENDPOINT": "api_endpoint",
         "DEEPSEEK_API_MODEL": "api_model",
         "AI_FRIEND_DB_PATH": "db_path",
+        "AI_FRIEND_LOG_LEVEL": "log_level",
+        "AI_FRIEND_TEMPERATURE": "temperature",
+        "AI_FRIEND_MAX_TOKENS": "max_tokens",
+        "AI_FRIEND_TIMEOUT": "api_timeout",
+        "AI_FRIEND_TYPING_SPEED": "typing_speed",
+        "AI_FRIEND_WEB_HOST": "web_host",
+        "AI_FRIEND_WEB_PORT": "web_port",
+        "AI_FRIEND_EMBEDDING_ENDPOINT": "embedding_endpoint",
+        "AI_FRIEND_EMBEDDING_DIM": "embedding_dim",
+        "AI_FRIEND_SHORT_TERM_CAPACITY": "short_term_capacity",
         "AI_FRIEND_LOG_LEVEL": "log_level",
     }
     for env_var, attr in env_map.items():
@@ -73,8 +104,16 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         if val:
             masked = "***" if "KEY" in env_var else val
             logger.info(f"[config] env override: {env_var}={masked}")
-            setattr(cfg, attr, val)
+            # Cast to the right type
+            field_type = type(getattr(cfg, attr))
+            try:
+                typed = field_type(val)
+            except (ValueError, TypeError):
+                logger.warning(f"[config] cannot cast {val} to {field_type.__name__} for {attr}, skipping")
+                continue
+            setattr(cfg, attr, typed)
 
+    _validate(cfg)
     return cfg
 
 

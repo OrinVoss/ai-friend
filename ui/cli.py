@@ -37,12 +37,14 @@ class NonBlockingInputReader:
 
 
 class ConsoleInterface:
-    def __init__(self):
+    def __init__(self, typing_speed: float = 0.02):
+        self._typing_speed = typing_speed
         self.reader = NonBlockingInputReader()
+        self.display: "DisplayEngine | None" = None
 
     def start(self) -> None:
         from ui.display import DisplayEngine
-        self.display = DisplayEngine()
+        self.display = DisplayEngine(typing_speed=self._typing_speed)
         self.reader.start()
 
     def stop(self) -> None:

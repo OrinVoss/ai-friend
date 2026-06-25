@@ -74,31 +74,31 @@
 
 | ID | 问题 | 修复 | 影响 |
 |----|------|------|------|
-| DP-002 | `len()` 计 CJK 为 1 列 | 用 `wcwidth` 库（或简单 CJK→2 估算） | 行宽正确 |
-| DP-004 | CJK 无空格断句 | 在 CJK 字符间允许断点 | 不截断语义 |
-| DP-010 | `\n` 双重延迟 | 从 sentence-ending 集合移除 `\n` | 速度正常 |
+| DP-002 ✅ | `len()` 计 CJK 为 1 列 | 用 `wcwidth` 库（或简单 CJK→2 估算） | 行宽正确 |
+| DP-004 ✅ | CJK 无空格断句 | 在 CJK 字符间允许断点 | 不截断语义 |
+| DP-010 ✅ | `\n` 双重延迟 | 从 sentence-ending 集合移除 `\n` | 速度正常 |
 
 ### cli.py — 配置生效
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| CL-001 | DisplayEngine 不接收 typing_speed | 从 config 传入 |
+| CL-001 ✅ | DisplayEngine 不接收 typing_speed | 从 config 传入 |
 
 ### config.py — 验证
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| CF-002 | 字段无验证 | `validate_config()` 检查范围 |
-| CF-009 | 仅 5 个环境变量映射 | 补全所有 config 字段的环境变量 |
-| CF-006 | Windows 硬编码路径 | 从默认值移除 `D:\音乐`、`D:\桌面` |
+| CF-002 ✅ | 字段无验证 | `validate_config()` 检查范围 |
+| CF-009 ✅ | 仅 5 个环境变量映射 | 补全所有 config 字段的环境变量 |
+| CF-006 ✅ | Windows 硬编码路径 | 从默认值移除 `D:\音乐`、`D:\桌面` |
 
 ### main.py + web_main.py
 
 | ID | 问题 | 修复 |
 |----|------|------|
-| MA-005 | `db.close()` 缺 await | `await db.close()` |
-| MA-003 | temperature 不传给 provider | 传参 |
-| MA-001 | 初始化无异常处理 | try/except + 友好错误消息 |
+| MA-005 ✅ | `db.close()` 缺 await | `await db.close()` |
+| MA-003 ✅ | temperature 不传给 provider | 传参（已在 main.py 中修复，MA-003 验证） |
+| MA-001 ✅ | 初始化无异常处理 | try/except + 友好错误消息 |
 
 ---
 
