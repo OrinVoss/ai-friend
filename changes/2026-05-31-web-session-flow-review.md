@@ -48,7 +48,7 @@
 
 ### 低风险问题（4个）
 1. **LR1**: `SessionManager._lock` 是 `threading.Lock` 而非 `asyncio.Lock`
-2. **LR2**: `WebAgent` 的 provider 是 `KimiProvider` 但配置默认是 DeepSeek
+2. **LR2**: `WebAgent` 的 provider 是 `DeepSeekProvider` 但配置默认是 DeepSeek
 3. **LR3**: `_proactive_loop` 中的 `sleep_cooldown` 是整数递减而非时间戳比较
 4. **LR4**: WebSocket 异常处理过于宽泛
 

@@ -528,7 +528,7 @@
 | SN-002 | 34 | `repo.session_id = session_id` 可变属性竞态 | P0 | 移除可变字段 |
 | SN-003 | 36-37 | `get_recent_turns_sync(30)` 无 session_id 过滤 → 加载全局历史 | P1 | 加 session_id 过滤 |
 | SN-004 | 36-37 | 数据库损坏时阻止所有 session 创建 | P2 | try/except 容错 |
-| SN-005 | 43-49 | 每个 WebAgent 创建独立 `KimiProvider`（含 requests Session） | P2 | 移除或共享 |
+| SN-005 | 43-49 | 每个 WebAgent 创建独立 `DeepSeekProvider`（含 requests Session） | P2 | 移除或共享 |
 | SN-006 | 54-62 | 每个 WebAgent 创建独立 `EmbeddingEngine` | P3 | SessionManager 级别共享 |
 | SN-007 | 88-104 | `personality.save()` 每次调用后都保存（3 个路径） | P0 | 写入防抖（10 次存一次） |
 | SN-008 | 91-99 | `personality.save()` 失败返回 500 但消息已处理完 | P2 | 不传播异常 |
@@ -764,7 +764,7 @@
 | RL-006 | core/agent.py | 247-249 | react_messages 异常后不重置 | P0 | try/finally |
 | RL-007 | models/personality.py | 261-262 | emotion_events.pop(0) O(n) | P3 | deque(maxlen=20) |
 | RL-008 | main.py | 115 | db.close() 无 await | P0 | await db.close() |
-| RL-009 | core/provider.py | 25 | KimiProvider HTTP session 从不关闭 | P2 | 添加 close() |
+| RL-009 | core/provider.py | 25 | DeepSeekProvider HTTP session 从不关闭 | P2 | 添加 close() |
 | RL-010 | core/provider.py | 87-128 | 流式 parse 错误时不消费 body | P2 | try/finally resp.close() |
 | RL-011 | web/server.py | 22-26 | lifespan 不关数据库 | P2 | await db.close() |
 | RL-012 | tools/web_tools.py | 68-69 | HTTP 错误时不关响应 | P3 | with session.post |

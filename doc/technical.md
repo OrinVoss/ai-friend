@@ -35,7 +35,7 @@ main.py / web_main.py
     │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
     │   ├── message_handler.py ── 消息入口（process_* 三方法）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
-    │   ├── provider.py ───────── LLMProvider 抽象基类 + KimiProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
+    │   ├── provider.py ───────── LLMProvider 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
     │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
     │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
     │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）

@@ -24,7 +24,7 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
   core/agent.py         Agent 3：ReAct Agent + 降级（3次工具失败→跳过）+ 破防机制
   core/personality.py   情绪引擎（四层：输入→调制+衰减→怨恨→事件记忆）
   core/embedding_server.py  共享 embedding server 启动（CLI/Web 共用）
-  core/provider.py          LLMProvider(ABC) 抽象基类 + KimiProvider 实现（trust_env=False）
+  core/provider.py          LLMProvider(ABC) 抽象基类 + DeepSeekProvider 实现（trust_env=False）
   core/async_utils.py       异步→同步桥接（run_async，线程池安全，60s 超时）
   memory/                   短期(LRU+Lock) / 长期(SQLite) / FactChecker(矛盾+衰减) / 检索(三层)
   storage/repository.py     session_id 隔离 + commit 强制 + get_similar_facts

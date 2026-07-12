@@ -7,7 +7,7 @@ from typing import Optional
 
 from config import Config
 from core.personality import Personality
-from core.provider import LLMProvider
+from core.provider import LLMProvider, DeepSeekProvider
 from core.agent import Agent
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
@@ -51,7 +51,7 @@ class WebAgent:
         if shared_provider is not None:
             self.provider = shared_provider
         else:
-            self.provider = KimiProvider(
+            self.provider = DeepSeekProvider(
                 endpoint=config.api_endpoint, api_key=config.api_key,
                 model=config.api_model, temperature=config.temperature,
                 max_tokens=config.max_tokens,
@@ -216,7 +216,7 @@ class SessionManager:
         await self.db.open()
         self.repo = Repository(self.db)
         # SN-005/006: build the shared clients once for all future sessions.
-        self._shared_provider = KimiProvider(
+        self._shared_provider = DeepSeekProvider(
             endpoint=self.config.api_endpoint, api_key=self.config.api_key,
             model=self.config.api_model, temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,

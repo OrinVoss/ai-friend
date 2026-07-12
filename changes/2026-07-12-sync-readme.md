@@ -10,9 +10,9 @@
 
 ## 修改内容摘要
 
-- **项目介绍**：将“基于 DeepSeek API”更新为“基于 OpenAI 兼容 API（默认 DeepSeek / KimiProvider）”。
+- **项目介绍**：将“基于 DeepSeek API”更新为“基于 OpenAI 兼容 API（默认 DeepSeek / DeepSeekProvider）”。
 - **特性补充**：
-  - Provider 抽象层：`LLMProvider(ABC)` + `KimiProvider`。
+  - Provider 抽象层：`LLMProvider(ABC)` + `DeepSeekProvider`。
   - REST API 类型安全：Pydantic 校验。
   - Web 安全加固：CORS 可配置、滑动窗口速率限制、CSP/X-Frame-Options 安全头。
   - 对话示例可配置：`config.json` 的 `conversation_examples`。

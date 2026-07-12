@@ -42,7 +42,7 @@ class LLMProvider(ABC):
         ...
 
 
-class KimiProvider(LLMProvider):
+class DeepSeekProvider(LLMProvider):
     def __init__(self, endpoint: str, api_key: str, model: str,
                  temperature: float = 0.8, max_tokens: int = 512,
                  thinking: Optional[str] = None,

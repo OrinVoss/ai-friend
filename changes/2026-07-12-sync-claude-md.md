@@ -12,7 +12,7 @@
 
 - **架构概要**：
   - 新增 `core/embedding_server.py`（CLI/Web 共享 embedding 启动）。
-  - 将 `core/provider.py` 从“DeepSeek API 客户端”更新为 `LLMProvider(ABC)` 抽象基类 + `KimiProvider` 实现。
+  - 将 `core/provider.py` 从“DeepSeek API 客户端”更新为 `LLMProvider(ABC)` 抽象基类 + `DeepSeekProvider` 实现。
   - 新增 `web/schemas.py`（Pydantic 请求/响应模型）。
   - 新增 `web/rate_limit.py`（内存滑动窗口限流中间件）。
   - 更新 `web/server.py` 描述，加入 Pydantic 校验、CORS、速率限制、CSP。

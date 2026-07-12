@@ -17,7 +17,7 @@
 
 关键发现包括：
 1. Web端 Database 连接永不关闭（严重）
-2. KimiProvider 流式响应连接可能泄漏（严重）
+2. DeepSeekProvider 流式响应连接可能泄漏（严重）
 3. 默认 ThreadPoolExecutor 无上限（严重）
 4. Proactive task 取消不彻底（严重）
 5. setup_logging 重复添加 handler（高）

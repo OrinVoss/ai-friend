@@ -13,8 +13,8 @@ class TestRealDream(RealAPITestCase):
         super().setUpClass()
         from config import load_config
         cfg = load_config()
-        from core.provider import KimiProvider
-        cls.provider = KimiProvider(
+        from core.provider import DeepSeekProvider
+        cls.provider = DeepSeekProvider(
             endpoint=cfg.api_endpoint, api_key=cfg.api_key,
             model=cfg.api_model, timeout=cfg.api_timeout,
         )

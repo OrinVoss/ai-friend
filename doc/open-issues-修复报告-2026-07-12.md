@@ -1407,7 +1407,7 @@ P2/P3 issue 数量较多，建议按模块分批处理。以下是关键模块�
 | #54 | 重构 | CSS 全部硬编码颜色：全面改用 CSS 变量，HTML/JS 内联颜色改为类名 | `web/static/style.css`, `web/static/index.html`, `web/static/app.js` |
 | #45 | 封装 | Web 层直接访问 `agent._xxx`：`WebAgent` 新增公共接口，隔离内部状态 | `web/session.py`, `web/server.py` |
 | #43 | 增强 | REST API 无 Pydantic 验证：新增 `web/schemas.py`，接口使用 Pydantic 模型 | `web/schemas.py`, `web/server.py` |
-| #23 | 重构 | `KimiProvider` 无抽象基类：新增 `LLMProvider(ABC)` | `core/provider.py`, `core/agent.py`, `web/session.py` |
+| #23 | 重构 | `DeepSeekProvider` 无抽象基类：新增 `LLMProvider(ABC)` | `core/provider.py`, `core/agent.py`, `web/session.py` |
 | #28 | 增强 | 对话示例硬编码：`config.py` 新增 `conversation_examples`，提示词动态渲染 | `config.py`, `prompts/system.py`, `core/message_handler.py`, `core/cli_controller.py` |
 | #24 | 安全 | CORS/速率限制/CSP 细化：新增 `allowed_origins`、内存滑动窗口限流、细化 CSP | `config.py`, `web/server.py`, `web/rate_limit.py`, `web/static/index.html` |
 

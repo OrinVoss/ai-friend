@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from core.provider import LLMProvider, KimiProvider
+from core.provider import LLMProvider, DeepSeekProvider
 
 
 class TestLLMProviderABC(unittest.TestCase):
@@ -10,8 +10,8 @@ class TestLLMProviderABC(unittest.TestCase):
         with self.assertRaises(TypeError):
             LLMProvider()
 
-    def test_kimi_provider_is_instance_of_abc(self):
-        p = KimiProvider(
+    def test_deepseek_provider_is_instance_of_abc(self):
+        p = DeepSeekProvider(
             endpoint="https://api.example.com",
             api_key="test-key",
             model="test-model",

@@ -163,7 +163,7 @@
 
 | # | 标题 | 修改内容 |
 |---|------|---------|
-| #23 | Provider 抽象基类 | `core/provider.py` 新增 `LLMProvider` ABC；`KimiProvider` 为首个实现；Web/CLI 统一通过接口调用 |
+| #23 | Provider 抽象基类 | `core/provider.py` 新增 `LLMProvider` ABC；`DeepSeekProvider` 为首个实现；Web/CLI 统一通过接口调用 |
 
 ### 开放
 

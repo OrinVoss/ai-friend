@@ -53,7 +53,7 @@ AI Friend 是一个基于 DeepSeek API 的 AI 伴侣应用，具有人格系统�
 
 2. **会话隔离完全缺失（架构缺陷）**：`conversation_turns` 表无 `session_id` 列（`storage/database.py:86-93`），所有 Web 用户共享同一份对话历史。`SessionManager` 创建的所有 `WebAgent` 操作同一个 `Repository` 实例。
 
-3. **main.py 与 web/session.py 初始化逻辑 80% 重复**：两个文件独立完成 10+ 组件的完整组装链（Database → Repository → LongTermMemory → KimiProvider → MemoryRetriever → ...），没有任何共用工厂函数。
+3. **main.py 与 web/session.py 初始化逻辑 80% 重复**：两个文件独立完成 10+ 组件的完整组装链（Database → Repository → LongTermMemory → DeepSeekProvider → MemoryRetriever → ...），没有任何共用工厂函数。
 
 4. **情感值饱和（功能失效）**：`personality.json` 中 `valence: 0.98`、`arousal: 0.98`、`joy/trust/anticipation: 0.975` 全部接近上限，情感系统已丧失区分度，`dominant_emotion` 被锁定在 `"joyful"`。
 
@@ -189,7 +189,7 @@ class SessionManager:
 
 ### 3.5 缺少抽象层 ❌未修复
 
-- **Provider 无 ABC**（`core/provider.py:11`）：`KimiProvider` 是具体实现，无 `BaseProvider` 接口，无法替换模型或 mock 测试。
+- **Provider 无 ABC**（`core/provider.py:11`）：`DeepSeekProvider` 是具体实现，无 `BaseProvider` 接口，无法替换模型或 mock 测试。
 - **无工厂模式**：Agent 的依赖组装链无处工厂化，导致 main.py 和 web/session.py 各写一遍。
 - **无 DI 容器**：组件间依赖通过构造函数手动注入，耦合度高。
 
@@ -396,7 +396,7 @@ c.execute("""
 
 **文件**：`core/provider.py:11-109`
 
-- `KimiProvider` 直接实现所有逻辑，无 `BaseProvider` ABC
+- `DeepSeekProvider` 直接实现所有逻辑，无 `BaseProvider` ABC
 - 无法替换为其他模型 API
 - 无法在测试中 mock
 

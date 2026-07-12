@@ -9,7 +9,7 @@ from config import load_config
 from core.agent import Agent
 from core.embedding_server import auto_start_embedding
 from core.personality import Personality
-from core.provider import KimiProvider
+from core.provider import DeepSeekProvider
 from core.logging_setup import setup_logging
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
@@ -48,7 +48,7 @@ async def main():
         short_term = ConversationBuffer(maxlen=config.short_term_capacity)
 
         # Initialize provider
-        provider = KimiProvider(
+        provider = DeepSeekProvider(
             endpoint=config.api_endpoint,
             api_key=config.api_key,
             model=config.api_model,

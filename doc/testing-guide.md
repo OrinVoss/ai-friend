@@ -199,12 +199,12 @@ class TestRealAPI:
 
 ### 新增功能测试要点
 
-**Provider ABC（#23）**：验证自定义 Provider 必须实现 `generate` 方法，且 `KimiProvider` 是 `LLMProvider` 子类。
+**Provider ABC（#23）**：验证自定义 Provider 必须实现 `generate` 方法，且 `DeepSeekProvider` 是 `LLMProvider` 子类。
 
 ```python
-from core.provider import LLMProvider, KimiProvider
+from core.provider import LLMProvider, DeepSeekProvider
 
-assert issubclass(KimiProvider, LLMProvider)
+assert issubclass(DeepSeekProvider, LLMProvider)
 ```
 
 **速率限制（#24）**：验证 `RateLimiter` 在 60 秒窗口内对同一 IP 限制 30 次 `/api/chat`。

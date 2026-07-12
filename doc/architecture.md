@@ -300,7 +300,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）
 │   ├── personality.py       情绪引擎（四层）
-│   ├── provider.py          LLMProvider ABC + KimiProvider 实现（OpenAI 兼容，流式，JSON mode）
+│   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
 │   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）
 │   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）
 ├── memory/                  记忆系统

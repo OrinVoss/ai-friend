@@ -1,4 +1,4 @@
-"""Real API tests for KimiProvider."""
+"""Real API tests for DeepSeekProvider."""
 import sys
 import unittest
 
@@ -13,8 +13,8 @@ class TestRealProvider(RealAPITestCase):
         super().setUpClass()
         from config import load_config
         cfg = load_config()
-        from core.provider import KimiProvider
-        cls.provider = KimiProvider(
+        from core.provider import DeepSeekProvider
+        cls.provider = DeepSeekProvider(
             endpoint=cfg.api_endpoint, api_key=cfg.api_key,
             model=cfg.api_model, temperature=cfg.temperature,
             max_tokens=cfg.max_tokens, timeout=cfg.api_timeout,
@@ -42,9 +42,9 @@ class TestRealProvider(RealAPITestCase):
         self.assertGreater(len(result), 0)
 
     def test_thinking_parameter(self):
-        from core.provider import KimiProvider
+        from core.provider import DeepSeekProvider
         cfg = __import__("config").load_config()
-        p = KimiProvider(
+        p = DeepSeekProvider(
             endpoint=cfg.api_endpoint, api_key=cfg.api_key,
             model=cfg.api_model, thinking="enabled", timeout=cfg.api_timeout,
         )

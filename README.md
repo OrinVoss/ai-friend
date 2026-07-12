@@ -1,6 +1,6 @@
 # AI Friend
 
-具有人格、情绪和长短期记忆的 AI 朋友。基于 OpenAI 兼容 API（默认 DeepSeek / KimiProvider），采用三层 Agent 架构，支持 CLI 和 Web 双端。
+具有人格、情绪和长短期记忆的 AI 朋友。基于 OpenAI 兼容 API（默认 DeepSeek / DeepSeekProvider），采用三层 Agent 架构，支持 CLI 和 Web 双端。
 
 核心引擎采用三层 Agent 架构：Agent 1 InnerDrive 自主推理 → Agent 2 ToolAgent 外部工具执行 → Agent 3 Roleplay 人格驱动回复，从根本上解决模型虚构工具调用内容的问题。闲聊场景中 Agent 1 检测无需外部工具，直接跳过 Agent 2，仅需 1 次 LLM 调用。
 
@@ -182,7 +182,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **token 动态调整** — max_tokens 随情绪变化（excited 768, neutral 512, sad 256）
 - **会话管理** — session_id cookie 持久化，多标签页独立会话，短期记忆重启恢复。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
 - **环境变量安全** — API Key 支持 `DEEPSEEK_API_KEY` 环境变量，优先级高于 config.json
-- **Provider 抽象层** — `LLMProvider(ABC)` 抽象基类，`KimiProvider` 为默认实现，便于切换多模型
+- **Provider 抽象层** — `LLMProvider(ABC)` 抽象基类，`DeepSeekProvider` 为默认实现，便于切换多模型
 - **REST API 类型安全** — 使用 Pydantic 模型校验请求/响应，自动返回 422 错误
 - **Web 安全加固** — CORS 来源可配置、基于滑动窗口的速率限制、CSP/X-Frame-Options 安全头
 - **对话示例可配置** — `config.json` 的 `conversation_examples` 可自定义系统提示词中的对话风格示例
@@ -348,7 +348,7 @@ ai-friend/
 │   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
-│   ├── provider.py             LLMProvider(ABC) 抽象基类 + KimiProvider 实现（OpenAI 兼容，trust_env=False）
+│   ├── provider.py             LLMProvider(ABC) 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，trust_env=False）
 │   ├── embedding_server.py    共享 embedding server 启动（CLI/Web 共用）
 │   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
 │   ├── async_utils.py         异步→同步桥接 run_async()（线程池安全）

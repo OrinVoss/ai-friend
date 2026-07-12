@@ -1,4 +1,4 @@
-"""Tests for core/provider.py -- KimiProvider retry/error handling"""
+"""Tests for core/provider.py -- DeepSeekProvider retry/error handling"""
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -8,8 +8,8 @@ from requests.exceptions import ConnectionError as ReqConnectionError, HTTPError
 
 class TestProviderRetry(unittest.TestCase):
     def setUp(self):
-        from core.provider import KimiProvider
-        self.provider = KimiProvider(
+        from core.provider import DeepSeekProvider
+        self.provider = DeepSeekProvider(
             endpoint="https://test.api/v1",
             api_key="sk-test",
             model="test-model",
@@ -137,8 +137,8 @@ class TestProviderRetry(unittest.TestCase):
 
     @patch('requests.Session.post')
     def test_thinking_parameter(self, mock_post):
-        from core.provider import KimiProvider
-        p = KimiProvider(
+        from core.provider import DeepSeekProvider
+        p = DeepSeekProvider(
             endpoint="https://test.api/v1", api_key="sk-test",
             model="test-model", thinking="enabled",
         )

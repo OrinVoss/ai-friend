@@ -16,8 +16,8 @@ class TestRealMessageFlow(RealAPITestCase):
         cls.cfg = cfg
 
         # Setup full agent with real API
-        from core.provider import KimiProvider
-        cls.provider = KimiProvider(
+        from core.provider import DeepSeekProvider
+        cls.provider = DeepSeekProvider(
             endpoint=cfg.api_endpoint, api_key=cfg.api_key,
             model=cfg.api_model, temperature=0.7,
             max_tokens=cfg.max_tokens, timeout=cfg.api_timeout,
