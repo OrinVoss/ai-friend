@@ -22,12 +22,20 @@ class EmbeddingEngine:
         self._session = requests.Session()
         self._session.trust_env = False
         self._cache = EmbeddingCache()  # #196: integrated cache
+        self._encode_lock = threading.Lock()  # #253: TOCTOU guard
 
     def encode(self, texts: list[str]) -> np.ndarray:
         """Batch encode texts -> (n, dim) float32 L2-normalized.
         Uses cache to skip API calls for known texts. (#196)"""
         if not texts:
             return np.empty((0, self._dim), dtype=np.float32)
+
+        # #253: serialize encode() to prevent TOCTOU between cache-check and cache-set
+        with self._encode_lock:
+            return self._encode_locked(texts)
+
+    def _encode_locked(self, texts: list[str]) -> np.ndarray:
+        """Internal encode() call — must be called with _encode_lock held."""
 
         # #196: check cache first
         vecs = []

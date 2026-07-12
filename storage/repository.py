@@ -153,10 +153,11 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("""
                 INSERT INTO experiences (summary, emotional_tone, significance, importance, tags,
-                                         turn_range_start, turn_range_end, embedding, embedding_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                                         turn_range_start, turn_range_end, embedding, embedding_version,
+                                         session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             """, (summary, tone, significance, importance, json.dumps(tags, ensure_ascii=False),
-                  turn_start, turn_end, embedding))
+                  turn_start, turn_end, embedding, self.session_id))
             await self.db.commit()
             return c.lastrowid
 
@@ -170,27 +171,27 @@ class Repository:
                     params.extend([f"%{kw}%", f"%{kw}%"])
                 await c.execute(f"""
                     SELECT * FROM experiences
-                    WHERE is_archived = 0 AND ({conditions})
+                    WHERE is_archived = 0 AND session_id = ? AND ({conditions})
                     ORDER BY composite_score DESC, created_at DESC
                     LIMIT ?
-                """, params + [limit])
+                """, [self.session_id] + params + [limit])
             else:
                 await c.execute("""
                     SELECT * FROM experiences
-                    WHERE is_archived = 0
+                    WHERE is_archived = 0 AND session_id = ?
                     ORDER BY composite_score DESC, created_at DESC
                     LIMIT ?
-                """, (limit,))
+                """, (self.session_id, limit))
             return [self._row_to_experience(r) for r in await c.fetchall()]
 
     async def get_recent_experiences(self, limit: int = 5) -> list[Experience]:
         async with self.db.cursor() as c:
             await c.execute("""
                 SELECT * FROM experiences
-                WHERE is_archived = 0
+                WHERE is_archived = 0 AND session_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (self.session_id, limit))
             return [self._row_to_experience(r) for r in await c.fetchall()]
 
     async def update_experience_score(self, exp_id: int, score: float) -> None:
@@ -208,19 +209,19 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("""
                 INSERT INTO reflections (content, insight_type, related_experience_ids, significance,
-                                         embedding, embedding_version)
-                VALUES (?, ?, ?, ?, ?, 1)
-            """, (content, insight_type, json.dumps(related_ids), significance, embedding))
+                                         embedding, embedding_version, session_id)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
+            """, (content, insight_type, json.dumps(related_ids), significance, embedding, self.session_id))
             await self.db.commit()
             return c.lastrowid
 
     async def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
         async with self.db.cursor() as c:
             await c.execute("""
-                SELECT * FROM reflections WHERE is_active = 1
+                SELECT * FROM reflections WHERE is_active = 1 AND session_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (limit,))
+            """, (self.session_id, limit))
             return [self._row_to_reflection(r) for r in await c.fetchall()]
 
     async def bulk_update_embeddings(self, table: str, updates: list[tuple[int, bytes]]):
@@ -237,7 +238,7 @@ class Repository:
 
     async def get_all_relationships(self) -> dict[str, float]:
         async with self.db.cursor() as c:
-            await c.execute("SELECT dimension, value FROM relationship_metrics")
+            await c.execute("SELECT dimension, value FROM relationship_metrics WHERE session_id = ?", (self.session_id,))
             return {r["dimension"]: r["value"] for r in await c.fetchall()}
 
     async def upsert_relationship(self, dimension: str, value: float) -> None:
@@ -245,11 +246,11 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("BEGIN")
             await c.execute("""
-                INSERT INTO relationship_metrics (dimension, value, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?)
                 ON CONFLICT(dimension) DO UPDATE SET
                     value = ?, updated_at = CURRENT_TIMESTAMP
-            """, (dimension, value, value))
+            """, (dimension, value, self.session_id, value))
             # #132: insert snapshot for time-series tracking
             await c.execute("""
                 INSERT INTO relationship_snapshots (dimension, value)
@@ -300,49 +301,47 @@ class Repository:
 
     async def prune_facts(self, max_count: int) -> int:
         async with self.db.cursor() as c:
-            await c.execute("SELECT COUNT(*) FROM user_facts WHERE is_active = 1")
+            await c.execute("SELECT COUNT(*) FROM user_facts WHERE is_active = 1 AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
             count = row[0]
             if count <= max_count:
                 return 0
             excess = count - max_count
             logger.info(f"[db] prune_facts: degrading {excess} of {count}")
-            # #135: degrade score instead of deactivating — pruned facts can still be found
             await c.execute("""
                 UPDATE user_facts SET composite_score = composite_score * 0.1
                 WHERE id IN (
-                    SELECT id FROM user_facts WHERE is_active = 1
+                    SELECT id FROM user_facts WHERE is_active = 1 AND session_id = ?
                     ORDER BY composite_score ASC, recall_count ASC
                     LIMIT ?
                 )
-            """, (excess,))
+            """, (self.session_id, excess))
             await self.db.commit()
             return c.rowcount
 
     async def prune_experiences(self, max_count: int) -> int:
         async with self.db.cursor() as c:
-            await c.execute("SELECT COUNT(*) FROM experiences WHERE is_archived = 0")
+            await c.execute("SELECT COUNT(*) FROM experiences WHERE is_archived = 0 AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
             count = row[0]
             if count <= max_count:
                 return 0
             excess = count - max_count
             logger.info(f"[db] prune_exps: pruning {excess} of {count}")
-            await self.db.commit()
             await c.execute("""
                 UPDATE experiences SET is_archived = 1
                 WHERE id IN (
-                    SELECT id FROM experiences WHERE is_archived = 0
+                    SELECT id FROM experiences WHERE is_archived = 0 AND session_id = ?
                     ORDER BY composite_score ASC, created_at ASC
                     LIMIT ?
                 )
-            """, (excess,))
+            """, (self.session_id, excess))
             await self.db.commit()
             return c.rowcount
 
     async def prune_reflections(self, max_count: int) -> int:
         async with self.db.cursor() as c:
-            await c.execute("SELECT COUNT(*) FROM reflections WHERE is_active = 1")
+            await c.execute("SELECT COUNT(*) FROM reflections WHERE is_active = 1 AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
             count = row[0]
             if count <= max_count:
@@ -351,11 +350,11 @@ class Repository:
             logger.info(f"[db] prune_refl: pruning {excess} of {count}")
             await c.execute("""
                 UPDATE reflections SET is_active = 0 WHERE id IN (
-                    SELECT id FROM reflections WHERE is_active = 1
+                    SELECT id FROM reflections WHERE is_active = 1 AND session_id = ?
                     ORDER BY significance ASC, created_at ASC
                     LIMIT ?
                 )
-            """, (excess,))
+            """, (self.session_id, excess))
             await self.db.commit()
             return c.rowcount
 

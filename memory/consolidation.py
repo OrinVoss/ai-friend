@@ -4,7 +4,10 @@ import logging
 import re
 from typing import Optional
 
-from core.async_utils import _EXECUTOR
+from core.async_utils import _EXECUTOR, run_async
+from memory.fact_checker import FactChecker
+from memory.embeddings import EmbeddingEngine
+from models.memory import UserFact
 from prompts.templates import safe_format
 
 from memory.long_term import LongTermMemory
@@ -32,7 +35,6 @@ class MemoryConsolidator:
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
-        from memory.fact_checker import FactChecker
         self._fact_checker = FactChecker(embedding_engine)
 
     def _call_llm(self, prompt: str, temperature: float = 0.2) -> str:
@@ -152,7 +154,6 @@ class MemoryConsolidator:
             result = self._call_llm(prompt, temperature=0.2)
             # TM-005: LLM may wrap JSON in markdown code fences; extract first
             # valid JSON object before passing to json.loads.
-            import re
             m = re.search(r'\{[^}]+\}', result.strip(), re.DOTALL)
             raw = m.group(0) if m else result.strip()
             data = json.loads(raw)
@@ -209,7 +210,6 @@ class MemoryConsolidator:
             if self._fact_checker and new_facts:
                 for cat, key, val, conf in new_facts:
                     similar = self.ltm.get_similar_facts(cat, key, limit=5)
-                    from models.memory import UserFact
                     new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
                     old_f = self._fact_checker.detect_contradiction(new_f, similar)
                     if old_f:
@@ -420,7 +420,6 @@ class MemoryConsolidator:
             self.ltm.update_relationship("trust", new_trust)
 
     def _prune(self, max_facts: int, max_experiences: int, max_reflections: int) -> None:
-        from core.async_utils import run_async
         pruned_f = run_async(self.ltm.repo.prune_facts(max_facts))
         pruned_e = run_async(self.ltm.repo.prune_experiences(max_experiences))
         pruned_r = run_async(self.ltm.repo.prune_reflections(max_reflections))
@@ -432,8 +431,6 @@ class MemoryConsolidator:
         if not self._embed or not self._embed.health_check():
             return
 
-        from core.async_utils import run_async
-        from memory.embeddings import EmbeddingEngine
         try:
             async def _do_embed():
                 async with self.ltm.repo.db.cursor() as c:
