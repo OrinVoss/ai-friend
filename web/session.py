@@ -93,6 +93,18 @@ class WebAgent:
             config=config,
         )
         self.agent._tool_registry = registry
+        self._last_save_time: float = 0.0  # #44: debounce personality save
+
+    def _save_personality_debounced(self) -> None:
+        """Save personality at most once every 30s to reduce disk writes. (#44)"""
+        now = time.time()
+        if now - getattr(self, '_last_save_time', 0.0) < 30:
+            return
+        self._last_save_time = now
+        try:
+            self.personality.save(self.config.personality_file)
+        except Exception as e:
+            logger.warning(f"[session] save personality failed: {e}")
 
     def close(self) -> None:
         """SN-013: release per-session resources on eviction/shutdown.
@@ -113,7 +125,7 @@ class WebAgent:
         result = self.agent.process_message(
             user_input, on_token=self._on_token_callback,
         )
-        self.personality.save(self.config.personality_file)
+        self._save_personality_debounced()
         return result
 
     def process_proactive(self, on_token=None, *, intent=None) -> str:
@@ -121,12 +133,12 @@ class WebAgent:
             on_token=on_token or self._on_token_callback,
             intent=intent,
         )
-        self.personality.save(self.config.personality_file)
+        self._save_personality_debounced()
         return result
 
     def process_explore(self, intent=None) -> str | None:
         result = self.agent.process_explore(intent=intent)
-        self.personality.save(self.config.personality_file)
+        self._save_personality_debounced()
         return result
 
     def process_proactive_with_intent(self, intent) -> str:

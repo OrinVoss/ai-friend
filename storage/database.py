@@ -53,9 +53,12 @@ class Database:
         await self.conn.execute("PRAGMA busy_timeout=5000")  # #154
         await self.initialize()
         try:
-            await self.conn.execute("PRAGMA integrity_check")
+            result = await self.conn.execute("PRAGMA integrity_check")
+            row = await result.fetchone()
+            if row and row[0] != "ok":
+                logger.warning(f"[db] integrity check failed: {row[0]}")
         except Exception as e:
-            logger.warning(f"[db] integrity check failed: {e}")
+            logger.warning(f"[db] integrity check error: {e}")
         logger.info(f"[db] opened: {self.db_path}")
 
     @asynccontextmanager
@@ -205,7 +208,35 @@ class Database:
             await c.execute(
                 "INSERT OR IGNORE INTO schema_version (version) VALUES (1)"
             )
+
+            # #157: create indexes for frequently-queried columns
+            await c.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_user_facts_session ON user_facts(session_id, is_active, composite_score);
+                CREATE INDEX IF NOT EXISTS idx_experiences_session ON experiences(session_id, is_archived, composite_score);
+                CREATE INDEX IF NOT EXISTS idx_reflections_session ON reflections(session_id, is_active);
+                CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, id);
+                CREATE INDEX IF NOT EXISTS idx_relationship_session ON relationship_metrics(session_id);
+            """)
+            logger.info("[db] indexes created/verified")
         await self.commit()
+
+    async def prune_old_turns(self, keep_max: int = 1000) -> int:
+        """Delete oldest conversation turns beyond keep_max per session. (#178)"""
+        async with self.cursor() as c:
+            await c.execute("""
+                DELETE FROM conversation_turns WHERE id IN (
+                    SELECT id FROM conversation_turns
+                    WHERE id NOT IN (
+                        SELECT id FROM conversation_turns
+                        ORDER BY id DESC LIMIT ?
+                    )
+                )
+            """, (keep_max,))
+            deleted = c.rowcount
+            if deleted:
+                await self.commit()
+                logger.info(f"[db] pruned {deleted} old conversation turns")
+            return deleted
 
     async def close(self) -> None:
         if self.conn:

@@ -203,6 +203,9 @@ class EmotionalState:
 
         self.valence = max(-1.0, min(1.0, self.valence + delta_v))
         self.arousal = max(0.0, min(1.0, self.arousal + delta_a))
+        # #42: warn when emotion hits hard clamp — decay() will pull back naturally
+        if abs(self.valence) >= 1.0 or self.arousal >= 1.0 or self.arousal <= 0.0:
+            logger.info(f"[emotion] hard clamp: v={self.valence:+.2f} a={self.arousal:.2f}")
 
         # Apply primary emotion deltas
         if primary_deltas:

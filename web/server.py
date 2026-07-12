@@ -56,9 +56,16 @@ async def lifespan(app: FastAPI):
             pass
         logger.info("Server starting...")
         await session_manager.open()
+        # #148: periodic session cleanup every 5 minutes
+        async def _periodic_cleanup():
+            while True:
+                await asyncio.sleep(300)
+                session_manager.cleanup_old()
+        cleanup_task = asyncio.create_task(_periodic_cleanup())
         yield
         # #212: graceful shutdown — also evict stale sessions via cleanup_old
         logger.info("Server shutting down...")
+        cleanup_task.cancel()
         session_manager.cleanup_old()
         await session_manager.shutdown()
     except Exception as e:

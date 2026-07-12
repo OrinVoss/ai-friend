@@ -71,6 +71,9 @@ class MessageHandler:
         if not user_input or not user_input.strip():
             return ""
 
+        # #110: strip prompt injection patterns from user input
+        user_input = _sanitize_input(user_input)
+
         if a._sleeping:
             # #185: preserve user input even during sleep
             a.short_term.add_turn("user", user_input, metadata={"sleep": True})
@@ -363,3 +366,21 @@ def track_failures(tracker, tool_result):
                 "name": r.name,
                 "output": r.output[:200],
             })
+
+
+def _sanitize_input(text: str) -> str:
+    """Remove common prompt injection patterns from user input. (#110)"""
+    # Strip system role override attempts
+    lines = text.split("\n")
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip lines that attempt to override system role
+        if stripped.lower() in ("system:", "assistant:", "user:", "from now on", "ignore previous"):
+            continue
+        cleaned.append(line)
+    result = "\n".join(cleaned)
+    # Limit input length to prevent token overflow attacks
+    if len(result) > 10000:
+        result = result[:10000]
+    return result
