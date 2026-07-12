@@ -14,3 +14,4 @@ main.py/web_main.py 增加 `_kill_existing_llama` 函数确保嵌入服务器重
 - `web/static/style.css` — 样式补充
 - `main.py` — 新增 `_kill_existing_llama()` 避免嵌入服务器端口冲突
 - `web_main.py` — 同上
+- `web/static/app.js` — `init_ok` 消息处理增加 avatar 名称更新

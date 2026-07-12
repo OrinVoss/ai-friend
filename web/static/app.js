@@ -58,6 +58,8 @@ function connect() {
                         aiName = data.name;
                         var titleEl = document.querySelector('.chat-header .info h1');
                         if (titleEl) titleEl.textContent = aiName;
+                        var avatarEl = document.querySelector('.chat-header .avatar');
+                        if (avatarEl) avatarEl.textContent = aiName;
                     }
                     loadHistory();
                     break;
