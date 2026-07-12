@@ -145,16 +145,56 @@ class CliController:
                 user_message = f"[主动开启对话] 主题方向：{a._pick_proactive_topic()}"
             else:
                 user_message = f"用户输入：{a.current_input or ''}"
-            # Agent 2: Run tools if Agent 1 decided they're needed
+            # Agent 2: Multi-round tool execution (same pattern as message_handler)
+            from core.tool_agent import ToolAttemptTracker
             drive_result = getattr(self, '_inner_drive_result', None)
             if drive_result and drive_result.needs_external_tools and not is_proactive:
                 self._ensure_tool_agent()
-                tool_result = self._tool_agent.run_with_request(
-                    drive_result.tool_requests[0].description
-                    if drive_result.tool_requests else user_message
-                )
-                if tool_result.has_results:
-                    self._tool_records = self._tool_agent.format_for_phase2(tool_result)
+                tracker = ToolAttemptTracker()
+                max_rounds = 3
+                all_tool_results = []
+                round_num = 0
+                try:
+                    while round_num < max_rounds and drive_result.needs_external_tools:
+                        round_num += 1
+                        tracker.round_number = round_num
+                        request_text = (drive_result.tool_requests[0].description
+                                       if drive_result.tool_requests else user_message)
+                        # Use run_with_requests if multiple requests
+                        if len(drive_result.tool_requests) > 1:
+                            reqs = [r.description for r in drive_result.tool_requests]
+                            tool_result = self._tool_agent.run_with_requests(reqs)
+                        else:
+                            tool_result = self._tool_agent.run_with_request(request_text)
+                        tracker.total_attempts += 1
+                        # In-round retries
+                        while tracker.can_retry_in_round and not tool_result.any_success:
+                            tracker.retry_count += 1
+                            tool_result = self._tool_agent.run_with_request(request_text)
+                            tracker.total_attempts += 1
+                        if tool_result and tool_result.has_results:
+                            all_tool_results.append(tool_result)
+                        combined = ""
+                        for r in all_tool_results:
+                            combined += self._tool_agent.format_for_phase2(r) + "\n"
+                        if tool_result and tool_result.any_success and round_num < max_rounds:
+                            drive_result = self._inner_drive.review(
+                                user_message, combined,
+                                round_num=round_num, max_rounds=max_rounds,
+                            )
+                        elif tool_result and not tool_result.any_success:
+                            if tracker.can_start_new_round:
+                                drive_result = self._inner_drive.re_decide(user_message, tracker.failure_log)
+                            else:
+                                break
+                        else:
+                            break
+                    parts = [self._tool_agent.format_for_phase2(r) for r in all_tool_results]
+                    merged = "\n".join(p for p in parts if p)
+                    if merged:
+                        self._tool_records = merged
+                except Exception:
+                    logger.exception("[cli] agent2 error, continuing with partial results")
 
             drive_summary = drive_result.summary if drive_result else ""
             sys_prompt = build_system_prompt(
