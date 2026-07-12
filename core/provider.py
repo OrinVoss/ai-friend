@@ -108,7 +108,7 @@ class KimiProvider:
             url,
             json=payload,
             stream=True,
-            timeout=self.timeout,
+            timeout=(10, self.timeout),  # #174: connect=10s, read=self.timeout
         )
         resp.raise_for_status()
 

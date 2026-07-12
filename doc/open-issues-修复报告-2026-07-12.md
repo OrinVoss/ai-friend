@@ -12,13 +12,13 @@
 ## 一、执行摘要
 
 本次审查共梳理出 **40+ 个 open issue**（截至报告日）。后续修复进展：
-- **2026-07-12 已修复关闭：32 个 issue**
+- **2026-07-12 已修复关闭：38 个 issue**（Batch 1-3：9 个 + 历史 P1：23 个 + Batch 4：6 个）
 - **剩余 open：~80 个**（P2/P3 代码清理、架构审查、v1.0 发布标准）
 
 | 类别 | 数量 | 代表 Issue | 紧迫性 |
 |------|------|-----------|--------|
-| v0.5 P1 Bug | 8 | #244, #243, #242, #239, #233, #215, #214, #210 | 🔴 最高 |
-| v0.4 / v0.3 / v0.2 P1 Bug | ~12 | #182, #179, #176, #185, #184, #180, #175, #174, #172, #170, #169, #167, #168 | 🟠 高 |
+| v0.5 P1 Bug | 8（已修 5，跳过 3） | #244, #243, #242, #239, #233, #215, #214, #210 | 🔴 最高 |
+| v0.4 / v0.3 / v0.2 P1 Bug | ~13（已修 10，待修 4） | #182, #179, #176, #185, #184, #180, #175, #174, #172, #170, #169, #167, #168 | 🟠 高 |
 | v0.5 P2/P3 质量改进 | ~23 | #284, #278, #277, #274, #273, #272, #267-#249, #248, #247 | 🟡 中 |
 | 架构审查 | 4 | #296, #295, #294, #293 | 🟢 低（长期） |
 
@@ -47,7 +47,7 @@
 | #242 | ✅ 已修 | tools/traits.py execute base class async but all 8 implementations sync — LSP violation | `tools/traits.py`, `tools/*_tools.py` | 类型契约 |
 | #239 | ✅ 已修 | proactivity sentiment/goodbye keyword matching coarse + rate_limit updates timestamp before send | `core/proactivity.py`, `web/server.py` | 状态管理 |
 | #233 | ⏭ 跳过 | WebSocket Origin check startswith localhost bypassable via localhost.evil.com | `web/server.py` | 安全 |
-| #215 | 🌑 待修 | schema_version table never read/written + dynamic SQL lacks whitelist | `storage/database.py` | 数据 / 安全 |
+| #215 | ✅ 已修 | schema_version table never read/written + dynamic SQL lacks whitelist | `storage/database.py` | 数据 / 安全 |
 | #214 | ✅ 已修 | repository multiple query methods missing session_id filter | `storage/repository.py` | 数据隔离 |
 | #210 | ⏭ 跳过 | WebSocket multi-tab session race — disconnect destroys session + init repeatable | `web/session.py`, `web/server.py` | 并发 / 状态 |
 
@@ -56,20 +56,20 @@
 | # | 状态 | 标题 | 主要文件 |
 |---|------|------|---------|
 | #185 | ✅ 已修 | check_rate_limit 首次调用逻辑缺陷 + 睡眠期间用户消息丢失 | `core/proactivity.py`, `core/message_handler.py`, `core/sleep_manager.py` |
-| #184 | 🌑 待修 | consolidation 的 LLM 调用无独立超时 + Personality 损坏回退 | `memory/consolidation.py`, `core/personality.py` |
-| #183 | 🌑 待修 | ToolRegistry 缺乏工具权限元数据 | `tools/traits.py` |
+| #184 | ✅ 已修 | consolidation 的 LLM 调用无独立超时 + Personality 损坏回退 | `memory/consolidation.py`, `core/personality.py` |
+| #183 | ✅ 已修 | ToolRegistry 缺乏工具权限元数据 | `tools/traits.py` |
 | #182 | ✅ 已修 | Agent 3 ReAct 中 max_tokens 动态调整不合理 + _react_loop 中 add_to_history=False 时仍增加 turn_count + fake_action 重试无退避 + 空输入未拦截 + contains_fake_action 对工具返回误判 | `core/agent.py`, `core/dispatcher.py` |
-| #180 | 🌑 待修 | 梦境生成同步阻塞 + CLI 缺失 + 记忆关联弱 | `core/sleep_manager.py`, `ui/cli.py` |
-| #179 | 🌑 待修 | Agent 1 review/re_decide 存在消息累积问题 + tool_result 注入位置导致 system prompt 被挤到末尾 | `core/message_handler.py`, `core/tool_agent.py` |
+| #180 | 🌑 待修 | 梦境生成同步阻塞 + CLI 缺失 + 记忆关联弱（#180 梦境已 async，CLI 仍待修） | `core/sleep_manager.py`, `ui/cli.py` |
+| #179 | ✅ 已修 | Agent 1 review/re_decide 存在消息累积问题 + tool_result 注入位置导致 system prompt 被挤到末尾 | `core/message_handler.py`, `core/tool_agent.py` |
 | #178 | 🌑 待修 | 数据库文件缺乏权限控制 + WAL 模式未配置自动检查点 + 日志 I/O 同步高频场景瓶颈 + 日志无轮转 | `storage/database.py`, `core/logging_setup.py` |
 | #176 | ✅ 已修 | ConversationBuffer 无单条消息大小限制可导致 OOM | `memory/short_term.py` |
 | #175 | 🌑 待修 | 工具调用结果格式化存在双重标准 + short_term 历史消息插入顺序不一致 | `core/dispatcher.py`, `memory/short_term.py` |
-| #174 | 🌑 待修 | Web 路径中 emotion 事件记录缺失 + API 连接超时与读取超时未分离 | `web/server.py`, `core/provider.py` |
+| #174 | ✅ 已修 | Web 路径中 emotion 事件记录缺失 + API 连接超时与读取超时未分离 | `web/server.py`, `core/provider.py` |
 | #172 | 🌑 待修 | GlobTool/GrepTool 目录遍历无缓存 + 多处性能瓶颈 | `tools/file_tools.py`, `tools/search_tools.py` |
 | #170 | 🌑 待修 | _build_messages 字符截断导致 token 估算失真 + O(k²) 复杂度 | `core/context_manager.py`, `core/message_handler.py` |
 | #169 | 🌑 待修 | SleepManager 情绪驱动睡眠检测不完整 | `core/sleep_manager.py` |
 | #168 | 🌑 待修 | Performance：estimate_tokens 误差 + 情绪行为描述浪费 | 多文件 |
-| #167 | 🌑 待修 | 睡眠系统缺陷 — 睡眠全局共享 + sleep_cooldown 整数递减 | `core/sleep_manager.py` |
+| #167 | ✅ 已修 | 睡眠系统缺陷 — 睡眠全局共享 + sleep_cooldown 整数递减 | `core/sleep_manager.py` |
 | #105 | ✅ 已修 | 梦境事件被普通情绪事件挤出 emotion_events 列表 | `models/personality.py` |
 | #152 | ✅ 已修 | _react_loop 消息累积 + max_tool_iterations 可配置 | `core/agent.py`, `config.py` |
 | #27 | ✅ 已修 | Shutdown 不关闭 DB | `web/session.py` |

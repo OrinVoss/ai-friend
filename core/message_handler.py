@@ -140,6 +140,8 @@ class MessageHandler:
                 combined_records = ""
                 for i, r in enumerate(all_tool_results):
                     combined_records += self._tool_agent.format_for_phase2(r) + "\n"
+                if len(combined_records) > 3000:
+                    combined_records = combined_records[:3000] + "\n...(后续结果已截断)"
 
                 if tool_result and tool_result.any_success and round_num < MAX_AGENT2_ROUNDS:
                     drive_result = self._inner_drive.review(
@@ -166,6 +168,8 @@ class MessageHandler:
             if part:
                 parts.append(part)
         tool_records = "\n".join(parts)
+        if len(tool_records) > 3000:
+            tool_records = tool_records[:3000] + "\n...(后续结果已截断)"
         if tool_records:
             total = sum(r.total_calls for r in all_tool_results)
             ok = sum(r.success_count for r in all_tool_results)

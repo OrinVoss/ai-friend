@@ -27,6 +27,9 @@ class ToolSpec:
 class Tool:
     """Base class for all tools. Subclass must define name(), description(), parameters_schema(), and execute()."""
 
+    # #183: optional permission metadata — empty list means no restrictions
+    required_permissions: list[str] = []
+
     def name(self) -> str:
         raise NotImplementedError
 
@@ -78,6 +81,16 @@ class ToolRegistry:
                 f"  参数: {params_str}"
             )
         return "\n\n".join(parts) if parts else "(无可用工具)"
+
+    # #183: permission check — simple role-based access
+    def check_permission(self, name: str, user_role: str = "user") -> bool:
+        """Check if a user role has permission to call a tool."""
+        tool = self._tools.get(name)
+        if not tool:
+            return False
+        if not tool.required_permissions:
+            return True
+        return user_role in tool.required_permissions
 
     def to_json_schema(self, names: list[str] | None = None) -> dict:
         """Generate JSON Schema for structured tool call output.

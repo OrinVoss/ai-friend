@@ -18,7 +18,23 @@
       "Read(//d/.claude/**)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if 'skill' in k.lower\\(\\)}, indent=2\\)\\)\")",
       "Bash(dreamina *)",
-      "Read(//d//**)"
+      "Read(//d//**)",
+      "Bash(python -c ' *)",
+      "Bash(git -c http.proxy=socks5://127.0.0.1:7897 push)",
+      "Bash(git push *)",
+      "Bash(cd D:\\\\桌面\\\\编程作品\\\\AI朋友 *)",
+      "Bash(taskkill //F //PID 29312)",
+      "Bash(taskkill //F //PID 34516)",
+      "Bash(taskkill //F //PID 44116)",
+      "Bash(taskkill //F //PID 2132)",
+      "Bash(python web_main.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/health)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":8000\")",
+      "Bash(curl -s --max-time 5 http://localhost:8000/)",
+      "Bash(findstr \"LISTEN.*8000\")",
+      "Bash(python -m pytest tests/ -q)"
     ]
   }
 }

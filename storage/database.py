@@ -7,6 +7,26 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+# DB-001: whitelist of allowable table/column alterations — prevents SQL injection in DDL
+ALLOWED_ALTERATIONS = {
+    ("user_facts", "importance"),
+    ("experiences", "importance"),
+    ("reflections", "is_active"),
+    ("user_facts", "embedding"),
+    ("user_facts", "embedding_version"),
+    ("experiences", "embedding"),
+    ("experiences", "embedding_version"),
+    ("reflections", "embedding"),
+    ("reflections", "embedding_version"),
+    ("user_facts", "fact_type"),
+    ("conversation_turns", "is_tool_claim"),
+    ("user_facts", "session_id"),
+    ("experiences", "session_id"),
+    ("reflections", "session_id"),
+    ("conversation_turns", "session_id"),
+    ("relationship_metrics", "session_id"),
+}
+
 
 class Database:
     def __init__(self, db_path: str):
@@ -142,7 +162,13 @@ class Database:
                 );
             """)
 
-            for table, column, col_type, default_val in [
+            # #215: read current schema version to skip already-applied migrations
+            await c.execute("SELECT MAX(version) FROM schema_version")
+            row = await c.fetchone()
+            current_version = row[0] if row and row[0] else 0
+            logger.info(f"[db] schema version: {current_version}")
+
+            alterations = [
                 ("user_facts", "importance", "REAL", "0.5"),
                 ("experiences", "importance", "REAL", "0.5"),
                 ("reflections", "is_active", "INTEGER", "1"),
@@ -159,7 +185,11 @@ class Database:
                 ("reflections", "session_id", "TEXT", "'default'"),         # #40
                 ("conversation_turns", "session_id", "TEXT", "'default'"),  # #40
                 ("relationship_metrics", "session_id", "TEXT", "'default'"),# #40
-            ]:
+            ]
+            for table, column, col_type, default_val in alterations:
+                # #215: whitelist validation — reject unknown alterations
+                if (table, column) not in ALLOWED_ALTERATIONS:
+                    raise ValueError(f"Unauthorized schema alteration: {table}.{column}")
                 await c.execute(f"PRAGMA table_info({table})")
                 rows = await c.fetchall()
                 columns = [row[1] for row in rows]

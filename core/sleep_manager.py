@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,9 @@ class SleepManager:
         # SL-002: guard _sleeping transitions against concurrent proactive ticks
         self._lock = asyncio.Lock()
         self._sleeping = self._load_sleep_state()
+        # #167: cooldown to prevent rapid sleep/wake cycling
+        self._last_transition_time = 0.0
+        self._MIN_SLEEP_INTERVAL = 600  # 10 minutes minimum between transitions
 
     @property
     def is_sleeping(self) -> bool:
@@ -73,10 +77,15 @@ class SleepManager:
         sleepiness += r * 0.2
 
         async with self._lock:
+            # #167: cooldown guard — don't transition if too soon after last change
+            if time.time() - self._last_transition_time < self._MIN_SLEEP_INTERVAL:
+                return False, None
+
             # Nap window: 12:00-13:00
             if 12 <= hour < 13 and not self._sleeping:
                 if random.random() < max(0.1, sleepiness):
                     self._sleeping = True; self._save_sleep_state()
+                    self._last_transition_time = time.time()
                     logger.info(f"[sleep] nap trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
                     return True, "我去午睡一会儿...困了[困]"
 
@@ -85,6 +94,7 @@ class SleepManager:
                 if not self._sleeping:
                     if random.random() < max(0.3, sleepiness + 0.3):
                         self._sleeping = True; self._save_sleep_state()
+                        self._last_transition_time = time.time()
                         logger.info(f"[sleep] night trigger: sleepiness={sleepiness:.2f} hour={hour:.2f}")
                         return True, "夜深了...我睡了，晚安[月亮]"
 
@@ -95,6 +105,7 @@ class SleepManager:
                 wake_chance -= r * 0.1
                 if random.random() < min(0.9, wake_chance):
                     self._sleeping = False; self._save_sleep_state()
+                    self._last_transition_time = time.time()
                     dream = await self.generate_dream()
                     logger.info(f"[sleep] nap wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
                     return False, f"睡醒了...{'做了个梦：' + dream if dream else '没做梦，睡得挺香'}"
@@ -106,6 +117,7 @@ class SleepManager:
                 wake_chance -= r * 0.1
                 if random.random() < min(0.9, wake_chance):
                     self._sleeping = False; self._save_sleep_state()
+                    self._last_transition_time = time.time()
                     dream = await self.generate_dream()
                     logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
                     return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"

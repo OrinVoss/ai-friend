@@ -1,8 +1,10 @@
+import concurrent.futures
 import json
 import logging
 import re
 from typing import Optional
 
+from core.async_utils import _EXECUTOR
 from prompts.templates import safe_format
 
 from memory.long_term import LongTermMemory
@@ -22,15 +24,28 @@ logger = logging.getLogger(__name__)
 
 class MemoryConsolidator:
     def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable,
-                 embedding_engine=None):
+                 embedding_engine=None, timeout: float = 60.0):
         self.ltm = ltm
         self.llm = llm_generate_fn
+        self._timeout = timeout  # #184: independent timeout for LLM calls
         self._embed = embedding_engine
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
         from memory.fact_checker import FactChecker
         self._fact_checker = FactChecker(embedding_engine)
+
+    def _call_llm(self, prompt: str, temperature: float = 0.2) -> str:
+        """Call LLM with timeout protection. (#184)"""
+        future = _EXECUTOR.submit(self.llm, prompt, temperature=temperature)
+        try:
+            return future.result(timeout=self._timeout)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"[consolidate] LLM timed out after {self._timeout}s")
+            return ""
+        except Exception as e:
+            logger.warning(f"[consolidate] LLM call failed: {e}")
+            return ""
 
     def should_consolidate(self, turn_count: int, emotional_intensity: float,
                            idle_duration: float, config) -> bool:
@@ -134,7 +149,7 @@ class MemoryConsolidator:
         that skips intimacy updates in _update_relationship."""
         try:
             prompt = safe_format(EMOTION_ANALYSIS_PROMPT, text=text)
-            result = self.llm(prompt, temperature=0.2)
+            result = self._call_llm(prompt, temperature=0.2)
             # TM-005: LLM may wrap JSON in markdown code fences; extract first
             # valid JSON object before passing to json.loads.
             import re
@@ -153,7 +168,7 @@ class MemoryConsolidator:
     def _extract_facts(self, turn_text: str) -> None:
         try:
             prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
-            result = self.llm(prompt, temperature=0.2)
+            result = self._call_llm(prompt, temperature=0.2)
             new_facts = []
             for line in result.strip().split("\n"):
                 line = line.strip()
@@ -206,7 +221,7 @@ class MemoryConsolidator:
                                short_term: ConversationBuffer) -> None:
         try:
             prompt = safe_format(EXPERIENCE_SUMMARIZATION_PROMPT, text=turn_text)
-            result = self.llm(prompt, temperature=0.3)
+            result = self._call_llm(prompt, temperature=0.3)
 
             summary = ""
             tone = "neutral"
@@ -261,7 +276,7 @@ class MemoryConsolidator:
                 f"- {f.fact_key}: {f.fact_value}" for f in facts
             ) or "暂无"
             prompt = safe_format(REFLECTION_L2_PROMPT, facts=fact_text, experiences=exp_text)
-            result = self.llm(prompt, temperature=0.4)
+            result = self._call_llm(prompt, temperature=0.4)
             content = ""
             significance = 0.5
             related_ids = []
@@ -304,7 +319,7 @@ class MemoryConsolidator:
                 current_emotion=personality.emotion.dominant_emotion,
                 patterns=pat_text,
             )
-            result = self.llm(prompt, temperature=0.5)
+            result = self._call_llm(prompt, temperature=0.5)
             content = ""
             significance = 0.5
             related_ids = []
@@ -350,7 +365,7 @@ class MemoryConsolidator:
                 current_emotion=personality.emotion.dominant_emotion,
                 relationship=relationship,
             )
-            result = self.llm(prompt, temperature=0.4)
+            result = self._call_llm(prompt, temperature=0.4)
 
             insight_type = "user_discovery"
             content = ""

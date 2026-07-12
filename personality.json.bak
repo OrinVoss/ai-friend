@@ -25,26 +25,26 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9705971116934368,
-    "arousal": 0.9957639239199954,
-    "baseline_valence": 0.417769343095458,
-    "baseline_arousal": 0.9142773165350602,
+    "valence": 0.9681312539700089,
+    "arousal": 0.9362402421121222,
+    "baseline_valence": 0.3690918321203576,
+    "baseline_arousal": 0.9233539832075552,
     "decay_rate": 0.05,
     "mood_valence": 1.0,
-    "mood_arousal": 1.0,
+    "mood_arousal": 0.981800000000001,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.7233478319441394,
-    "trust": 0.942607023316903,
-    "fear": 0.020357731373253973,
-    "surprise": 0.18354375191669317,
-    "sadness": 0.02634878066617082,
-    "anticipation": 0.49371966415434254,
-    "anger": 0.01906922051221153,
-    "disgust": 0.10000000000003297,
-    "resentment": 0.0009822714738483844,
+    "joy": 0.8373374038777849,
+    "trust": 0.9457032942392286,
+    "fear": 0.019674901618555753,
+    "surprise": 0.1013029177558692,
+    "sadness": 0.015852585978620787,
+    "anticipation": 0.43560806757285764,
+    "anger": 0.013696185116848867,
+    "disgust": 0.10000000000005739,
+    "resentment": 0.0010762578424565914,
     "emotion_events": [
       {
         "timestamp": 1781078396.8877544,
@@ -367,77 +367,21 @@
         "primary_emotion": "trusting",
         "intensity": 0.9457032942392286,
         "context": "还没有哦，台风到我这都变成大风了，你别担心"
-      },
-      {
-        "timestamp": 1783854987.3122149,
-        "trigger": "把你烤了",
-        "primary_emotion": "trusting",
-        "intensity": 0.931191222798141,
-        "context": "把你烤了"
-      },
-      {
-        "timestamp": 1783855031.5314193,
-        "trigger": "说说你对我的印象",
-        "primary_emotion": "trusting",
-        "intensity": 0.92610471515318,
-        "context": "说说你对我的印象"
-      },
-      {
-        "timestamp": 1783855085.3061638,
-        "trigger": "你的记忆里面有什么",
-        "primary_emotion": "excited",
-        "intensity": 0.924766012934473,
-        "context": "你的记忆里面有什么"
-      },
-      {
-        "timestamp": 1783855127.2522578,
-        "trigger": "还有吗，比如我是谁",
-        "primary_emotion": "excited",
-        "intensity": 0.9253095885328994,
-        "context": "还有吗，比如我是谁"
-      },
-      {
-        "timestamp": 1783855151.0593948,
-        "trigger": "你查查记忆吧",
-        "primary_emotion": "trusting",
-        "intensity": 0.9149772178717138,
-        "context": "你查查记忆吧"
-      },
-      {
-        "timestamp": 1783855200.766705,
-        "trigger": "我是你爸爸，请记住1",
-        "primary_emotion": "excited",
-        "intensity": 0.9106648020303476,
-        "context": "我是你爸爸，请记住1"
-      },
-      {
-        "timestamp": 1783855207.3136084,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.9404930212010048,
-        "context": "我是你爸爸，请记住!"
-      },
-      {
-        "timestamp": 1783855335.7503407,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.942607023316903,
-        "context": "我是你爸爸，请记住!"
       }
     ],
     "history": [
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
       "trusting",
       "trusting",
       "trusting",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited"
+      "trusting",
+      "trusting"
     ],
     "consecutive_negative": 0,
-    "dominant_emotion": "excited"
+    "dominant_emotion": "trusting"
   }
 }
