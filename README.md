@@ -1,6 +1,6 @@
 # AI Friend
 
-具有人格、情绪和长短期记忆的 AI 朋友。基于 DeepSeek API，采用三层 Agent 架构，支持 CLI 和 Web 双端。
+具有人格、情绪和长短期记忆的 AI 朋友。基于 OpenAI 兼容 API（默认 DeepSeek / KimiProvider），采用三层 Agent 架构，支持 CLI 和 Web 双端。
 
 核心引擎采用三层 Agent 架构：Agent 1 InnerDrive 自主推理 → Agent 2 ToolAgent 外部工具执行 → Agent 3 Roleplay 人格驱动回复，从根本上解决模型虚构工具调用内容的问题。闲聊场景中 Agent 1 检测无需外部工具，直接跳过 Agent 2，仅需 1 次 LLM 调用。
 
@@ -182,6 +182,11 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **token 动态调整** — max_tokens 随情绪变化（excited 768, neutral 512, sad 256）
 - **会话管理** — session_id cookie 持久化，多标签页独立会话，短期记忆重启恢复。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
 - **环境变量安全** — API Key 支持 `DEEPSEEK_API_KEY` 环境变量，优先级高于 config.json
+- **Provider 抽象层** — `LLMProvider(ABC)` 抽象基类，`KimiProvider` 为默认实现，便于切换多模型
+- **REST API 类型安全** — 使用 Pydantic 模型校验请求/响应，自动返回 422 错误
+- **Web 安全加固** — CORS 来源可配置、基于滑动窗口的速率限制、CSP/X-Frame-Options 安全头
+- **对话示例可配置** — `config.json` 的 `conversation_examples` 可自定义系统提示词中的对话风格示例
+- **共享 embedding 启动** — CLI/Web 双端统一调用 `core/embedding_server.py`，消除启动代码重复
 
 ---
 
@@ -225,8 +230,10 @@ python web_main.py
 | `web_port` | — | `8000` | Web 端口 |
 | — | `ANYSEARCH_API_KEY` | — | AnySearch API Key（可选，匿名也可用） |
 | `embedding_endpoint` | — | `http://localhost:8080/v1/embeddings` | llama.cpp 嵌入服务地址 |
-| `embedding_dim` | — | `512` | 嵌入向量维度（Qwen3.5-0.8B 输出） |
+| `embedding_dim` | — | `1024` | 嵌入向量维度（Qwen3.5-0.8B 输出） |
 | `embedding_cache_size` | — | `1000` | 嵌入缓存条目数（LRU） |
+| `conversation_examples` | — | 5 组默认示例 | 系统提示词中的对话风格示例（可配置） |
+| `allowed_origins` | — | `[]` | 除 localhost 外额外允许的 CORS 来源 |
 
 ---
 
@@ -270,9 +277,13 @@ python web_main.py
 
 - 发现 bug → 先创建 GitHub issue → 修复 → changes 记录 → 推送
 - 修改文件 → `changes/YYYY-MM-DD-简短描述.md`
-- 文档用 ASCII 图表达架构/流程/状态机
+- 文档用 ASCII 图表达架构/流程/状态机；README 与 `doc/architecture.md`、`doc/api.md`、`CLAUDE.md` 同步更新
 - 提交前 `python -m py_compile` 检查语法
 - API 调用使用 `trust_env=False`
+- Provider 必须继承 `LLMProvider(ABC)`，禁止直接依赖具体实现
+- Web 层通过 `WebAgent` 公共接口与 Agent 交互，禁止直接访问 `agent._xxx`
+- REST API 入参/返回使用 `web/schemas.py` Pydantic 模型
+- CSS 颜色统一使用 `web/static/style.css` CSS 变量，禁止硬编码色值
 
 ---
 
@@ -301,10 +312,11 @@ ai-friend/
 │   ├── prompt-reference.md    Prompt 工程参考
 │   ├── testing-guide.md       测试指南
 │   ├── deployment.md          部署手册
+│   ├── open-issues-修复报告-2026-07-12.md  近期修复报告
 │   ├── db-report.html         数据库诊断报告
 │   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
 │
-├── tests/                     单元测试（288 passed + 2 skipped）
+├── tests/                     单元测试（312 collected）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（38 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
@@ -336,7 +348,8 @@ ai-friend/
 │   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
-│   ├── provider.py             LLM API 客户端（OpenAI 兼容，trust_env=False，支持 response_format JSON mode）
+│   ├── provider.py             LLMProvider(ABC) 抽象基类 + KimiProvider 实现（OpenAI 兼容，trust_env=False）
+│   ├── embedding_server.py    共享 embedding server 启动（CLI/Web 共用）
 │   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
 │   ├── async_utils.py         异步→同步桥接 run_async()（线程池安全）
 │   └── dispatcher.py           tool_call 三层解析（JSON calls 数组 + XML 正则 + 裸 JSON）+ 执行 + 别名归一化
@@ -363,9 +376,11 @@ ai-friend/
 ├── models/                     数据模型（EmotionalState / EmotionEvent / Turn）
 ├── ui/                         CLI 界面（ConsoleInterface + 打字机效果）
 └── web/                        Web 界面
-    ├── server.py               FastAPI + WebSocket + proactive_loop（作息/探索/聊天）
-    ├── session.py              SessionManager + WebAgent（会话隔离 + 记忆恢复）
-    └── static/                 前端（HTML + CSS + JS，暗色主题）
+    ├── server.py               FastAPI + WebSocket + Pydantic 校验 + CORS/速率限制/CSP
+    ├── session.py              SessionManager + WebAgent（会话隔离 + Agent 私有接口封装）
+    ├── schemas.py              Pydantic 请求/响应模型（ChatRequest / ChatResponse / ...）
+    ├── rate_limit.py           内存滑动窗口限流中间件
+    └── static/                 前端（HTML + CSS + JS，暗色主题，CSS 变量统一颜色）
 ```
 
 ---
