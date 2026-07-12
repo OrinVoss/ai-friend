@@ -28,7 +28,7 @@ def estimate_tokens(text: str) -> int:
     tok = _get_tokenizer()
     if tok:
         return len(tok.encode(text, disallowed_special=()))
-    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '　' <= c <= '〿')
+    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '\U00020000' <= c <= '\U0002A6DF' or '　' <= c <= '〿')
     ascii_chars = sum(1 for c in text if c.isascii() and c.isalpha())
     digits = sum(1 for c in text if c.isdigit())
     other = len(text) - cjk - ascii_chars - digits

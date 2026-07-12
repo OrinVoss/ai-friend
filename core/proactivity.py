@@ -3,6 +3,7 @@
 import logging
 import random
 import time
+from collections import deque
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ class ProactivityManager:
         self._short_term = short_term
         self._last_explore_time: float = 0
         self._last_chat_time: float = 0
+        self._recent_topics: deque = deque(maxlen=5)  # #265: topic dedup
 
     def calculate_proactivity(self, idle_duration: float) -> float:
         """Return 0.0-0.8 probability of initiating proactive chat."""
@@ -64,7 +66,7 @@ class ProactivityManager:
         return score
 
     def pick_proactive_topic(self) -> str:
-        """Select a topic for proactive conversation initiation."""
+        """Select a topic for proactive conversation initiation. (#265: dedup against recent topics)"""
         exps = self._ltm.get_recent_experiences(limit=3)
         facts = self._ltm.get_all_active_facts(limit=5)
         interests = getattr(self._personality.config, 'interests', [])
@@ -89,7 +91,11 @@ class ProactivityManager:
             else:
                 topics.append("聊聊最近有什么新鲜事")
 
-        return random.choice(topics)
+        # #265: filter out recently used topics, fall back to first candidate
+        fresh = [t for t in topics if t not in self._recent_topics]
+        chosen = random.choice(fresh) if fresh else topics[0]
+        self._recent_topics.append(chosen)
+        return chosen
 
     def check_rate_limit(self, action: str) -> bool:
         """Check rate limits (read-only, does not update timestamps)."""

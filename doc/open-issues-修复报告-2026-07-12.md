@@ -12,7 +12,7 @@
 ## 一、执行摘要
 
 本次审查共梳理出 **40+ 个 open issue**（截至报告日）。后续修复进展：
-- **2026-07-12 已修复关闭：38 个 issue**（Batch 1-3：9 个 + 历史 P1：23 个 + Batch 4：6 个）
+- **2026-07-12 已修复关闭：48 个 issue**（Batch 1-3：9 个 + 历史 P1：23 个 + Batch 4-7：16 个）
 - **剩余 open：~80 个**（P2/P3 代码清理、架构审查、v1.0 发布标准）
 
 | 类别 | 数量 | 代表 Issue | 紧迫性 |
@@ -66,7 +66,7 @@
 | #175 | ✅ 已修 | 工具调用结果格式化存在双重标准 + short_term 历史消息插入顺序不一致 | `core/dispatcher.py`, `memory/short_term.py` |
 | #174 | ✅ 已修 | Web 路径中 emotion 事件记录缺失 + API 连接超时与读取超时未分离 | `web/server.py`, `core/provider.py` |
 | #172 | ✅ 已修 | GlobTool/GrepTool 目录遍历无缓存 + 多处性能瓶颈 | `tools/file_tools.py`, `tools/search_tools.py` |
-| #170 | 🌑 待修 | _build_messages 字符截断导致 token 估算失真 + O(k²) 复杂度 | `core/context_manager.py`, `core/message_handler.py` |
+| #170 | 🌑 待修 | _build_messages 字符截断导致 token 估算失真 + O(k) 已修（#168 已修复） | `core/context_manager.py`, `core/message_handler.py` |
 | #169 | 🌑 待修 | SleepManager 情绪驱动睡眠检测不完整 | `core/sleep_manager.py` |
 | #168 | ✅ 已修 | Performance：estimate_tokens 误差 + 情绪行为描述浪费 | 多文件 |
 | #167 | ✅ 已修 | 睡眠系统缺陷 — 睡眠全局共享 + sleep_cooldown 整数递减 | `core/sleep_manager.py` |
