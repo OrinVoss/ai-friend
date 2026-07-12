@@ -209,6 +209,7 @@ class SessionManager:
         # (and one EmbeddingCache) per open tab.
         self._shared_provider: LLMProvider | None = None
         self._shared_embed_engine: EmbeddingEngine | None = None
+        self._create_count: int = 0  # #123: throttle cleanup_old
 
     async def open(self):
         self.db = Database(self.config.db_path)
@@ -237,6 +238,10 @@ class SessionManager:
                     shared_provider=self._shared_provider,
                     shared_embed_engine=self._shared_embed_engine,
                 )
+                # #123: trigger cleanup every 10 new sessions to evict stale REST sessions
+                self._create_count += 1
+                if self._create_count % 10 == 0:
+                    self.cleanup_old()
             else:
                 logger.debug(f"[session] restore: {sid}")
             return sid, self._sessions[sid]

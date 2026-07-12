@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 config = load_config()
 session_manager = SessionManager(config)
 rate_limiter = RateLimiter()
+_ws_connections: list[dict] = []  # #158: track active WebSocket connections for rate limiting
 
 
 def ensure_session():
@@ -305,14 +306,30 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
 async def websocket_endpoint(websocket: WebSocket):
     # #158: validate Origin header to prevent cross-origin WebSocket attacks
     origin = websocket.headers.get("origin", "")
-    allowed = {"http://localhost:8000", "http://127.0.0.1:8000", "null"}
-    if origin and origin not in allowed and not origin.startswith("http://localhost"):
-        logger.warning(f"[ws] rejected origin: {origin}")
-        await websocket.close(code=4003)
+    from urllib.parse import urlparse
+    allowed = {"localhost", "127.0.0.1"}
+    if origin and origin != "null":
+        parsed = urlparse(origin)
+        if parsed.hostname not in allowed:
+            logger.warning(f"[ws] rejected origin: {origin}")
+            await websocket.close(code=4003)
+            return
+
+    # #158: connection limits — max 5 per IP, max 100 global
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    conn_count = sum(1 for ws in _ws_connections if ws.get("ip") == client_ip)
+    if conn_count >= 5:
+        logger.warning(f"[ws] too many connections from {client_ip}")
+        await websocket.close(code=4004)
+        return
+    if len(_ws_connections) >= 100:
+        logger.warning("[ws] too many global connections")
+        await websocket.close(code=4004)
         return
 
     await websocket.accept()
-    logger.info(f"[ws] accepted: {websocket.client.host}:{websocket.client.port}")
+    _ws_connections.append({"ip": client_ip, "ws": websocket})
+    logger.info(f"[ws] accepted: {client_ip}:{websocket.client.port} ({len(_ws_connections)} total)")
     session_id = None
 
     try:
@@ -374,5 +391,7 @@ async def websocket_endpoint(websocket: WebSocket):
         except (WebSocketDisconnect, ConnectionError, RuntimeError):
             pass  # Client already disconnected, can't send error
     finally:
+        # #158: remove from connection tracking
+        _ws_connections[:] = [c for c in _ws_connections if c.get("ws") is not websocket]
         if session_id:
             session_manager.remove(session_id)
