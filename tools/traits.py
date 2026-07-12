@@ -2,6 +2,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# #258: canonical list of external tool names, shared across modules
+EXTERNAL_TOOL_NAMES = [
+    "web_fetch", "web_search", "read_file", "glob", "grep",
+    "music_play", "notify",
+]
+
 
 @dataclass
 class ToolResult:
@@ -15,6 +21,9 @@ class ToolResult:
     @staticmethod
     def fail(error: str) -> "ToolResult":
         return ToolResult(success=False, output=error)
+
+    def to_dict(self) -> dict:  # #273
+        return {"success": self.success, "output": self.output}
 
 
 @dataclass
@@ -96,6 +105,7 @@ class ToolRegistry:
         """Generate JSON Schema for structured tool call output.
 
         Returns schema compatible with DeepSeek response_format={"type": "json_object"}.
+        Includes tool-specific properties to guide model output format. (#273)
         """
         tool_names = []
         for spec in self.list_specs():
@@ -105,4 +115,27 @@ class ToolRegistry:
 
         return {
             "type": "json_object",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "calls": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "enum": tool_names if tool_names else ["web_fetch"],
+                                    "description": "要调用的工具名称",
+                                },
+                                "arguments": {
+                                    "type": "object",
+                                    "description": "工具参数，根据具体工具而定",
+                                },
+                            },
+                            "required": ["name", "arguments"],
+                        },
+                    },
+                },
+            },
         }

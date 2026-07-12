@@ -36,38 +36,42 @@ class RecallTool(Tool):
         }
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        query = args.get("query", "").strip()
-        if not query:
-            return ToolResult.fail("请告诉我你想回忆什么")
+        try:
+            query = args.get("query", "").strip()
+            if not query:
+                return ToolResult.fail("请告诉我你想回忆什么")
 
-        logger.info(f"[tool] recall query={query[:60]}")
-        keywords = self.retriever._extract_keywords(query)
-        facts = self.ltm.search_facts(query, limit=5)
-        experiences = self.ltm.search_experiences(keywords, limit=3)
-        reflections = self.ltm.get_recent_reflections(limit=2)
-        logger.info(f"[tool] recall result: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
+            logger.info(f"[tool] recall query={query[:60]}")
+            keywords = self.retriever._extract_keywords(query)
+            facts = self.ltm.search_facts(query, limit=5)
+            experiences = self.ltm.search_experiences(keywords, limit=3)
+            reflections = self.ltm.get_recent_reflections(limit=2)
+            logger.info(f"[tool] recall result: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
 
-        parts = []
+            parts = []
 
-        if facts:
-            parts.append("关于用户我知道：")
-            for f in facts:
-                parts.append(f"- {f.fact_key}: {f.fact_value}")
+            if facts:
+                parts.append("关于用户我知道：")
+                for f in facts:
+                    parts.append(f"- {f.fact_key}: {f.fact_value}")
 
-        if experiences:
-            parts.append("共同回忆：")
-            for e in experiences:
-                parts.append(f"- [{e.emotional_tone}] {e.summary}")
+            if experiences:
+                parts.append("共同回忆：")
+                for e in experiences:
+                    parts.append(f"- [{e.emotional_tone}] {e.summary}")
 
-        if reflections:
-            parts.append("相关思考：")
-            for r in reflections:
-                parts.append(f"- {r.content}")
+            if reflections:
+                parts.append("相关思考：")
+                for r in reflections:
+                    parts.append(f"- {r.content}")
 
-        if not parts:
-            return ToolResult.ok(f"没有找到关于「{query}」的记忆")
+            if not parts:
+                return ToolResult.ok(f"没有找到关于「{query}」的记忆")
 
-        return ToolResult.ok("\n".join(parts))
+            return ToolResult.ok("\n".join(parts))
+        except Exception as e:
+            logger.exception(f"[tool] recall failed: {e}")
+            return ToolResult.fail(f"回忆失败: {e}")
 
 
 class RememberTool(Tool):
@@ -120,28 +124,32 @@ class RememberTool(Tool):
         }
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        category = args.get("category", "preference")
-        key = args.get("key", "").strip()
-        value = args.get("value", "").strip()
-        importance = float(args.get("importance", 0.6))
-        is_correction = args.get("correct", False)
-        fact_type = args.get("fact_type", "user_fact")  # #127
+        try:
+            category = args.get("category", "preference")
+            key = args.get("key", "").strip()
+            value = args.get("value", "").strip()
+            importance = float(args.get("importance", 0.6))
+            is_correction = args.get("correct", False)
+            fact_type = args.get("fact_type", "user_fact")  # #127
 
-        if not key or not value:
-            return ToolResult.fail("请提供关键词和具体内容")
+            if not key or not value:
+                return ToolResult.fail("请提供关键词和具体内容")
 
-        if is_correction:
-            similar = self.ltm.search_facts(key, limit=5)
-            old_id = None
-            for f in similar:
-                if f.category == category and f.fact_key == key:
-                    old_id = f.id
-                    break
-            self.ltm.correct_fact(category, key, value, old_fact_id=old_id)
-            logger.info(f"Corrected fact: {category}/{key} = {value}")
-            return ToolResult.ok(f"已纠正: {key} = {value}")
-        else:
-            self.ltm.store_fact(category, key, value, confidence=0.9,
-                               importance=importance, fact_type=fact_type)
-            logger.info(f"Remembered: {category}/{key} = {value} type={fact_type}")
-            return ToolResult.ok(f"已记住: {key} = {value}")
+            if is_correction:
+                similar = self.ltm.search_facts(key, limit=5)
+                old_id = None
+                for f in similar:
+                    if f.category == category and f.fact_key == key:
+                        old_id = f.id
+                        break
+                self.ltm.correct_fact(category, key, value, old_fact_id=old_id)
+                logger.info(f"Corrected fact: {category}/{key} = {value}")
+                return ToolResult.ok(f"已纠正: {key} = {value}")
+            else:
+                self.ltm.store_fact(category, key, value, confidence=0.9,
+                                   importance=importance, fact_type=fact_type)
+                logger.info(f"Remembered: {category}/{key} = {value} type={fact_type}")
+                return ToolResult.ok(f"已记住: {key} = {value}")
+        except Exception as e:
+            logger.exception(f"[tool] remember failed: {e}")
+            return ToolResult.fail(f"记忆失败: {e}")

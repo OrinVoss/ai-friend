@@ -8,14 +8,9 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from tools.traits import ToolRegistry
+from tools.traits import ToolRegistry, EXTERNAL_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
-
-EXTERNAL_TOOL_NAMES = [
-    "web_fetch", "web_search", "read_file", "glob", "grep",
-    "music_play", "notify",
-]
 
 
 @dataclass
@@ -145,6 +140,11 @@ class ToolAgent:
         Retries up to max_retries times within a single round.
         Caller handles the round-level loop (Agent 1 re-decide).
         """
+        # #258: guard against empty input
+        if not tool_request or not tool_request.strip():
+            logger.warning("[tool_agent] empty tool_request, returning empty result")
+            return ToolAgentResult()
+
         from prompts.system import build_tool_agent_prompt
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
@@ -231,6 +231,7 @@ class ToolAgent:
         """
         merged = ToolAgentResult()
         if not tool_requests:
+            logger.warning("[tool_agent] empty tool_requests list, returning empty result")
             return merged
         t0 = time.time()
         for req in tool_requests:

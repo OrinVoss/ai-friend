@@ -14,10 +14,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-EXTERNAL_TOOL_NAMES = [
-    "web_fetch", "web_search", "read_file", "glob", "grep",
-    "music_play", "notify",
-]
+from tools.traits import EXTERNAL_TOOL_NAMES
 
 
 @dataclass
@@ -49,7 +46,11 @@ class InnerDriveAgent:
     """Agent 1: Self-aware reasoning before any external tool execution."""
 
     def __init__(self, provider, personality, ltm, retriever, short_term,
-                 tool_registry, max_iterations: int = 5):
+                 tool_registry, max_iterations: int = 5,
+                 max_tokens_assess: int = 512,
+                 max_tokens_proactive: int = 256,
+                 max_tokens_review: int = 512,
+                 conv_hist_tokens: int = 1800):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
@@ -57,6 +58,10 @@ class InnerDriveAgent:
         self._short_term = short_term
         self._full_registry = tool_registry
         self._max_iterations = max_iterations
+        self._max_tokens_assess = max_tokens_assess      # #257
+        self._max_tokens_proactive = max_tokens_proactive
+        self._max_tokens_review = max_tokens_review
+        self._conv_hist_tokens = conv_hist_tokens
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning loop, return decision."""
@@ -64,7 +69,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
@@ -82,7 +87,7 @@ class InnerDriveAgent:
 
         for _idx in range(self._max_iterations):
             logger.debug(f"[inner_drive] iter={_idx+1}/{self._max_iterations}")
-            resp = self._provider.generate(messages, stream=False, max_tokens=512)
+            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_assess)
             cleaned, calls = parse_tool_calls(resp)
 
             if not calls:
@@ -122,7 +127,7 @@ class InnerDriveAgent:
 
         now = datetime.now()
         mem_ctx = self._retriever.retrieve_for_query("")
-        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
 
         sys_prompt = build_inner_drive_proactive_prompt(
             personality=self._personality.config,
@@ -143,7 +148,7 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] proactive assess idle={idle_duration:.0f}s")
-        resp = self._provider.generate(messages, stream=False, max_tokens=256)
+        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_proactive)
         intent = self._parse_proactive_intent(resp)
         logger.info(
             f"[inner_drive] proactive decision: action={intent.action} "
@@ -170,7 +175,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
 
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
@@ -196,7 +201,7 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] review round={round_num}/{max_rounds}")
-        resp = self._provider.generate(messages, stream=False, max_tokens=512)
+        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
         cleaned, calls = parse_tool_calls(resp)
 
         if calls:
@@ -204,7 +209,7 @@ class InnerDriveAgent:
             results = execute_tool_calls(self._full_registry, calls)
             result_text = self._format_internal_results(results)
             messages.append({"role": "user", "content": result_text})
-            resp = self._provider.generate(messages, stream=False, max_tokens=512)
+            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
             cleaned, _ = parse_tool_calls(resp)
 
         result = self._parse_decision(cleaned)
@@ -220,7 +225,7 @@ class InnerDriveAgent:
         from core.dispatcher import parse_tool_calls, execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=1200)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
 
         # Build failure context
         fail_lines = ["=== 之前的工具调用全部失败 ==="]
@@ -244,7 +249,7 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] re-decide after {len(failure_log)} failures")
-        resp = self._provider.generate(messages, stream=False, max_tokens=512)
+        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
         cleaned, calls = parse_tool_calls(resp)
 
         # Execute any internal tool calls from re-decision
@@ -253,7 +258,7 @@ class InnerDriveAgent:
             results = execute_tool_calls(self._full_registry, calls)
             result_text = self._format_internal_results(results)
             messages.append({"role": "user", "content": result_text})
-            resp = self._provider.generate(messages, stream=False, max_tokens=512)
+            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
             cleaned, _ = parse_tool_calls(resp)
 
         result = self._parse_decision(cleaned)

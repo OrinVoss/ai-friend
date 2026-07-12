@@ -4,16 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:8000 wss://localhost:8000">
     <title>AI 朋友</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/marked.min.js"></script>
 </head>
 <body>
     <div class="chat-header">
-        <div class="avatar">星</div>
+        <div class="avatar" aria-hidden="true">星</div>
         <div class="info">
             <h1>小星</h1>
-            <div class="status">
+            <div class="status" role="status" aria-live="polite">
                 <span class="dot" id="status-dot"></span>
                 <span id="status-text">连接中...</span>
                 <span class="typing-dots" id="typing-dots" style="display:none">
@@ -25,12 +26,12 @@
         </div>
     </div>
 
-    <div class="chat-messages" id="chat-messages">
+    <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="聊天记录">
     </div>
 
     <div class="chat-input-area">
-        <textarea id="input" placeholder="说点什么..." rows="1"></textarea>
-        <button id="send-btn" disabled>➤</button>
+        <textarea id="input" placeholder="说点什么..." rows="1" aria-label="输入消息"></textarea>
+        <button id="send-btn" disabled aria-label="发送">➤</button>
     </div>
 
     <script src="/static/app.js?v=2"></script>

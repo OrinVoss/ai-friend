@@ -102,9 +102,20 @@ function connect() {
         }
     };
 
+    var reconnectDelay = 2000;
+    const maxReconnectDelay = 30000;
+
     ws.onclose = function() {
         setStatus('disconnected'); hideTyping();
-        setTimeout(connect, 2000);
+        // #277: exponential backoff for reconnect
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+    };
+
+    ws.onopen = function() {
+        reconnectDelay = 2000;  // reset on successful connection
+        ws.send(JSON.stringify({ type: 'init', session_id: sessionId }));
+        setStatus('connected');
     };
 
     ws.onerror = function() { setStatus('error'); };

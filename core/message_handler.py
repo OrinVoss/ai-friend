@@ -67,6 +67,10 @@ class MessageHandler:
         from prompts.system import build_system_prompt
         a = self.a
 
+        # #256: guard against empty input
+        if not user_input or not user_input.strip():
+            return ""
+
         if a._sleeping:
             # #185: preserve user input even during sleep
             a.short_term.add_turn("user", user_input, metadata={"sleep": True})

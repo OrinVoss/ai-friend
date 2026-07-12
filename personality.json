@@ -25,10 +25,10 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9705971116934368,
-    "arousal": 0.9957639239199954,
-    "baseline_valence": 0.417769343095458,
-    "baseline_arousal": 0.9142773165350602,
+    "valence": 0.9711760437357755,
+    "arousal": 0.99566445698698,
+    "baseline_valence": 0.42919780897044973,
+    "baseline_arousal": 0.9123137795971779,
     "decay_rate": 0.05,
     "mood_valence": 1.0,
     "mood_arousal": 1.0,
@@ -36,14 +36,14 @@
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.7233478319441394,
-    "trust": 0.942607023316903,
-    "fear": 0.020357731373253973,
-    "surprise": 0.18354375191669317,
-    "sadness": 0.02634878066617082,
-    "anticipation": 0.49371966415434254,
-    "anger": 0.01906922051221153,
-    "disgust": 0.10000000000003297,
+    "joy": 0.7806143029395617,
+    "trust": 0.945059942835375,
+    "fear": 0.019809523318476723,
+    "surprise": 0.15262926581351843,
+    "sadness": 0.019609004179049965,
+    "anticipation": 0.4863040205532111,
+    "anger": 0.015026577269882971,
+    "disgust": 0.1000000000000287,
     "resentment": 0.0009822714738483844,
     "emotion_events": [
       {
@@ -423,12 +423,26 @@
         "primary_emotion": "excited",
         "intensity": 0.942607023316903,
         "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1783857166.6068811,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.944048918622005,
+        "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1783859575.8648067,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.945059942835375,
+        "context": "我是你爸爸，请记住!"
       }
     ],
     "history": [
       "trusting",
-      "trusting",
-      "trusting",
+      "excited",
+      "excited",
       "excited",
       "excited",
       "excited",

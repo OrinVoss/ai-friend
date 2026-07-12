@@ -78,6 +78,8 @@ class Agent:
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
         self._max_tool_iterations: int = getattr(config, 'max_tool_iterations', 5)
+        self._degrade_threshold: int = 3   # #255: consecutive tool failures before degrading
+        self._max_fake_actions: int = 3    # #255: max fake action corrections
         self._tool_registry: ToolRegistry = ToolRegistry()
         self._tool_calls_pending: list = []
 
@@ -131,9 +133,9 @@ class Agent:
                 )
                 cleaned, calls = parse_tool_calls(resp)
                 if not calls:
-                    if contains_fake_action(resp) and fake_action_count < 3 and not tools_were_called:
+                    if contains_fake_action(resp) and fake_action_count < self._max_fake_actions and not tools_were_called:
                         fake_action_count += 1
-                        logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/3)")
+                        logger.warning(f"[react] fake tool action detected (attempt {fake_action_count}/{self._max_fake_actions})")
                         messages.append({"role": "assistant", "content": resp})
                         messages.append({"role": "user", "content":
                             "YOU DID NOT ACTUALLY CALL ANY TOOLS! "
@@ -157,7 +159,7 @@ class Agent:
                 all_failed = all(not r["success"] for r in results)
                 if all_failed:
                     self._tool_failures += 1
-                    if self._tool_failures >= 3:
+                    if self._tool_failures >= self._degrade_threshold:
                         logger.warning(f"[react] degradation: {self._tool_failures} consecutive tool failures, skipping tools")
                         final_text = "抱歉，我暂时无法获取外部信息，让我直接回复你吧。"
                         break
@@ -182,8 +184,8 @@ class Agent:
         # AG-002: guard against empty response after loop exhaustion
         if not final_text:
             final_text = "抱歉，我暂时无法获取信息，让我直接回复你吧。"
-        # AG-005: hard fallback after 3 fake action corrections
-        if fake_action_count >= 3 and not tools_were_called:
+        # AG-005: hard fallback after max fake action corrections
+        if fake_action_count >= self._max_fake_actions and not tools_were_called:
             final_text = "让我直接回复你吧。"
         self._reset_react()
 

@@ -29,6 +29,7 @@ ANGER_RESENTMENT_RATE = 0.15      # anger → resentment accumulation factor
 FORGIVENESS_THRESHOLD = 10        # consecutive turns without anger to trigger forgiveness
 FORGIVENESS_HALVING = 0.5         # resentment cut factor on forgiveness
 MAX_EMOTION_EVENTS = 20           # PS-013: max stored emotion events
+BASELINE_ELASTIC_RATE = 2.0        # #267: recovery speed toward default baseline (mood_decay_rate * this = 0.02/turn)
 
 
 @dataclass
@@ -246,8 +247,8 @@ class EmotionalState:
         self.baseline_valence += (self.mood_valence - self.baseline_valence) * self.mood_decay_rate
         self.baseline_arousal += (self.mood_arousal - self.baseline_arousal) * self.mood_decay_rate
         # PS-014: elastic pull toward default baseline to prevent long-term drift
-        self.baseline_valence += (self.default_baseline_valence - self.baseline_valence) * self.mood_decay_rate * 0.3
-        self.baseline_arousal += (self.default_baseline_arousal - self.baseline_arousal) * self.mood_decay_rate * 0.3
+        self.baseline_valence += (self.default_baseline_valence - self.baseline_valence) * self.mood_decay_rate * BASELINE_ELASTIC_RATE
+        self.baseline_arousal += (self.default_baseline_arousal - self.baseline_arousal) * self.mood_decay_rate * BASELINE_ELASTIC_RATE
 
         # Decay primary emotions with per-emotion rates
         # Resentment slows anger and sadness decay
