@@ -21,3 +21,10 @@
 ### prompts/system.py
 - **Fix #229**: emotion_behavior 查找改用 `emotion.dominant_emotion`（英文 key），修复全部 15 种情绪行为描述未生效的 bug
 - `"fearful"` 统一为 `"afraid"`
+- **Fix #230**: humor/sass 特质 >0.5 时在 Identity block 注入情绪调制说明
+
+### core/cli_controller.py
+- **Fix #246**: CLI 路径引入 Agent 2 多轮循环（review → re_decide），对齐 Web 路径行为
+- 支持多个 `tool_requests`（通过 `run_with_requests`）
+- 添加 ToolAttemptTracker 圈内重试
+- try/except 异常保护
