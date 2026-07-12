@@ -251,6 +251,13 @@ def build_system_prompt(
 你的背景：{personality.backstory}
 你喜欢讨论：{'、'.join(personality.interests)}"""
     )
+    # #230: inject humor/sass modulation into prompt
+    for t in personality.traits:
+        if t.name == "humor" and t.value > 0.5:
+            blocks[-1] += f"\n你的幽默感很强（{t.value:.0%}），难过时会自动用幽默化解。"
+        elif t.name == "sass" and t.value > 0.5:
+            blocks[-1] += f"\n你嘴有点损（sass {t.value:.0%}），轻度负面时喜欢用阴阳怪气代替直接生气。"
+
 
     # Block 3: Conversation style examples
     blocks.append(
