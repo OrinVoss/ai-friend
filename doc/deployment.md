@@ -137,10 +137,11 @@ server {
         proxy_read_timeout 86400;
     }
 
-    # 安全头
+    # 安全头（与 web/server.py 保持一致）
     add_header X-Content-Type-Options nosniff;
     add_header X-Frame-Options DENY;
-    add_header Content-Security-Policy "default-src 'self'";
+    add_header Referrer-Policy strict-origin-when-cross-origin;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'";
 }
 ```
 
@@ -199,8 +200,15 @@ python -c "import os; print(f'{os.path.getsize(\"data/ai_friend.db\") / 1024:.0f
 | `ANYSEARCH_API_KEY` | — | AnySearch 搜索 API 密钥（需要网络搜索时） |
 | `DEEPSEEK_API_ENDPOINT` | — | API 地址覆盖 |
 | `DEEPSEEK_API_MODEL` | — | 模型名覆盖 |
+| `AI_FRIEND_TIMEOUT` | — | API 超时覆盖 |
+| `AI_FRIEND_MAX_TOKENS` | — | 最大 token 覆盖 |
+| `AI_FRIEND_TEMPERATURE` | — | 温度覆盖 |
 | `AI_FRIEND_DB_PATH` | — | 数据库路径覆盖 |
 | `AI_FRIEND_LOG_LEVEL` | — | 日志级别覆盖 |
+| `AI_FRIEND_WEB_HOST` | — | Web 监听地址覆盖 |
+| `AI_FRIEND_WEB_PORT` | — | Web 监听端口覆盖 |
+| `AI_FRIEND_EMBEDDING_ENDPOINT` | — | 嵌入服务端点覆盖 |
+| `AI_FRIEND_EMBEDDING_DIM` | — | 嵌入维度覆盖 |
 
 ---
 
@@ -226,7 +234,8 @@ New-NetFirewallRule -DisplayName "AI Friend" -Direction Inbound -Protocol TCP -L
 
 - [ ] 使用环境变量注入 API Key（**不要** 写入 config.json）
 - [ ] 设置 Nginx/Caddy 反向代理 + HTTPS
-- [ ] 配置合适的 CORS 和 CSP 头
+- [ ] 配置合适的 CORS（`config.allowed_origins`）和 CSP 头
+- [ ] 确认速率限制满足预期（默认 REST/WS 聊天 30/60s）
 - [ ] 限制 `allowed_read_paths` 范围
 - [ ] 数据库文件备份策略
 - [ ] 单人使用无需多 session 安全加固
@@ -235,7 +244,13 @@ New-NetFirewallRule -DisplayName "AI Friend" -Direction Inbound -Protocol TCP -L
 
 | # | 问题 | 影响 |
 |---|------|------|
-| #24 | 无 CORS 配置 | 本地使用不影响 |
-| #43 | REST API 无 Pydantic 验证 | 单人使用不影响 |
 | #46 | 同步调用占用线程池 | 高并发下可能阻塞 |
 | #154 | 数据库无连接池 | 高并发下性能受限 |
+
+### 已关闭（2026-07-12）
+
+| # | 标题 | 状态 |
+|---|------|------|
+| #24 | CORS/速率限制/CSP 细化 | ✅ 已关闭 |
+| #43 | REST API Pydantic 验证 | ✅ 已关闭 |
+| #58 | main.py / web_main.py 启动代码重复 | ✅ 已关闭 |

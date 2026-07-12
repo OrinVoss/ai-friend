@@ -240,9 +240,9 @@ WebSocket onclose
 
 ### 3.1 `POST /api/chat` — 发送消息
 
-WebSocket 不可用时的降级方案。
+WebSocket 不可用时的降级方案。请求/响应使用 Pydantic 模型校验（`web/schemas.py`）。
 
-**Request**:
+**Request** (`ChatRequest`):
 
 ```json
 {
@@ -256,7 +256,7 @@ WebSocket 不可用时的降级方案。
 | `session_id` | string | — | `"default"` | 会话标识 |
 | `message` | string | ✓ | — | 消息正文，不可为空 |
 
-**Response**:
+**Response** (`ChatResponse`):
 
 ```json
 {
@@ -276,17 +276,14 @@ WebSocket 不可用时的降级方案。
 
 **错误响应**:
 
-```json
-{
-  "error": "empty message"
-}
-```
+- `422 Unprocessable Entity`：`message` 为空或类型错误（FastAPI/Pydantic 自动校验）。
+- `429 Too Many Requests`：触发速率限制（每 IP 30 次/分钟）。
 
 注意：REST 模式无分段推送，前端收到完整 `response` 后自行用 `splitSegments()` 分段 + `setTimeout` 模拟逐段显示。分段逻辑与 WebSocket 端一致（[见第 4 节](#4-分段推送)）。
 
 ### 3.2 `GET /api/status` — 获取关系状态
 
-获取 AI 当前情绪、关系指标以及 7 天关系历史（`#132`）。
+获取 AI 当前情绪、关系指标以及 7 天关系历史（`#132`）。响应使用 Pydantic 模型 `StatusResponse`。
 
 **Query Parameters**:
 
@@ -319,11 +316,33 @@ WebSocket 不可用时的降级方案。
 | `relationship` | object | 关系四维指标（trust/familiarity/intimacy/fun） |
 | `relationship_history` | array | 最近 7 天关系快照数组 |
 
-### 3.3 `GET /` — 前端页面
+### 3.3 `GET /api/chat/history` — 获取最近对话
+
+返回当前 session 的最近对话轮次（用于页面刷新后恢复聊天记录）。响应使用 Pydantic 模型 `HistoryResponse`。
+
+**Query Parameters**:
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `session_id` | string | `"default"` | 会话标识 |
+
+**Response**:
+
+```json
+{
+  "turns": [
+    { "role": "user", "content": "你好" },
+    { "role": "assistant", "content": "嗨！" }
+  ],
+  "session_id": "default"
+}
+```
+
+### 3.4 `GET /` — 前端页面
 
 返回 `web/static/index.html`。
 
-### 3.4 `GET /static/*` — 静态资源
+### 3.5 `GET /static/*` — 静态资源
 
 FastAPI `StaticFiles` 挂载，提供 `app.js`、`style.css` 等前端资源。
 
@@ -542,11 +561,12 @@ session_manager.cleanup_old(max_sessions=50, ttl_seconds=86400)
 
 | 场景 | HTTP 状态码 | Response |
 |------|------------|----------|
-| 空消息 | 200 | `{"error":"empty message"}` |
+| 请求格式非法 / 字段缺失 | 422 | FastAPI 标准校验错误体 |
+| 触发速率限制 | 429 | `{"error":"Too many requests. Please slow down."}` |
 | session 不存在 | 200 | 自动创建新 session |
-| 服务端异常 | 200 | 异常信息通过 response 透出 |
+| 服务端异常 | 500 | 异常信息通过 response 透出 |
 
-注意：REST API 当前未使用标准 HTTP 状态码（所有请求返回 200），异常通过 response body 的 text 内容或 error 字段传递。当前为单人本地使用场景。
+说明：Pydantic 校验错误统一返回 `422`；内存滑动窗口限流器对 `/api/*` 路径按客户端 IP 限速（`/api/chat` 30 次/分钟，`/api/status` 与 `/api/chat/history` 60 次/分钟）。
 
 ### 8.3 前端错误处理
 
@@ -567,7 +587,7 @@ ws.onclose = function() {
 
 ## 9. 安全
 
-### 9.1 Origin 验证（`#158`）
+### 9.1 Origin 验证（`#158` / `#24`）
 
 ```python
 allowed = {"http://localhost:8000", "http://127.0.0.1:8000", "null"}
@@ -575,30 +595,58 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
     await websocket.close(code=4003)
 ```
 
-- 仅允许 `localhost` 和 `127.0.0.1` 来源
+- 默认仅允许 `localhost` 和 `127.0.0.1` 来源
 - 空 Origin（非浏览器客户端）视为合法（兼容性）
 - 拒绝非 localhost 跨站 WebSocket 连接
+- 用户可在 `config.json` 中通过 `allowed_origins` 追加额外可信来源（见 [#24 CORS](#932-cors)）
 
 ### 9.2 消息大小限制
 
 - 所有 WebSocket 消息（含 message 内容）限制 100KB（`#176` 防 OOM）
 
-### 9.3 WebSocket 连接限制
+### 9.3 速率限制（`#24` / `RL-001`）
 
-- 单人使用场景，无连接数/速率限制
+基于内存滑动窗口的 per-IP 限流器（`web/rate_limit.py`）：
+
+| 路径 | 限制 | 说明 |
+|------|------|------|
+| `/api/chat` | 30 次 / 60 秒 | 覆盖 REST 与 WebSocket `message` |
+| `/api/status` | 60 次 / 60 秒 | REST 状态查询 |
+| `/api/chat/history` | 60 次 / 60 秒 | REST 历史查询 |
+
+- REST 层通过 `RateLimitMiddleware` 统一拦截，超限返回 `429 Too Many Requests`
+- WebSocket 层在收到 `message` 时同样调用限流器，超限回复 `{"type":"error","content":"发送太频繁了，请稍后再试。"}`
+- 部署在反向代理后时，限流器优先读取 `X-Forwarded-For` 头部第一段 IP
+
+### 9.4 WebSocket 连接限制
+
 - 多标签页共享同一 session 的后台 proactive 任务会自动 cancel 旧任务
+- 速率限制见 [9.3](#93-速率限制24--rl-001)
 
-### 9.4 静态文件
+### 9.5 静态文件
 
 - FastAPI `StaticFiles` 无额外限制，仅供前端 HTML/CSS/JS
 
-### 9.5 安全加固状态
+### 9.6 安全响应头（`#24` / `WS-027` / `WS-028`）
+
+每个 HTTP 响应都会附加：
+
+| 头部 | 值 | 作用 |
+|------|-----|------|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'` | 禁止内联脚本，限制连接来源，防点击劫持 |
+| `X-Frame-Options` | `DENY` | 拒绝被嵌入 iframe |
+| `X-Content-Type-Options` | `nosniff` | 禁止 MIME 嗅探 |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | 控制 referrer 泄露 |
+
+### 9.7 安全加固状态
 
 | # | 问题 | 状态 |
 |---|------|------|
-| #158 | WebSocket Origin 校验 | ✅ 已加（仅 localhost） |
+| #158 | WebSocket Origin 校验 | ✅ 已加（默认仅 localhost，可扩展） |
 | #176 | 消息大小 100KB 限制 | ✅ 协议层 + 应用层双重校验 |
-| WS-003 | CORS | ✅ CORSMiddleware（仅 localhost:8000/127.0.0.1:8000） |
+| #24 | CORS 可配置化 | ✅ `allowed_origins` + 默认 localhost |
+| #24 | 速率限制细化 | ✅ REST + WebSocket 双通道限流 |
+| #24 | CSP 细化 | ✅ 移除 `unsafe-inline` 脚本，connect-src 限制域名 |
 | WS-027 | X-Frame-Options | ✅ DENY |
 | WS-028 | Content-Security-Policy | ✅ 已加（含 frame-ancestors 'none'） |
 | #155 | API Key 可能泄露到日志 | 低（单人），待 #155 后续治理 |
@@ -614,11 +662,13 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 |--------|--------|------|
 | `web_host` | `"0.0.0.0"` | 监听地址 |
 | `web_port` | `8000` | 监听端口 |
+| `allowed_origins` | `[]` | 额外允许的 CORS Origin 列表（默认已含 localhost） |
 | `api_endpoint` | `"https://api.deepseek.com"` | LLM API 地址 |
 | `api_model` | `"deepseek-v4-flash"` | 使用的模型 |
 | `api_timeout` | `180` | API 请求超时（秒） |
 | `max_tokens` | `512` | 最大回复 token 数 |
 | `temperature` | `0.8` | 回复随机性（Agent 3） |
+| `conversation_examples` | 见 `config.py` | 对话风格示例数组（#28） |
 
 环境变量覆盖（参考 `config.py`）：
 

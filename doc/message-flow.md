@@ -66,6 +66,34 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 | 输出 | 打字机效果逐字打印 | 全量获取 → 6 级分段 → 独立气泡推送 |
 | 主动对话 | IDLE 状态内轮询 | asyncio.create_task(_proactive_loop) |
 | 空闲检测 | time.sleep(0.1) 轮询 | await asyncio.sleep(5/15) 协程睡眠 |
+| 封装层 | 无（直接操作 Agent） | `WebAgent` 封装 `Agent` 私有接口（#45） |
+
+### WebAgent 封装层（#45）
+
+Web 服务端不直接操作 `Agent` 实例，而是通过 `web/session.py` 中的 `WebAgent`：
+
+```
+WebSocket / REST 端点
+    │
+    ▼
+SessionManager.get_or_create() → WebAgent
+    │
+    ├── process_message(content)      # 代理 Agent.process_message
+    ├── process_proactive(intent)     # 代理 Agent.process_proactive
+    ├── process_explore(intent)       # 代理 Agent.process_explore
+    ├── emotion (property)            # 代理 personality.emotion.dominant_emotion
+    ├── turn_count (property)         # 代理 agent.turn_count
+    ├── last_activity (property)      # 代理 agent.last_activity_time
+    ├── get_sleep_state()             # 代理 agent._get_sleep_state
+    ├── generate_dream()              # 代理 agent._generate_dream
+    └── close()                       # 释放 per-session 资源（SN-013）
+```
+
+`WebAgent` 内部负责：
+- 为每个 session 创建独立的 `Personality` / `ConversationBuffer` / `LongTermMemory`
+- 复用 `SessionManager` 共享的 `LLMProvider` 与 `EmbeddingEngine`（SN-005/006）
+- 30s 防抖保存 `personality.json`（#44）
+- 在 session 移除/关闭时调用 `close()` 持久化情绪状态
 
 ---
 

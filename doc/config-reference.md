@@ -86,8 +86,18 @@
 | `DEEPSEEK_API_KEY` | `api_key` | `set DEEPSEEK_API_KEY=sk-xxx` |
 | `DEEPSEEK_API_ENDPOINT` | `api_endpoint` | `set DEEPSEEK_API_ENDPOINT=https://api.deepseek.com` |
 | `DEEPSEEK_API_MODEL` | `api_model` | `set DEEPSEEK_API_MODEL=deepseek-v4-flash` |
+| `AI_FRIEND_TIMEOUT` | `api_timeout` | `set AI_FRIEND_TIMEOUT=180` |
+| `AI_FRIEND_MAX_TOKENS` | `max_tokens` | `set AI_FRIEND_MAX_TOKENS=512` |
+| `AI_FRIEND_TEMPERATURE` | `temperature` | `set AI_FRIEND_TEMPERATURE=0.8` |
 | `AI_FRIEND_DB_PATH` | `db_path` | `set AI_FRIEND_DB_PATH=D:\data\my_friend.db` |
 | `AI_FRIEND_LOG_LEVEL` | `log_level` | `set AI_FRIEND_LOG_LEVEL=DEBUG` |
+| `AI_FRIEND_WEB_HOST` | `web_host` | `set AI_FRIEND_WEB_HOST=0.0.0.0` |
+| `AI_FRIEND_WEB_PORT` | `web_port` | `set AI_FRIEND_WEB_PORT=8000` |
+| `AI_FRIEND_TYPING_SPEED` | `typing_speed` | `set AI_FRIEND_TYPING_SPEED=0.005` |
+| `AI_FRIEND_MAX_TOOL_ITERATIONS` | `max_tool_iterations` | `set AI_FRIEND_MAX_TOOL_ITERATIONS=5` |
+| `AI_FRIEND_EMBEDDING_ENDPOINT` | `embedding_endpoint` | `set AI_FRIEND_EMBEDDING_ENDPOINT=http://localhost:8080/v1/embeddings` |
+| `AI_FRIEND_EMBEDDING_DIM` | `embedding_dim` | `set AI_FRIEND_EMBEDDING_DIM=1024` |
+| `AI_FRIEND_SHORT_TERM_CAPACITY` | `short_term_capacity` | `set AI_FRIEND_SHORT_TERM_CAPACITY=500` |
 
 优先级：**环境变量 > config.json > 代码默认值**
 

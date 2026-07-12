@@ -62,6 +62,8 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 
 风格描述越具体越好：
 
+> 注：除 `speaking_style` 外，系统 prompt 还会注入 `config.conversation_examples` 中的对话示例（#28）。示例会作为“风格参考”与 `speaking_style` 共同作用，想调整口吻可同时修改 `config.json` 里的示例。
+
 ```
 # 好例子
 幽默、嘴贫、爱开玩笑，说话带点损但其实是关心。
@@ -91,6 +93,35 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 一个爱读书的文艺青年，时不时引用诗句和歌词。
 喜欢在聊天里夹带一些冷知识。
 ```
+
+### conversation_examples — 对话风格示例（#28）
+
+除了 `speaking_style`，你还可以在 `config.json` 中配置具体对话示例，让 AI 学习你的偏好口吻。
+
+```json
+{
+  "conversation_examples": [
+    {
+      "user": "今天去外滩拍照了，日落的时候光影特别好",
+      "replies": [
+        "蛙趣！那肯定好看！发出来看看[旺柴]",
+        "哇哇哇，听起来就很绝！拍了多久啊？"
+      ]
+    },
+    {
+      "user": "好烦啊今天好多事",
+      "replies": [
+        "哈哈哈哈心疼你一秒 剩下的59秒先笑为敬[捂脸]",
+        "咋了嘛，说出来让我开心一下[坏笑]"
+      ]
+    }
+  ]
+}
+```
+
+- 每条包含 `user`（用户说的话）和 `replies`（AI 的若干种可能回复）。
+- 修改后重启生效，无需改动 `personality.json`。
+- 留空数组则系统 prompt 中不注入示例。
 
 ### interests — 兴趣领域
 

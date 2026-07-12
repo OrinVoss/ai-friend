@@ -83,16 +83,25 @@ class WeatherTool(Tool):
 
 ### 第 2 步：注册到 ToolRegistry
 
-需要同时在**两个位置**注册，分别给 Agent 2 和 Agent 1/3：
+需要在**入口/封装层**把新工具挂到对应的 `ToolRegistry`，再交给 Agent：
 
 ```python
-# 位置 1 — web/session.py WebAgent.__init__
+# Web 模式 — web/session.py WebAgent.__init__
+registry = ToolRegistry()
 registry.register(WeatherTool())  # 和其他工具并列注册
+...
+self.agent = Agent(...)
+self.agent._tool_registry = registry  # 交给 Agent 3 ReAct 使用
 
-# 位置 2 — core/agent.py Agent.__init__（如果是 Agent 2 可以用的外部工具）
+# CLI 模式 — main.py
+registry = ToolRegistry()
+registry.register(WeatherTool())
+...
+agent = Agent(...)
+agent._tool_registry = registry
 ```
 
-注意：Agent 1 和 Agent 3 只能使用 `recall` / `remember` 两个内部工具。新工具如果是**外部工具**（调用 API、读文件等），只需要在 WebAgent 注册到完整的 `_tool_registry`。
+注意：Agent 1 和 Agent 3 只能使用 `recall` / `remember` 两个内部工具。新工具如果是**外部工具**（调用 API、读文件等），只需要在 Agent 2 的 registry 中注册；Web 端通过 `WebAgent` 封装后统一赋值给 `Agent._tool_registry`（#45）。
 
 ### 第 3 步（可选）：加参数别名
 

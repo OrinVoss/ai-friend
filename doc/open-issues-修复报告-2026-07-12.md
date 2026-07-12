@@ -1431,4 +1431,46 @@ P2/P3 issue 数量较多，建议按模块分批处理。以下是关键模块�
 
 ---
 
+## 十二、2026-07-12 第二批关闭后：还剩哪些 issue？
+
+本次关闭 `#58`/`#54`/`#45`/`#43`/`#23`/`#28`/`#24` 后，剩余重点关注项如下（按紧迫性排序）：
+
+### 🔴 安全与数据隔离（最高优先级）
+
+| Issue | 标题 | 说明 |
+|-------|------|------|
+| #244 | Cookie 安全标记 + reconnect storm + name 硬编码 | `web/static/app.js` 与 `web/server.py`；需后端 Set-Cookie 或前端 SameSite/Secure |
+| #233 | WebSocket Origin `startswith localhost` 绕过 | `web/server.py`；需用 `urllib.parse.urlparse` 精确匹配 hostname |
+| #210 | WebSocket 多 tab session 竞态 | `web/session.py`；disconnect 销毁 session、init 可重复、task.cancel 无法中断同步代码 |
+| #214 | Repository 多处查询缺少 `session_id` 过滤 | `storage/repository.py`；跨 session 数据污染风险 |
+
+### 🟠 历史版本 P1 Bug
+
+| Issue | 标题 | 说明 |
+|-------|------|------|
+| #180 | 梦境生成同步阻塞 + CLI 缺失 + 记忆关联弱 | `core/sleep_manager.py`, `ui/cli.py` |
+| #178 | 数据库权限 / WAL 检查点 / 日志 I/O 瓶颈 / 无轮转 | `storage/database.py`, `core/logging_setup.py` |
+| #170 | `_build_messages` 字符截断导致 token 估算失真 | `core/context_manager.py` |
+| #169 | SleepManager 情绪驱动睡眠检测不完整 | `core/sleep_manager.py` |
+
+### 🟡 v0.5 P2/P3 质量改进（23 项）
+
+代表：`#284` 横切面异常/日志/资源泄漏、`#278` CSP/ARIA/CSS 变量前端安全、`#277` app.js 异常/重连/超时、`#274-#247` 各模块质量债。
+
+### 🟢 架构审查（4 项）
+
+| Issue | 标题 |
+|-------|------|
+| #296 | FactChecker 审查 |
+| #295 | ContextManager 审查 |
+| #294 | Prompt 架构审查 |
+| #293 | 三层 Agent 系统成熟度评估 |
+
+### 统计
+
+- 本报告范围内剩余 **~80 个 open issue**（含 P2/P3 与架构审查）。
+- 下一批建议优先处理 **#244、#233、#210、#214**（安全/隔离）。
+
+---
+
 *报告结束。*

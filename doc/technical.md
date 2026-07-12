@@ -35,7 +35,9 @@ main.py / web_main.py
     │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
     │   ├── message_handler.py ── 消息入口（process_* 三方法）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
-    │   ├── provider.py ───────── LLM API 客户端（OpenAI 兼容，流式，response_format JSON mode）
+    │   ├── provider.py ───────── LLMProvider 抽象基类 + KimiProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
+    │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
+    │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
     │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
     │   └── dispatcher.py ─────── tool_call 三层解析（JSON 数组 / XML / 裸 JSON）+ 工具调度
     │
@@ -87,11 +89,13 @@ main.py / web_main.py
 
 ```
 CLI 模式： main.py
+    load_config() + setup_logging() + auto_start_embedding()  (#58 共享启动)
     ConsoleInterface（非阻塞 stdin）
         → Agent.run()（状态机循环）
             → _on_idle → _on_perceive → _on_think → _on_act → _on_reflect
 
 Web 模式： web_main.py → uvicorn
+    load_config() + setup_logging() + auto_start_embedding()  (#58 共享启动)
     FastAPI + WebSocket
         → SessionManager.get_or_create(session_id)
             → WebAgent.process_message() / process_proactive()
@@ -767,6 +771,21 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 像朋友一样回她。嘴可以贱，但心要暖。
 ```
 
+对话示例现在来自 `config.conversation_examples`（#28），可在 `config.json` 中自定义：
+
+```json
+{
+  "conversation_examples": [
+    {
+      "user": "今天去外滩拍照了，日落的时候光影特别好",
+      "replies": [
+        "蛙趣！那肯定好看！发出来看看[旺柴]",
+        "哇哇哇，听起来就很绝！拍了多久啊？"
+      ]
+    }
+  ]
+}
+```
 ### 6.2 Prompt 模板
 
 | 模板 | 用途 | 关键参数 |
@@ -876,33 +895,54 @@ _proactive_loop (15s tick)
 
 空闲阈值与情绪挂钩：excited 60s, sad 900s, neutral 360s，resentment 额外+300s。
 
-### 7.5 主动对话后台（旧）
-        if idle > config.proactive_min_idle:
-            score = agent.agent._calculate_proactivity(idle)
-            if random.random() < score:
-                response = agent.process_proactive()
-                await _send_segments(ws, response)
-        await asyncio.sleep(15)
-```
-
-- 用户发消息时重置 `last_activity_time`
-- WebSocket 断开时自动 cancel
-- 多标签页共享 agent 实例（待修复竞争条件）
-
 ### 7.5 会话管理
 
 ```python
 class SessionManager:
     _sessions: dict[session_id → WebAgent]
+    _proactive_tasks: dict[session_id → asyncio.Task]
+    _active_ws: dict[session_id → WebSocket]
     _lock: Lock
 
-    def get_or_create(session_id) -> WebAgent
+    def get_or_create(session_id) -> tuple[str, WebAgent]
     def remove(session_id)
+    def register_proactive(session_id, task, websocket)
+    def cleanup_old(max_sessions, ttl_seconds)
+    async def shutdown()
 ```
 
-- 每个浏览器标签页独立 Agent 实例
-- 独立 Personality + ConversationBuffer
-- 共享 SQLite（无 session_id 隔离，待修复）
+- 每个 session 拥有独立的 `WebAgent` 实例（独立 `Personality` + `ConversationBuffer`）
+- `WebAgent` 封装 `Agent` 私有接口，Web 端不再直接访问 `agent._xxx`（#45）
+- 多标签页共享同一 session 时，新连接会 cancel 旧 proactive 任务
+- `SessionManager` 级别共享 `LLMProvider` / `EmbeddingEngine` HTTP 会话（SN-005/006）
+- 24h TTL / 最多 50 个 session 自动清理（#148）
+- lifespan shutdown 阶段优雅关闭：保存 personality、cancel 任务、释放共享连接（#212）
+
+### 7.6 REST API 与校验（#43）
+
+REST 端点使用 Pydantic 模型（`web/schemas.py`）进行请求/响应校验：
+
+| 模型 | 用途 | 关键约束 |
+|------|------|----------|
+| `ChatRequest` | `POST /api/chat` | `message` 必填且非空，`session_id` 默认 `"default"` |
+| `ChatResponse` | `POST /api/chat` | `response`, `emotion`, `turn`, `session_id` |
+| `StatusResponse` | `GET /api/status` | `turn`, `emotion`, `relationship`, `relationship_history` |
+| `HistoryResponse` | `GET /api/chat/history` | `turns: list[HistoryTurn]`, `session_id` |
+
+- 字段缺失/类型错误时 FastAPI 自动返回 `422 Unprocessable Entity`
+- 校验失败信息包含具体字段与错误原因
+
+### 7.7 Web 安全（#24）
+
+| 机制 | 实现 | 说明 |
+|------|------|------|
+| CORS | `CORSMiddleware` | 默认允许 `localhost:8000` / `127.0.0.1:8000`；`config.allowed_origins` 可追加 |
+| 速率限制 | `RateLimitMiddleware` + `RateLimiter` | per-IP 滑动窗口：聊天 30/60s，状态/历史 60/60s |
+| WebSocket 限流 | `RateLimiter.is_allowed()` | `message` 消息同样受 30/60s 限制 |
+| CSP | `Content-Security-Policy` | `script-src 'self'`（无内联脚本），`connect-src` 限制 localhost |
+| X-Frame-Options | `DENY` | 防止点击劫持 |
+| X-Content-Type-Options | `nosniff` | 防止 MIME 嗅探 |
+| Referrer-Policy | `strict-origin-when-cross-origin` | 控制 referrer 泄露 |
 
 ---
 

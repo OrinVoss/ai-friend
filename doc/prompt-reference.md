@@ -19,29 +19,47 @@
 
 **文件**: `prompts/system.py`
 
-所有区块的动态拼接入口。完整 prompt 由 7 个区块组成：
+所有区块的动态拼接入口。完整 prompt 由以下区块组成：
 
 ```
-=== Block 1: 当前时间 ===          # datetime.now() 格式化
-=== Block 2: 身份核心 ===           # personality.json 的 name/traits/speaking_style/backstory
-=== Block 3: 情绪状态 ===           # EmotionalState.dominant_emotion + valence/arousal
-=== Block 4: 关系指标 ===           # trust/familiarity/intimacy/fun 实时值
-=== Block 5: 长期记忆 ===           # facts + experiences + reflections
-=== Block 6: 工具列表 ===           # ToolRegistry.format_for_prompt()
-=== Block 7: 对话示例 + 指令 ===    # 对话风格示例 + 行为指令
+=== Block 0: 当前时间 ===
+=== Block 1: Agent 2 工具结果 ===    # tool_records（需要时）
+=== Block 1b: Agent 1 内驱判断 ===   # inner_drive_summary（需要时）
+=== Block 2: 身份核心 ===            # personality.json 的 name/traits/speaking_style/backstory
+=== Block 3: 对话风格示例 ===        # config.conversation_examples（#28 可配置）
+=== Block 4: 当前情绪状态 ===        # EmotionalState.dominant_emotion + valence/arousal
+=== Block 4b: 怨恨状态 ===           # resentment > 0.2 时注入
+=== Block 4c: 情绪事件记忆 ===       # 最近未解决情绪事件
+=== Block 5: 关系指标 ===            # trust/familiarity/intimacy/fun 实时值
+=== Block 6: 长期记忆 ===            # facts + experiences + reflections + 梦境
+=== Block 6b: 对话压缩摘要 ===       # compressed_summary（需要时）
+=== Block 7: 内部工具列表 ===        # ToolRegistry.format_for_prompt() 仅 recall/remember
+=== Block 8: 工具调用记录 ===        # 当前会话最近 5 条工具调用
+=== Block 9: 最近对话 ===            # 当前短期记忆
+=== Block 10: 破防状态指令 ===       # consecutive_negative 累计时注入
+=== Block 11: 行为指令 ===           # 普通 / proactive / explore 模式
 ```
 
 ### 变量来源
 
 | 区块 | 数据来源 | 说明 |
 |------|----------|------|
-| Block 1 | `datetime.now()` | 当前时间，格式 `YYYY-MM-DD HH:mm Weekday` |
+| Block 0 | `datetime.now()` | 当前时间，格式 `YYYY-MM-DD HH:mm Weekday` |
+| Block 1 | `tool_records` | Agent 2 外部工具执行结果 |
+| Block 1b | `inner_drive_summary` | Agent 1 自主推理摘要 |
 | Block 2 | `personality.json → PersonalityConfig` | 人格核心定义 |
-| Block 3 | `EmotionalState` | VAD + 8 Plutchik + history |
-| Block 4 | `LongTermMemory.get_relationship()` | 关系四维指标 |
-| Block 5 | `MemoryRetriever.retrieve_for_query()` | 三层检索结果 |
-| Block 6 | `ToolRegistry` | 仅 `recall`/`remember` 两个内部工具 |
-| Block 7 | 硬编码指令 | 对话示例 + 行为约束 |
+| Block 3 | `config.conversation_examples` | 可配置对话风格示例（#28） |
+| Block 4 | `EmotionalState` | VAD + 8 Plutchik + history |
+| Block 4b | `EmotionalState.resentment` | 怨恨值 > 0.2 时注入 |
+| Block 4c | `EmotionalState.emotion_events` | 最近 3 条未解决情绪事件 |
+| Block 5 | `LongTermMemory.get_relationship()` | 关系四维指标 |
+| Block 6 | `MemoryRetriever.retrieve_for_query()` | 三层检索结果 + 梦境 |
+| Block 6b | `_compress_context()` | 超出上下文阈值时生成 |
+| Block 7 | `ToolRegistry` | 仅 `recall`/`remember` 两个内部工具 |
+| Block 8 | `tool_call_history` | 当前会话最近 5 条调用记录 |
+| Block 9 | `ConversationBuffer` | 最近对话历史 |
+| Block 10 | `consecutive_negative` | 连续负面交互破防指令 |
+| Block 11 | 硬编码 | 根据模式（普通/proactive/explore）注入不同指令 |
 
 ### 特殊注入
 

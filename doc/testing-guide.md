@@ -38,7 +38,7 @@ python -m pytest tests/ tests/real_api/ -v --real-api
 ### 运行语法检查
 
 ```bash
-python -m py_compile *.py core/*.py memory/*.py storage/*.py tools/*.py web/*.py models/*.py prompts/*.py
+python -m py_compile *.py core/*.py memory/*.py storage/*.py tools/*.py web/*.py models/*.py prompts/*.py ui/*.py
 ```
 
 ---
@@ -73,6 +73,9 @@ tests/
 ├── test_fact_checker.py     # FactChecker 测试
 ├── test_segmentation.py     # 分段推送测试
 ├── test_web_agent.py        # WebAgent 测试
+├── test_provider_abc.py     # LLMProvider ABC 测试（#23）
+├── test_rate_limit.py       # 速率限制测试（#24）
+├── test_conversation_examples.py  # 对话示例可配置测试（#28）
 │
 ├── test_v02_issues.py       # v0.2 issue 回归测试
 │
@@ -193,6 +196,41 @@ class TestRealAPI:
         # 只在 --real-api 标志下运行
         pass
 ```
+
+### 新增功能测试要点
+
+**Provider ABC（#23）**：验证自定义 Provider 必须实现 `generate` 方法，且 `KimiProvider` 是 `LLMProvider` 子类。
+
+```python
+from core.provider import LLMProvider, KimiProvider
+
+assert issubclass(KimiProvider, LLMProvider)
+```
+
+**速率限制（#24）**：验证 `RateLimiter` 在 60 秒窗口内对同一 IP 限制 30 次 `/api/chat`。
+
+```python
+from web.rate_limit import RateLimiter
+
+limiter = RateLimiter()
+for _ in range(30):
+    assert limiter.check("127.0.0.1", "/api/chat")
+assert not limiter.check("127.0.0.1", "/api/chat")
+```
+
+**Pydantic 校验（#43）**：验证 `ChatRequest` 对空 `message` 返回 422。
+
+```python
+from web.schemas import ChatRequest
+from pydantic import ValidationError
+
+with pytest.raises(ValidationError):
+    ChatRequest(message="")
+```
+
+**WebAgent 封装（#45）**：验证 `WebAgent` 暴露 `emotion`、`turn_count`、`process_message` 等公共接口，Web 端不直接访问 `agent._xxx`。
+
+**对话示例可配置（#28）**：验证 `build_system_prompt` 传入不同 `conversation_examples` 后 prompt 包含对应示例文本。
 
 ---
 

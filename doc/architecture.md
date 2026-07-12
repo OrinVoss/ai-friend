@@ -63,9 +63,11 @@ python web_main.py
     │
     └── Web: python web_main.py → FastAPI + WebSocket
               │
-              ├── web/server.py  (HTTP + WS + proactive_loop, 每个 session 仅一个活跃 loop)
-              ├── web/session.py (SessionManager + WebAgent + per-session proactive task/WS 追踪)
-              └── web/static/    (HTML + CSS + JS)
+              ├── web/server.py  (HTTP + WS + proactive_loop + Pydantic + 滑动窗口限流)
+              ├── web/session.py (SessionManager + WebAgent 封装 Agent 公共接口)
+              ├── web/schemas.py (Pydantic 请求/响应模型)
+              ├── web/rate_limit.py (内存滑动窗口限流)
+              └── web/static/    (HTML + CSS 变量 + JS)
     │
     ▼
 Agent 1: core/inner_drive.py  (InnerDriveAgent)
@@ -260,11 +262,24 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
   "thinking": "disabled",
   "max_tokens": 512,
   "temperature": 0.8,
-  "web_port": 8000
+  "web_host": "0.0.0.0",
+  "web_port": 8000,
+  "allowed_origins": [],
+  "conversation_examples": [
+    {
+      "user": "今天去外滩拍照了，日落的时候光影特别好",
+      "replies": [
+        "蛙趣！那肯定好看！发出来看看[旺柴]",
+        "哇哇哇，听起来就很绝！拍了多久啊？"
+      ]
+    }
+  ]
 }
 ```
 
 环境变量覆盖：`DEEPSEEK_API_KEY`, `ANYSEARCH_API_KEY` 等。
+- `allowed_origins`：默认已包含 `localhost:8000` 和 `127.0.0.1:8000`，可在此追加额外 CORS 来源。
+- `conversation_examples`：系统提示词中的对话风格示例，支持自定义以减少 token 浪费。
 
 ---
 
@@ -285,7 +300,8 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）
 │   ├── personality.py       情绪引擎（四层）
-│   ├── provider.py          LLM API 客户端（支持 response_format JSON mode）
+│   ├── provider.py          LLMProvider ABC + KimiProvider 实现（OpenAI 兼容，流式，JSON mode）
+│   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）
 │   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）
 ├── memory/                  记忆系统
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
@@ -294,9 +310,11 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── models/                  数据模型
 ├── ui/                      CLI 界面
 └── web/                     Web 界面
-    ├── server.py            FastAPI + WebSocket（详见 [API 文档](api.md)）
-    ├── session.py           SessionManager
-    └── static/              前端
+    ├── server.py            FastAPI + WebSocket + Pydantic + 滑动窗口限流
+    ├── session.py           SessionManager + WebAgent（封装 Agent 私有接口）
+    ├── schemas.py           Pydantic 请求/响应模型
+    ├── rate_limit.py        内存滑动窗口限流
+    └── static/              前端（CSS 变量 + 无内联颜色）
 ```
 
 ## 相关链接
