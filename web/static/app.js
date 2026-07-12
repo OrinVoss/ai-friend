@@ -107,7 +107,13 @@ function connect() {
                     break;
                 case 'segment':
                     hideTyping();
-                    createMessage('assistant', data.content);
+                    // Append segment to last assistant bubble instead of creating new one
+                    var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
+                    if (lastBubble) {
+                        lastBubble.textContent += data.content;
+                    } else {
+                        createMessage('assistant', data.content);
+                    }
                     scrollToBottom();
                     break;
                 case 'done':
