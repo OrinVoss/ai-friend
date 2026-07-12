@@ -23,14 +23,18 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
   core/tool_agent.py    Agent 2：外部工具执行 + ToolAttemptTracker（3retry×3round）
   core/agent.py         Agent 3：ReAct Agent + 降级（3次工具失败→跳过）+ 破防机制
   core/personality.py   情绪引擎（四层：输入→调制+衰减→怨恨→事件记忆）
-  core/provider.py      DeepSeek API 客户端（trust_env=False）
-  core/async_utils.py   异步→同步桥接（run_async，线程池安全，60s 超时）
-  memory/               短期(LRU+Lock) / 长期(SQLite) / FactChecker(矛盾+衰减) / 检索(三层)
-  storage/repository.py session_id 隔离 + commit 强制 + get_similar_facts
-  tools/                Agent 1,3: recall/remember / Agent 2: web_fetch/web_search/read_file/glob/grep/music/notify
-  models/personality.py EmotionalState（VAD + 8 Plutchik + resentment + emotion_events）
-  web/server.py         FastAPI + WebSocket + proactive_loop（作息/探索/聊天）
-  web/session.py        SessionManager（24h TTL + 引用计数 + shutdown 优雅关闭）
+  core/embedding_server.py  共享 embedding server 启动（CLI/Web 共用）
+  core/provider.py          LLMProvider(ABC) 抽象基类 + KimiProvider 实现（trust_env=False）
+  core/async_utils.py       异步→同步桥接（run_async，线程池安全，60s 超时）
+  memory/                   短期(LRU+Lock) / 长期(SQLite) / FactChecker(矛盾+衰减) / 检索(三层)
+  storage/repository.py     session_id 隔离 + commit 强制 + get_similar_facts
+  tools/                    Agent 1,3: recall/remember / Agent 2: web_fetch/web_search/read_file/glob/grep/music/notify
+  models/personality.py     EmotionalState（VAD + 8 Plutchik + resentment + emotion_events）
+  web/server.py             FastAPI + WebSocket + Pydantic 校验 + CORS/速率限制/CSP
+  web/session.py            SessionManager（24h TTL + 引用计数）+ WebAgent（封装 Agent 私有接口）
+  web/schemas.py            Pydantic 请求/响应模型（ChatRequest / ChatResponse / ...）
+  web/rate_limit.py         内存滑动窗口限流中间件
+  web/static/style.css      CSS 变量统一暗色主题颜色
 ```
 
 ## 关键命令
@@ -50,9 +54,9 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 ## 文档规范
 
 - 写技术文档时善于使用 ASCII 图（流程图、状态机、架构图、数据流图）来表达
-- 更新代码的同时更新对应的 doc、README、changes
-- README 和 doc/architecture.md、doc/api.md 保持同步更新
-- doc/ 下已有 12 份文档：architecture.md, technical.md, message-flow.md, api.md, config-reference.md, personality-guide.md, testing-guide.md, tool-development.md, prompt-reference.md, deployment.md, milestones-and-issues.md, db-report.html
+- 更新代码的同时更新对应的 doc、README、changes、CLAUDE.md
+- README 和 doc/architecture.md、doc/api.md、CLAUDE.md 保持同步更新
+- doc/ 下已有 13 份文档：architecture.md, technical.md, message-flow.md, api.md, config-reference.md, personality-guide.md, testing-guide.md, tool-development.md, prompt-reference.md, deployment.md, milestones-and-issues.md, open-issues-修复报告-2026-07-12.md, db-report.html
 
 ## 代码规范
 
@@ -60,3 +64,8 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 - Web 端每次请求结束时调用 `record_emotion_event()` 记录强情绪
 - 主动回复不加入短期记忆（`add_to_history=False`）
 - 环境变量优先级高于 config.json（DEEPSEEK_API_KEY 等）
+- Provider 必须继承 `LLMProvider(ABC)`，通过抽象接口注入 Agent
+- Web 层通过 `WebAgent` 公共接口与 Agent 交互，禁止直接访问 `agent._xxx`
+- REST API 入参/返回使用 `web/schemas.py` 中的 Pydantic 模型，自动获得 422 校验
+- CSS 颜色统一使用 `web/static/style.css` 中的 CSS 变量，禁止硬编码色值
+- CORS 来源通过 `config.allowed_origins` 扩展；速率限制/CSP 安全头由 `web/server.py` 统一添加
