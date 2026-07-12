@@ -4,7 +4,14 @@ from unittest.mock import MagicMock
 
 from models.memory import UserFact
 from memory.fact_checker import (
-    FactChecker, SIMILARITY_THRESHOLD, CONTRADICTION_DECAY, MIN_CONFIDENCE_FILTER,
+    FactChecker,
+    SIMILARITY_THRESHOLD,
+    CONTRADICTION_DECAY,
+    CONTRADICTION_DECAY_MILD,
+    MIN_CONFIDENCE_FILTER,
+    MIN_NEW_FACT_CONFIDENCE,
+    CONFIDENCE_RATIO_MILD,
+    KEYWORD_OVERLAP_THRESHOLD,
 )
 
 
@@ -182,6 +189,142 @@ class TestConstants(unittest.TestCase):
         self.assertLess(CONTRADICTION_DECAY, 0.5)
         self.assertGreater(CONTRADICTION_DECAY, 0.0)
         self.assertLess(MIN_CONFIDENCE_FILTER, 0.5)
+        self.assertGreaterEqual(MIN_NEW_FACT_CONFIDENCE, 0.0)
+        self.assertLess(MIN_NEW_FACT_CONFIDENCE, 1.0)
+        self.assertGreater(CONFIDENCE_RATIO_MILD, 0.0)
+        self.assertLess(CONFIDENCE_RATIO_MILD, 1.0)
+        self.assertGreaterEqual(KEYWORD_OVERLAP_THRESHOLD, 0.3)
+        self.assertLess(KEYWORD_OVERLAP_THRESHOLD, 1.0)
+
+
+class TestResolveQualityAwareness(unittest.TestCase):
+    """FC-003: new-fact quality validation in resolve()."""
+
+    def setUp(self):
+        self.fc = FactChecker()
+        self.repo = MagicMock()
+
+    def test_low_confidence_new_fact_is_ignored(self):
+        """New fact below MIN_NEW_FACT_CONFIDENCE should not affect old fact."""
+        old = UserFact(id=20, fact_key="爱好", fact_value="游泳", confidence=0.8)
+        new = UserFact(fact_key="爱好", fact_value="跑步", confidence=MIN_NEW_FACT_CONFIDENCE - 0.05)
+
+        deactivated = self.fc.resolve(new, old, self.repo)
+        self.assertFalse(deactivated)
+        self.repo.update_fact_confidence.assert_not_called()
+        self.repo.deactivate_fact.assert_not_called()
+
+    def test_mild_decay_when_new_confidence_much_lower(self):
+        """If new confidence < 50% of old confidence, apply mild decay."""
+        old = UserFact(id=21, fact_key="住所", fact_value="北京", confidence=0.9)
+        new = UserFact(fact_key="住所", fact_value="上海", confidence=0.3)
+        # ratio = 0.3 / 0.9 = 0.33 < 0.5 -> mild decay
+
+        deactivated = self.fc.resolve(new, old, self.repo)
+        self.assertFalse(deactivated)
+        self.repo.update_fact_confidence.assert_called_once()
+        expected_conf = 0.9 * CONTRADICTION_DECAY_MILD  # still above 0.2
+        self.repo.update_fact_confidence.assert_called_with(21, expected_conf)
+        self.repo.deactivate_fact.assert_not_called()
+
+    def test_full_decay_when_new_confidence_ratio_high(self):
+        """If new confidence >= 50% of old confidence, apply full decay."""
+        old = UserFact(id=22, fact_key="工作", fact_value="医生", confidence=0.8)
+        new = UserFact(fact_key="工作", fact_value="律师", confidence=0.5)
+        # ratio = 0.5 / 0.8 = 0.625 >= 0.5 -> full decay
+
+        deactivated = self.fc.resolve(new, old, self.repo)
+        self.assertFalse(deactivated)
+        expected_conf = 0.8 * CONTRADICTION_DECAY  # 0.32, above 0.2
+        self.repo.update_fact_confidence.assert_called_with(22, expected_conf)
+
+
+class TestKeywordFallback(unittest.TestCase):
+    """FC-005: keyword-overlap semantic fallback without embedding."""
+
+    def setUp(self):
+        self.fc = FactChecker()  # no embedding engine
+
+    def test_keyword_contradiction_detected(self):
+        """Long similar keys with different values trigger keyword fallback."""
+        existing = [
+            UserFact(id=30, category="preference", fact_key="the favorite food of the user",
+                     fact_value="pizza", confidence=0.8),
+        ]
+        result = self.fc.detect_contradiction(
+            UserFact(category="preference", fact_key="the favourite food of the user",
+                     fact_value="sushi", confidence=0.7),
+            existing,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, 30)
+
+    def test_keyword_same_value_not_contradiction(self):
+        existing = [
+            UserFact(id=31, category="preference", fact_key="the favorite food of the user",
+                     fact_value="pizza", confidence=0.8),
+        ]
+        result = self.fc.detect_contradiction(
+            UserFact(category="preference", fact_key="the favourite food of the user",
+                     fact_value="pizza", confidence=0.7),
+            existing,
+        )
+        self.assertIsNone(result)
+
+    def test_keyword_low_overlap_not_contradiction(self):
+        existing = [
+            UserFact(id=32, category="routine", fact_key="每天起床时间",
+                     fact_value="8点", confidence=0.7),
+        ]
+        result = self.fc.detect_contradiction(
+            UserFact(category="preference", fact_key="最喜欢的音乐",
+                     fact_value="摇滚", confidence=0.7),
+            existing,
+        )
+        self.assertIsNone(result)
+
+    def test_direct_contradiction_takes_precedence_over_keyword(self):
+        existing = [
+            UserFact(id=33, category="preference", fact_key="最喜欢的食物",
+                     fact_value="意大利面", confidence=0.8),
+        ]
+        result = self.fc.detect_contradiction(
+            UserFact(category="preference", fact_key="最喜欢的食物",
+                     fact_value="寿司", confidence=0.7),
+            existing,
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, 33)
+
+
+class TestCosineSimBatch(unittest.TestCase):
+    """FC-004: vectorised batch cosine similarity."""
+
+    def test_batch_multiple_vectors(self):
+        fc = FactChecker()
+        new_vec = [1, 0, 0]
+        old_vecs = [
+            [1, 0, 0],   # identical
+            [0, 1, 0],   # orthogonal
+            [-1, 0, 0],  # opposite
+        ]
+        sims = fc._cosine_sim_batch(new_vec, old_vecs)
+        self.assertAlmostEqual(float(sims[0]), 1.0, places=5)
+        self.assertAlmostEqual(float(sims[1]), 0.0, places=5)
+        self.assertAlmostEqual(float(sims[2]), -1.0, places=5)
+
+    def test_batch_single_vector_matches_pairwise(self):
+        fc = FactChecker()
+        new_vec = [0.8, 0.6, 0.1]
+        old_vecs = [[0.79, 0.61, 0.09]]
+        batch_sim = float(fc._cosine_sim_batch(new_vec, old_vecs)[0])
+        pairwise_sim = fc._cosine_sim(new_vec, old_vecs[0])
+        self.assertAlmostEqual(batch_sim, pairwise_sim, places=5)
+
+    def test_batch_zero_vector(self):
+        fc = FactChecker()
+        sims = fc._cosine_sim_batch([0, 0, 0], [[1, 1, 1]])
+        self.assertEqual(float(sims[0]), 0.0)
 
 
 if __name__ == "__main__":
