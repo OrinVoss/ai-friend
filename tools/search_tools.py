@@ -4,12 +4,38 @@ import logging
 import os
 import re
 import signal
+import time
 from typing import Any
 
 from tools.file_tools import _get_allowed_roots, _is_binary
 from tools.traits import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# #172: simple TTL cache for search results (glob + grep)
+_SEARCH_CACHE: dict[str, tuple[float, str]] = {}
+_SEARCH_CACHE_TTL = 60  # seconds
+_SEARCH_CACHE_MAX = 20
+
+
+def _cache_get(key: str) -> str | None:
+    """Get cached result if fresh. Returns None if missing or expired."""
+    entry = _SEARCH_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, val = entry
+    if time.time() - ts > _SEARCH_CACHE_TTL:
+        del _SEARCH_CACHE[key]
+        return None
+    return val
+
+
+def _cache_set(key: str, val: str) -> None:
+    """Store result in cache, evicting oldest if at capacity."""
+    if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX:
+        oldest = min(_SEARCH_CACHE.items(), key=lambda kv: kv[1][0])
+        _SEARCH_CACHE.pop(oldest[0], None)
+    _SEARCH_CACHE[key] = (time.time(), val)
 
 # #150: regex timeout to prevent ReDoS
 GREP_TIMEOUT = 5  # seconds per file match
@@ -90,6 +116,13 @@ class GlobTool(Tool):
         if root is None:
             return ToolResult.fail(f"路径不在可访问范围内: {search_root}")
 
+        # #172: check cache
+        cache_key = f"glob:{pattern}:{root}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            logger.debug(f"[tool] glob cache hit: {cache_key}")
+            return ToolResult.ok(cached)
+
         results = []
         file_count = 0  # SR-003: guard against unbounded os.walk
         for dirpath, _, fnames in os.walk(root):
@@ -123,7 +156,9 @@ class GlobTool(Tool):
         if len(results) > GLOB_MAX_RESULTS:
             lines.append(f"  ... 还有 {len(results) - GLOB_MAX_RESULTS} 个文件未显示")
 
-        return ToolResult.ok("\n".join(lines))
+        output = "\n".join(lines)
+        _cache_set(cache_key, output)  # #172
+        return ToolResult.ok(output)
 
 
 class GrepTool(Tool):
@@ -186,6 +221,13 @@ class GrepTool(Tool):
         target = _resolve_search_path(search_path)
         if target is None:
             return ToolResult.fail(f"路径不在可访问范围内: {search_path}")
+
+        # #172: check cache
+        cache_key = f"grep:{pattern}:{target}:{file_glob}:{ignore_case}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            logger.debug(f"[tool] grep cache hit: {cache_key}")
+            return ToolResult.ok(cached)
 
         try:
             # #150: validate regex doesn't have catastrophic backtracking patterns
@@ -270,4 +312,6 @@ class GrepTool(Tool):
             return ToolResult.ok(f"未找到匹配 '{pattern}' 的内容")
 
         header = f"搜索 '{pattern}' ({total_matches} 处匹配, {len(files)} 个文件):"
-        return ToolResult.ok(header + "\n".join(results[:self.MAX_RESULTS * 4]))
+        output = header + "\n".join(results[:self.MAX_RESULTS * 4])
+        _cache_set(cache_key, output)  # #172
+        return ToolResult.ok(output)

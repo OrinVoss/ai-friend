@@ -32,7 +32,7 @@ def estimate_tokens(text: str) -> int:
     ascii_chars = sum(1 for c in text if c.isascii() and c.isalpha())
     digits = sum(1 for c in text if c.isdigit())
     other = len(text) - cjk - ascii_chars - digits
-    return max(1, int(cjk / 1.5 + ascii_chars / 4 + digits / 3 + other / 8))
+    return max(1, int(cjk * 1.5 + ascii_chars / 4 + digits / 3 + other / 8))
 
 
 class ContextManager:

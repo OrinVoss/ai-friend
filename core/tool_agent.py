@@ -242,29 +242,19 @@ class ToolAgent:
         return merged
 
     def format_for_phase2(self, result: ToolAgentResult) -> str:
-        """Format Phase 2 results as a user message for Agent 3."""
+        """Format Phase 2 results as a user message for Agent 3.
+
+        #175: reuse format_tool_results from dispatcher for consistent formatting.
+        """
         if not result.has_results:
             return ""
 
-        total_entries = sum(r.output.count("\n") + 1 for r in result.records)
-        parts = [
-            "=== 系统已获取的真实数据（你只能基于这些数据回复，不得编造任何内容） ===",
-            f"共执行 {result.total_calls} 个工具，成功 {result.success_count} 个，耗时 {result.elapsed_ms:.0f}ms。",
-            "以下是工具返回的原始内容。你只能基于这些内容回复——不要说任何数据中没有的信息。",
-            "",
+        from core.dispatcher import format_tool_results
+        records = [
+            {"name": r.name, "success": r.success, "output": r.output}
+            for r in result.records
         ]
-        for i, r in enumerate(result.records, 1):
-            status = "成功" if r.success else "失败"
-            entry_count = r.output.count("\n") + 1 if r.output else 0
-            parts.append(
-                f"[工具 {i}] {r.name}（{status}，{entry_count} 条结果）:\n"
-                f"{r.output[:6000]}\n"
-            )
-        parts.append(
-            f"=== 数据结束。以上共 {total_entries} 条记录。"
-            "你只能基于这些数据回复，禁止编造、润色、补充任何信息。 ==="
-        )
-        return "\n".join(parts)
+        return format_tool_results(records)
 
 
 def _format_raw_results(results: list[dict]) -> str:

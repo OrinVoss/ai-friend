@@ -325,6 +325,7 @@ class MessageHandler:
         # turns once the window slid past 5, so long histories silently grew
         # past the compression threshold.
         running_total = 0
+        history_messages = []
         for t in a.short_term.get_all_reversed():
             # #130: skip turns with stage directions / fake tool claims
             if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
@@ -337,7 +338,9 @@ class MessageHandler:
                 overflow = True
                 break
             running_total += turn_tokens
-            messages.insert(1, {"role": role, "content": t.content})
+            history_messages.append({"role": role, "content": t.content})
+        # #168: O(k) slice assignment instead of O(k²) insert(1, ...)
+        messages[1:1] = reversed(history_messages)
         if overflow and a._context.compressed_summary:
             messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {a._context.compressed_summary}"})
         if user_input:

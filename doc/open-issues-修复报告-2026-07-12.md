@@ -63,12 +63,12 @@
 | #179 | ✅ 已修 | Agent 1 review/re_decide 存在消息累积问题 + tool_result 注入位置导致 system prompt 被挤到末尾 | `core/message_handler.py`, `core/tool_agent.py` |
 | #178 | 🌑 待修 | 数据库文件缺乏权限控制 + WAL 模式未配置自动检查点 + 日志 I/O 同步高频场景瓶颈 + 日志无轮转 | `storage/database.py`, `core/logging_setup.py` |
 | #176 | ✅ 已修 | ConversationBuffer 无单条消息大小限制可导致 OOM | `memory/short_term.py` |
-| #175 | 🌑 待修 | 工具调用结果格式化存在双重标准 + short_term 历史消息插入顺序不一致 | `core/dispatcher.py`, `memory/short_term.py` |
+| #175 | ✅ 已修 | 工具调用结果格式化存在双重标准 + short_term 历史消息插入顺序不一致 | `core/dispatcher.py`, `memory/short_term.py` |
 | #174 | ✅ 已修 | Web 路径中 emotion 事件记录缺失 + API 连接超时与读取超时未分离 | `web/server.py`, `core/provider.py` |
-| #172 | 🌑 待修 | GlobTool/GrepTool 目录遍历无缓存 + 多处性能瓶颈 | `tools/file_tools.py`, `tools/search_tools.py` |
+| #172 | ✅ 已修 | GlobTool/GrepTool 目录遍历无缓存 + 多处性能瓶颈 | `tools/file_tools.py`, `tools/search_tools.py` |
 | #170 | 🌑 待修 | _build_messages 字符截断导致 token 估算失真 + O(k²) 复杂度 | `core/context_manager.py`, `core/message_handler.py` |
 | #169 | 🌑 待修 | SleepManager 情绪驱动睡眠检测不完整 | `core/sleep_manager.py` |
-| #168 | 🌑 待修 | Performance：estimate_tokens 误差 + 情绪行为描述浪费 | 多文件 |
+| #168 | ✅ 已修 | Performance：estimate_tokens 误差 + 情绪行为描述浪费 | 多文件 |
 | #167 | ✅ 已修 | 睡眠系统缺陷 — 睡眠全局共享 + sleep_cooldown 整数递减 | `core/sleep_manager.py` |
 | #105 | ✅ 已修 | 梦境事件被普通情绪事件挤出 emotion_events 列表 | `models/personality.py` |
 | #152 | ✅ 已修 | _react_loop 消息累积 + max_tool_iterations 可配置 | `core/agent.py`, `config.py` |
