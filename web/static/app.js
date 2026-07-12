@@ -1,5 +1,6 @@
 let ws = null;
 let sessionId = getCookie('session_id') || '';
+let aiName = '星';
 let isProcessing = false;
 let lastMessageTime = 0;
 
@@ -35,57 +36,6 @@ function setCookie(name, value) {
     document.cookie = name + '=' + value + '; path=/; max-age=86400';
 }
 
-function splitSegments(text) {
-    // Step 1: split on sentence-ending punctuation (handles trailing quotes/brackets)
-    var parts = text.split(/(?<=[。！？.!?\n])(?:[」"'')]?\s*)(?=\S)/).filter(function(s) { return s.trim(); });
-    if (parts.length > 1) {
-        return _mergeShort(parts);
-    }
-
-    // Step 2: split on whitespace
-    var spaceParts = text.split(/\s+/).filter(function(s) { return s.trim(); });
-    if (spaceParts.length > 1) {
-        return _mergeShort(spaceParts);
-    }
-
-    // Step 3: split after 语气词
-    if (text.length > 10) {
-        var toneParts = text.split(/(?<=[啊吗呢了吧么呀哦嘛哇])/).filter(function(s) { return s.trim(); });
-        if (toneParts.length > 1) {
-            return _mergeShort(toneParts);
-        }
-    }
-
-    // Step 4: last resort for long text — split at natural pauses
-    if (text.length > 25) {
-        var naturalParts = text.split(/(?<=[了过完好到])|(?<=然后|但是|不过|所以|因为|而且|或者|只是|于是|接着|还有|另外|虽然|如果|可以|应该)/).filter(function(s) { return s.trim(); });
-        if (naturalParts.length > 1) {
-            return _mergeShort(naturalParts);
-        }
-        // absolute fallback: hard-split
-        var chunked = [];
-        for (var i = 0; i < text.length; i += 18) {
-            chunked.push(text.slice(i, i + 18));
-        }
-        return _mergeShort(chunked);
-    }
-
-    return [text];
-}
-
-function _mergeShort(parts) {
-    var merged = [];
-    for (var i = 0; i < parts.length; i++) {
-        var s = parts[i];
-        if (merged.length && s.length < 4) {
-            merged[merged.length - 1] += s;
-        } else {
-            merged.push(s);
-        }
-    }
-    return merged;
-}
-
 function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws');
@@ -103,6 +53,12 @@ function connect() {
                     sessionId = data.session_id;
                     setCookie('session_id', sessionId);
                     showEmotion(data.emotion);
+                    // FJ-007/FH-003: dynamic personality name
+                    if (data.name) {
+                        aiName = data.name;
+                        var titleEl = document.querySelector('.chat-header .info h1');
+                        if (titleEl) titleEl.textContent = aiName;
+                    }
                     loadHistory();
                     break;
                 case 'segment':
@@ -112,7 +68,6 @@ function connect() {
                         var raw = lastBubble.getAttribute('data-raw') || '';
                         raw += data.content;
                         lastBubble.setAttribute('data-raw', raw);
-                        // Show raw text during streaming to avoid broken markdown flash
                         lastBubble.textContent = raw;
                     } else {
                         createMessage('assistant', data.content);
@@ -126,7 +81,6 @@ function connect() {
                     updateSendButton();
                     setStatus('connected');
                     hideTyping();
-                    // Render full markdown on done
                     if (typeof marked !== 'undefined') {
                         var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
                         if (lastBubble) {
@@ -141,7 +95,9 @@ function connect() {
                 case 'pong':
                     break;
             }
-        } catch(e) {}
+        } catch(e) {
+            console.error('[ws] parse error:', e, event.data);
+        }
     };
 
     ws.onclose = function() {
@@ -162,7 +118,10 @@ function connect() {
 function loadHistory() {
     var sid = getCookie('session_id');
     if (!sid) return;
-    fetch('/api/chat/history?session_id=' + encodeURIComponent(sid))
+    // FJ-009: AbortController 15s timeout
+    var controller = new AbortController();
+    setTimeout(function() { controller.abort(); }, 15000);
+    fetch('/api/chat/history?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var turns = data.turns || [];
@@ -172,7 +131,7 @@ function loadHistory() {
             }
             scrollToBottom();
         })
-        .catch(function(e) {});
+        .catch(function(e) { console.error('[history] load failed:', e); });
 }
 
 function setStatus(s) {
@@ -226,7 +185,7 @@ function createMessage(role, content) {
     div.className = 'message ' + role;
     var av = document.createElement('div');
     av.className = 'avatar';
-    av.textContent = role === 'user' ? '我' : '星';
+    av.textContent = role === 'user' ? '我' : aiName;
     var bb = document.createElement('div');
     bb.className = 'bubble';
     if (role === 'assistant' && typeof marked !== 'undefined') {
@@ -262,38 +221,31 @@ function sendMessage() {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'message', content: text }));
     } else {
+        // FJ-009: AbortController 15s timeout for REST fallback
+        var controller = new AbortController();
+        setTimeout(function() { controller.abort(); }, 15000);
         fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: text, session_id: sessionId }),
+            signal: controller.signal,
         })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             hideTyping();
             var resp = data.response || '';
-            var segs = splitSegments(resp);
-            var delay = 0;
-            for (var i = 0; i < segs.length; i++) {
-                (function(seg) {
-                    setTimeout(function() { createMessage('assistant', seg); }, delay);
-                })(segs[i]);
-                delay += 1200;
-            }
+            createMessage('assistant', resp);
             if (data.emotion) showEmotion(data.emotion);
-            setTimeout(function() {
-                isProcessing = false; updateSendButton(); setStatus('connected');
-            }, delay);
+            isProcessing = false; updateSendButton(); setStatus('connected');
         })
         .catch(function(err) {
+            console.error('[rest] chat failed:', err);
             hideTyping(); isProcessing = false; updateSendButton(); setStatus('connected');
         });
     }
 }
 
 (function() {
-    setInterval(function() {
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
-    }, 30000);
     document.addEventListener('DOMContentLoaded', function() {
         connect();
         var input = document.getElementById('input');

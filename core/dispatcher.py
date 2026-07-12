@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Optional
 
+from core.async_utils import run_async
+from core.async_utils import run_async
 from tools.traits import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -135,7 +137,6 @@ def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[d
             continue
 
         try:
-            from core.async_utils import run_async
             if inspect.iscoroutinefunction(tool.execute):
                 result: ToolResult = run_async(tool.execute(args))
             else:

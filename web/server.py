@@ -214,13 +214,10 @@ def _split_segments(text: str) -> list[str]:
 
 
 async def _send_segments(websocket: WebSocket, agent, response: str, emotion: str):
-    segments = _split_segments(response)
-    for i, seg in enumerate(segments):
-        if i > 0:
-            await asyncio.sleep(_calc_delay(emotion, len(seg)))
-        await websocket.send_text(json.dumps({
-            "type": "segment", "content": seg,
-        }, ensure_ascii=False))
+    # TODO: re-enable segmentation when markdown streaming is stable
+    await websocket.send_text(json.dumps({
+        "type": "segment", "content": response,
+    }, ensure_ascii=False))
     await websocket.send_text(json.dumps({
         "type": "done", "content": response,
         "emotion": emotion, "turn": agent.turn_count,
@@ -332,6 +329,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({
                     "type": "init_ok", "session_id": session_id,
                     "emotion": agent.emotion,
+                    "name": agent.personality.config.name,
                 }, ensure_ascii=False))
 
             elif msg_type == "message":
