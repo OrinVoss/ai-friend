@@ -9,7 +9,7 @@ from typing import Optional
 
 from models.conversation import MemoryContext
 from core.personality import Personality
-from core.provider import KimiProvider
+from core.provider import LLMProvider
 from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
@@ -36,7 +36,7 @@ class AgentState(Enum):
     SHUTDOWN = "shutdown"
 
 class Agent:
-    def __init__(self, personality: Personality, provider: KimiProvider,
+    def __init__(self, personality: Personality, provider: LLMProvider,
                  ltm: LongTermMemory, retriever: MemoryRetriever,
                  consolidator: MemoryConsolidator, short_term: ConversationBuffer,
                  config: Config, ui: Optional[ConsoleInterface] = None):

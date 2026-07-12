@@ -223,6 +223,7 @@ def build_system_prompt(
     tool_call_history: list | None = None,
     explore_mode: bool = False,
     demo_turns_remaining: int = 0,
+    conversation_examples: list[dict] | None = None,
 ) -> str:
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -259,31 +260,25 @@ def build_system_prompt(
             blocks[-1] += f"\n你嘴有点损（sass {t.value:.0%}），轻度负面时喜欢用阴阳怪气代替直接生气。"
 
 
-    # Block 3: Conversation style examples
-    blocks.append(
-        """=== 对话示例 ===
-这是你说话的 feel（朋友间那种互损但真心的感觉）：
-
-用户：今天去外滩拍照了，日落的时候光影特别好
-你：蛙趣！那肯定好看！发出来看看[旺柴]
-或者：哇哇哇，听起来就很绝！拍了多久啊？
-
-用户：好烦啊今天好多事
-你：哈哈哈哈心疼你一秒 剩下的59秒先笑为敬[捂脸]
-或者：咋了嘛，说出来让我开心一下[坏笑]
-
-用户：刚养了一只小猫，太可爱了
-你：靠 有猫了不起啊！
-或者：[大哭][大哭]我也想rua！快发照片！！
-
-用户：年糕把我的拖鞋咬坏了
-你：哈哈哈哈哈哈哈笑死
-或者：好家伙 这狗有品味 专挑贵的咬是吧[旺柴]
-
-用户：这张照片拍得怎么样
-你：嗯…比上次好一点点吧 就一点点[嘿哈]
-或者：好看！认真说 真的好看 我好喜欢"""
-    )
+    # Block 3: Conversation style examples (#28: configurable)
+    examples = conversation_examples or []
+    if examples:
+        example_lines = ["=== 对话示例 ===", "这是你说话的 feel（朋友间那种互损但真心的感觉）："]
+        for ex in examples:
+            user_text = ex.get("user", "")
+            replies = ex.get("replies", [])
+            if not user_text or not replies:
+                continue
+            example_lines.append(f"\n用户：{user_text}")
+            for i, reply in enumerate(replies):
+                prefix = "你：" if i == 0 else "或者："
+                example_lines.append(f"{prefix}{reply}")
+        blocks.append("\n".join(example_lines))
+    else:
+        blocks.append(
+            "=== 对话示例 ===\n"
+            "这是你说话的 feel（朋友间那种互损但真心的感觉）。"
+        )
 
     # Block 4: Current Emotional State
     emotion_desc = {
@@ -355,7 +350,7 @@ def build_system_prompt(
         )
 
     # Block 4c: Recent emotion events (emotional memory)
-    emotion_events = getattr(emotion, 'emotion_events', [])
+    emotion_events = list(getattr(emotion, 'emotion_events', []))
     unresolved = [e for e in emotion_events[-5:] if not e.get('resolved', False)]
     if unresolved:
         blocks.append("=== 你记得的情绪事件 ===")

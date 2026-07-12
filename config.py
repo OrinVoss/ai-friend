@@ -62,6 +62,46 @@ class Config:
     embedding_endpoint: str = "http://localhost:8080/v1/embeddings"
     embedding_dim: int = 1024
     embedding_cache_size: int = 1000
+    # CE-001: configurable conversation style examples (#28)
+    conversation_examples: list[dict] = field(default_factory=lambda: [
+        {
+            "user": "今天去外滩拍照了，日落的时候光影特别好",
+            "replies": [
+                "蛙趣！那肯定好看！发出来看看[旺柴]",
+                "哇哇哇，听起来就很绝！拍了多久啊？",
+            ],
+        },
+        {
+            "user": "好烦啊今天好多事",
+            "replies": [
+                "哈哈哈哈心疼你一秒 剩下的59秒先笑为敬[捂脸]",
+                "咋了嘛，说出来让我开心一下[坏笑]",
+            ],
+        },
+        {
+            "user": "刚养了一只小猫，太可爱了",
+            "replies": [
+                "靠 有猫了不起啊！",
+                "[大哭][大哭]我也想rua！快发照片！！",
+            ],
+        },
+        {
+            "user": "年糕把我的拖鞋咬坏了",
+            "replies": [
+                "哈哈哈哈哈哈哈笑死",
+                "好家伙 这狗有品味 专挑贵的咬是吧[旺柴]",
+            ],
+        },
+        {
+            "user": "这张照片拍得怎么样",
+            "replies": [
+                "嗯…比上次好一点点吧 就一点点[嘿哈]",
+                "好看！认真说 真的好看 我好喜欢",
+            ],
+        },
+    ])
+    # Web security: extra allowed CORS origins beyond localhost
+    allowed_origins: list[str] = field(default_factory=list)
 
 
 CONFIG_PATH = "config.json"

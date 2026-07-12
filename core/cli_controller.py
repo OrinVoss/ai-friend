@@ -206,6 +206,7 @@ class CliController:
                 tools=a._tool_registry,
                 consecutive_negative=a._consecutive_negative,
                 inner_drive_summary=drive_summary,
+                conversation_examples=a.config.conversation_examples,
             )
             messages = [{"role": "system", "content": sys_prompt}]
             a._context.reset_estimate(estimate_tokens(sys_prompt))

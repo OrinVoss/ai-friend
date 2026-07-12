@@ -152,14 +152,13 @@ function setStatus(s) {
     var text = document.getElementById('status-text');
     if (!dot || !text) return;
     var m = {
-        connected: ['#4ade80','在线'],
-        disconnected: ['#f87171','已断开'],
-        error: ['#fbbf24','连接异常'],
-        thinking: ['#fbbf24','输入中']
+        connected: '在线',
+        disconnected: '已断开',
+        error: '连接异常',
+        thinking: '输入中'
     };
-    var st = m[s] || m.disconnected;
-    dot.style.background = st[0];
-    text.textContent = st[1];
+    dot.className = 'dot ' + (s || 'disconnected');
+    text.textContent = m[s] || m.disconnected;
 }
 
 function showTyping() {
@@ -185,7 +184,7 @@ function scrollToBottom() {
 function addSystemMessage(text) {
     var c = document.getElementById('chat-messages');
     var d = document.createElement('div');
-    d.style.cssText = 'text-align:center;color:#666;font-size:12px;padding:4px 0;';
+    d.className = 'system-message';
     d.textContent = text;
     c.appendChild(d);
     scrollToBottom();

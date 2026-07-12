@@ -7,7 +7,7 @@ from typing import Optional
 
 from config import Config
 from core.personality import Personality
-from core.provider import KimiProvider
+from core.provider import LLMProvider
 from core.agent import Agent
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class WebAgent:
     def __init__(self, config: Config, db: Database, repo: Repository,
                  session_id: str = "default",
-                 shared_provider: Optional[KimiProvider] = None,
+                 shared_provider: Optional[LLMProvider] = None,
                  shared_embed_engine: Optional[EmbeddingEngine] = None):
         self.config = config
         self.db = db
@@ -157,6 +157,43 @@ class WebAgent:
     def turn_count(self):
         return self.agent.turn_count
 
+    @property
+    def last_activity(self):
+        return self.agent.last_activity_time
+
+    @last_activity.setter
+    def last_activity(self, value):
+        self.agent.last_activity_time = value
+
+    @property
+    def is_sleeping(self):
+        return self.agent._sleeping
+
+    async def get_sleep_state(self):
+        return await self.agent._get_sleep_state()
+
+    async def generate_dream(self):
+        return await self.agent._generate_dream()
+
+    def calculate_proactivity(self, idle_duration: float) -> float:
+        return self.agent._calculate_proactivity(idle_duration)
+
+    def check_rate_limit(self, action: str) -> bool:
+        return self.agent._check_rate_limit(action)
+
+    def record_rate_limit(self, action: str) -> None:
+        self.agent._proactive.record_rate_limit(action)
+
+    def decide_proactive_action(self, idle_duration: float):
+        return self.agent.decide_proactive_action(idle_duration)
+
+    def save_personality(self) -> None:
+        """Persist personality state to disk."""
+        try:
+            self.personality.save(self.config.personality_file)
+        except Exception as e:
+            logger.warning(f"[session] save personality failed: {e}")
+
 
 class SessionManager:
     def __init__(self, config: Config):
@@ -170,7 +207,7 @@ class SessionManager:
         # SN-005/006: shared HTTP sessions for Provider + EmbeddingEngine —
         # every WebAgent reuses these so we don't open one requests.Session
         # (and one EmbeddingCache) per open tab.
-        self._shared_provider: KimiProvider | None = None
+        self._shared_provider: LLMProvider | None = None
         self._shared_embed_engine: EmbeddingEngine | None = None
 
     async def open(self):
@@ -239,7 +276,7 @@ class SessionManager:
         with self._lock:
             expired = [
                 sid for sid, agent in self._sessions.items()
-                if now - agent.agent.last_activity_time > ttl_seconds
+                if now - agent.last_activity > ttl_seconds
             ]
             for sid in expired:
                 agent = self._sessions.pop(sid, None)
@@ -272,7 +309,7 @@ class SessionManager:
         logger.info("Shutting down sessions...")
         for sid, agent in list(self._sessions.items()):
             try:
-                agent.agent.personality.save(agent.agent.config.personality_file)
+                agent.save_personality()
             except Exception as e:
                 logger.warning(f"Failed to save personality for {sid}: {e}")
         # SN-013: also close each WebAgent so per-session resources release.

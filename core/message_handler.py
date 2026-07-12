@@ -220,6 +220,7 @@ class MessageHandler:
             is_proactive=True,
             consecutive_negative=a._consecutive_negative,
             inner_drive_summary=inner_drive_summary,
+            conversation_examples=a.config.conversation_examples,
         )
         messages = self._build_messages(sys_prompt, user_input=f"[主动开启对话] 主题方向：{topic}")
         logger.info(
@@ -266,6 +267,7 @@ class MessageHandler:
             consecutive_negative=a._consecutive_negative,
             explore_mode=True,
             inner_drive_summary=inner_drive_summary,
+            conversation_examples=a.config.conversation_examples,
         )
         messages = self._build_messages(sys_prompt, user_input=None)
         if tool_records:
@@ -314,6 +316,7 @@ class MessageHandler:
             consecutive_negative=a._consecutive_negative,
             tool_call_history=a._tool_call_history,
             inner_drive_summary=drive_result.summary if drive_result else "",
+            conversation_examples=a.config.conversation_examples,
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         # Inject tool results as USER message (LLM respects user messages >> system messages)

@@ -2,6 +2,7 @@
 import json
 import logging
 import time
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import requests
@@ -13,7 +14,35 @@ logger = logging.getLogger(__name__)
 STREAM_MAX_BYTES = 1_048_576  # 1 MiB
 
 
-class KimiProvider:
+class LLMProvider(ABC):
+    """Abstract base class for LLM providers.
+
+    Defines the minimal interface expected by Agent, InnerDrive, and memory
+    components. Concrete providers must implement :meth:`generate`.
+    """
+
+    @abstractmethod
+    def generate(self, messages: list[dict],
+                 stream: bool = True,
+                 on_token: Optional[callable] = None,
+                 max_tokens: Optional[int] = None,
+                 response_format: Optional[dict] = None) -> str:
+        """Generate a text completion from the LLM.
+
+        Args:
+            messages: OpenAI-style chat messages.
+            stream: Whether to stream tokens.
+            on_token: Optional callback invoked for each streamed token.
+            max_tokens: Optional override for the default output token limit.
+            response_format: Optional JSON schema / response_format dict.
+
+        Returns:
+            The full generated text.
+        """
+        ...
+
+
+class KimiProvider(LLMProvider):
     def __init__(self, endpoint: str, api_key: str, model: str,
                  temperature: float = 0.8, max_tokens: int = 512,
                  thinking: Optional[str] = None,

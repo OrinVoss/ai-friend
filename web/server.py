@@ -16,11 +16,14 @@ from fastapi.staticfiles import StaticFiles
 
 from config import load_config
 from web.session import SessionManager
+from web.schemas import ChatRequest, ChatResponse, StatusResponse, HistoryResponse
+from web.rate_limit import RateLimiter, RateLimitMiddleware
 
 logger = logging.getLogger(__name__)
 
 config = load_config()
 session_manager = SessionManager(config)
+rate_limiter = RateLimiter()
 
 
 def ensure_session():
@@ -32,9 +35,10 @@ def ensure_session():
 
 # WS-028: Content-Security-Policy — restrict fetch/script origins to block inline
 # injection from any WebSocket-delivered content. Local dev allows self + localhost.
+# script-src no longer allows 'unsafe-inline' since all JS lives in external files.
 CSP_HEADER = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; "
     "img-src 'self' data:; "
@@ -73,21 +77,25 @@ async def lifespan(app: FastAPI):
         raise
 
 
-# WS-003: CORS — only localhost origins may browse the API; cross-origin reads
-# are blocked by default, WebSocket Origin validation lives in the endpoint.
+# WS-003: CORS — localhost origins are always allowed; users may add extra origins
+# via config.allowed_origins. WebSocket Origin validation lives in the endpoint.
+_default_origins = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+_allowed_origins = list(dict.fromkeys(_default_origins + getattr(config, 'allowed_origins', [])))
+
 app = FastAPI(
     lifespan=lifespan,
     middleware=[
         Middleware(
             CORSMiddleware,
-            allow_origins=[
-                "http://localhost:8000",
-                "http://127.0.0.1:8000",
-            ],
+            allow_origins=_allowed_origins,
             allow_methods=["GET", "POST"],
             allow_headers=["Content-Type"],
             allow_credentials=False,
         ),
+        Middleware(RateLimitMiddleware, limiter=rate_limiter),
     ],
 )
 
@@ -113,52 +121,46 @@ async def index():
     return FileResponse("web/static/index.html")
 
 
-@app.post("/api/chat")
-async def chat_api(body: dict):
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_api(req: ChatRequest):
     ensure_session()
-    session_id = body.get("session_id", "default")
-    message = body.get("message", "")
-    if not message.strip():
-        return {"error": "empty message"}
-    logger.info(f"[rest] chat session={session_id} len={len(message)}")
-    _, agent = session_manager.get_or_create(session_id)
-    response = agent.process_message(message)
-    logger.info(f"[rest] chat_done session={session_id} turn={agent.turn_count} emotion={agent.emotion} resp_len={len(response)}")
-    return {
-        "response": response,
-        "emotion": agent.emotion,
-        "turn": agent.turn_count,
-        "session_id": session_id,
-    }
+    logger.info(f"[rest] chat session={req.session_id} len={len(req.message)}")
+    _, agent = session_manager.get_or_create(req.session_id)
+    response = agent.process_message(req.message)
+    logger.info(f"[rest] chat_done session={req.session_id} turn={agent.turn_count} emotion={agent.emotion} resp_len={len(response)}")
+    return ChatResponse(
+        response=response,
+        emotion=agent.emotion,
+        turn=agent.turn_count,
+        session_id=req.session_id,
+    )
 
 
-@app.get("/api/status")
+@app.get("/api/status", response_model=StatusResponse)
 async def status_api(session_id: str = "default"):
     """Return relationship metrics + history (#132)."""
     _, agent = session_manager.get_or_create(session_id)
-    ag = agent.agent
-    rel = ag.ltm.get_relationship()
-    history = ag.ltm.get_relationship_history(days=7)
-    return {
-        "turn": ag.turn_count,
-        "emotion": agent.emotion,
-        "relationship": rel,
-        "relationship_history": history,
-    }
+    rel = agent.agent.ltm.get_relationship()
+    history = agent.agent.ltm.get_relationship_history(days=7)
+    return StatusResponse(
+        turn=agent.turn_count,
+        emotion=agent.emotion,
+        relationship=rel,
+        relationship_history=history,
+    )
 
 
-@app.get("/api/chat/history")
+@app.get("/api/chat/history", response_model=HistoryResponse)
 async def chat_history_api(session_id: str = "default"):
     """Return recent conversation turns for UI display on reconnect."""
     _, agent = session_manager.get_or_create(session_id)
-    ag = agent.agent
     turns = []
-    for t in ag.short_term.get_all():
+    for t in agent.agent.short_term.get_all():
         turns.append({
             "role": t.role,
             "content": t.content,
         })
-    return {"turns": turns, "session_id": session_id}
+    return HistoryResponse(turns=turns, session_id=session_id)
 
 
 def _calc_delay(emotion: str, seg_len: int) -> float:
@@ -239,45 +241,44 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
             # Use the most recently active WebSocket for this session
             active_ws = session_manager.get_active_ws(session_id) or websocket
             _, agent = session_manager.get_or_create(session_id)
-            ag = agent.agent
 
             # Sleep/Wake cycle (only check if not in transition cooldown)
             if sleep_cooldown == 0:
-                should_sleep, msg = await ag._get_sleep_state()
+                should_sleep, msg = await agent.get_sleep_state()
                 if msg:
-                    logger.info(f"Sleep/wake message: sleeping={ag._sleeping} msg={msg[:50]}")
-                    ag.last_activity_time = time.time()
+                    logger.info(f"Sleep/wake message: sleeping={agent.is_sleeping} msg={msg[:50]}")
+                    agent.last_activity = time.time()
                     cooldown = 60
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
                     await _send_segments(active_ws, agent, msg, agent.emotion)
                     if should_sleep:
-                        await ag._generate_dream()
+                        await agent.generate_dream()
             else:
                 sleep_cooldown = max(0, sleep_cooldown - 1)
-            if ag._sleeping:
+            if agent.is_sleeping:
                 await asyncio.sleep(30)
                 continue
 
-            idle = time.time() - ag.last_activity_time
+            idle = time.time() - agent.last_activity
             if idle < 30 or cooldown > 0:
                 cooldown = max(0, cooldown - 1)
                 await asyncio.sleep(5)
                 continue
 
-            score = ag._calculate_proactivity(idle)
+            score = agent.calculate_proactivity(idle)
             if random.random() < score:
                 loop = asyncio.get_event_loop()
 
                 # Agent 1 (InnerDrive) decides what to do
                 intent = await loop.run_in_executor(
-                    None, ag.decide_proactive_action, idle
+                    None, agent.decide_proactive_action, idle
                 )
 
-                if intent.action == "explore" and ag._check_rate_limit("explore"):
+                if intent.action == "explore" and agent.check_rate_limit("explore"):
                     response = await loop.run_in_executor(
                         None, agent.process_explore_with_intent, intent
                     )
-                elif intent.action == "chat" and ag._check_rate_limit("chat"):
+                elif intent.action == "chat" and agent.check_rate_limit("chat"):
                     response = await loop.run_in_executor(
                         None, agent.process_proactive_with_intent, intent
                     )
@@ -288,8 +289,8 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                         logger.debug(f"[proactive] rate limit blocked action={intent.action}")
                     response = None
                 if response:
-                    ag.last_activity_time = time.time()
-                    ag._proactive.record_rate_limit(intent.action)
+                    agent.last_activity = time.time()
+                    agent.record_rate_limit(intent.action)
                     cooldown = 12
                     await _send_segments(active_ws, agent, response, agent.emotion)
             await asyncio.sleep(15)
@@ -344,11 +345,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 content = data.get("content", "").strip()
                 if not content:
                     continue
+                # RL-001: apply per-IP rate limit to WebSocket chat messages
+                client_ip = websocket.client.host if websocket.client else "unknown"
+                if not rate_limiter.is_allowed(client_ip, "/api/chat", 30, 60):
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "content": "发送太频繁了，请稍后再试。",
+                    }, ensure_ascii=False))
+                    continue
                 logger.info(f"[ws] message session={session_id} len={len(content)}")
                 if not session_id:
                     session_id = "default"
                 _, agent = session_manager.get_or_create(session_id)
-                agent.agent.last_activity_time = time.time()
+                agent.last_activity = time.time()
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(None, agent.process_message, content)
                 await _send_segments(websocket, agent, response, agent.emotion)

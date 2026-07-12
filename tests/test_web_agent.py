@@ -1,6 +1,6 @@
 """Tests for web/session.py — WebAgent proactive wrappers (#125)."""
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
 from core.inner_drive import ProactiveIntent
 
@@ -57,6 +57,51 @@ class TestWebAgentProactive(unittest.TestCase):
         result = self.agent.process_explore()
         self.assertIsNone(result)
         self.agent.agent.process_explore.assert_called_once_with(intent=None)
+
+    def test_last_activity_property(self):
+        self.agent.agent.last_activity_time = 123.0
+        self.assertEqual(self.agent.last_activity, 123.0)
+        self.agent.last_activity = 456.0
+        self.assertEqual(self.agent.agent.last_activity_time, 456.0)
+
+    def test_is_sleeping_property(self):
+        self.agent.agent._sleeping = True
+        self.assertTrue(self.agent.is_sleeping)
+
+    def test_get_sleep_state(self):
+        import asyncio
+        self.agent.agent._get_sleep_state = AsyncMock(return_value=(True, "zzz"))
+        result = asyncio.run(self.agent.get_sleep_state())
+        self.assertEqual(result, (True, "zzz"))
+
+    def test_generate_dream(self):
+        import asyncio
+        self.agent.agent._generate_dream = AsyncMock(return_value=" dreamed ")
+        result = asyncio.run(self.agent.generate_dream())
+        self.assertEqual(result, " dreamed ")
+
+    def test_calculate_proactivity(self):
+        self.agent.agent._calculate_proactivity = MagicMock(return_value=0.42)
+        self.assertEqual(self.agent.calculate_proactivity(120.0), 0.42)
+
+    def test_check_rate_limit(self):
+        self.agent.agent._check_rate_limit = MagicMock(return_value=True)
+        self.assertTrue(self.agent.check_rate_limit("chat"))
+
+    def test_record_rate_limit(self):
+        self.agent.agent._proactive = MagicMock()
+        self.agent.record_rate_limit("chat")
+        self.agent.agent._proactive.record_rate_limit.assert_called_once_with("chat")
+
+    def test_decide_proactive_action(self):
+        intent = ProactiveIntent(action="chat", topic_hint="x", reasoning="y")
+        self.agent.agent.decide_proactive_action = MagicMock(return_value=intent)
+        result = self.agent.decide_proactive_action(60.0)
+        self.assertEqual(result, intent)
+
+    def test_save_personality(self):
+        self.agent.save_personality()
+        self.agent.personality.save.assert_called_once_with("personality.json")
 
 
 if __name__ == "__main__":

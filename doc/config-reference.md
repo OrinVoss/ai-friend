@@ -27,6 +27,7 @@
 |------|------|--------|------|
 | `web_host` | string | `"0.0.0.0"` | 监听地址 |
 | `web_port` | int | `8000` | 监听端口 |
+| `allowed_origins` | array | `[]` | 额外允许的 CORS 来源（默认已包含 localhost） |
 
 ### 记忆系统
 
@@ -51,7 +52,7 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `embedding_endpoint` | string | `"http://localhost:8080/v1/embeddings"` | llama-server API 地址 |
-| `embedding_dim` | int | `512` | 嵌入向量维度 |
+| `embedding_dim` | int | `1024` | 嵌入向量维度 |
 | `embedding_cache_size` | int | `1000` | 嵌入 LRU 缓存容量 |
 
 ### 杂项
@@ -61,7 +62,20 @@
 | `personality_file` | string | `"personality.json"` | 人格定义文件路径 |
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
-| `allowed_read_paths` | array | `[".", "D:\\音乐", ...]` | 文件读取工具白名单目录 |
+| `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
+| `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
+
+`conversation_examples` 每项格式：
+
+```json
+{
+  "user": "用户说的话",
+  "replies": [
+    "AI 的第一种回复",
+    "AI 的第二种回复（用'或者：'前缀渲染）"
+  ]
+}
+```
 
 ### 环境变量覆盖
 
@@ -96,9 +110,13 @@
   "max_reflections": 50,
   "db_path": "data/ai_friend.db",
   "embedding_endpoint": "http://localhost:8080/v1/embeddings",
-  "embedding_dim": 512,
+  "embedding_dim": 1024,
   "embedding_cache_size": 1000,
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "allowed_origins": [],
+  "conversation_examples": [
+    { "user": "今天去外滩拍照了", "replies": ["蛙趣！发出来看看", "听起来就很绝"] }
+  ]
 }
 ```
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:8000 wss://localhost:8000">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'">
     <title>AI 朋友</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/marked.min.js"></script>
@@ -20,8 +20,8 @@
                 <span class="typing-dots" id="typing-dots" style="display:none">
                     <span></span><span></span><span></span>
                 </span>
-                <span style="color:#888;margin:0 4px">|</span>
-                <span style="color:#a78bfa" id="emotion-text"></span>
+                <span class="status-separator">|</span>
+                <span class="emotion-text" id="emotion-text"></span>
             </div>
         </div>
     </div>
