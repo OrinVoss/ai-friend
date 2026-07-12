@@ -17,3 +17,7 @@
 
 ### core/dispatcher.py
 - `from core.async_utils import run_async` 从函数内移到模块顶部
+
+### prompts/system.py
+- **Fix #229**: emotion_behavior 查找改用 `emotion.dominant_emotion`（英文 key），修复全部 15 种情绪行为描述未生效的 bug
+- `"fearful"` 统一为 `"afraid"`

@@ -317,10 +317,10 @@ def build_system_prompt(
         "melancholy": "你有些忧郁。语气缓慢、若有所思。说话带着距离感。",
         "excited": "你非常兴奋！话多、爱用感叹号、能量爆棚。尽情哈哈哈。",
         "joyful": "你心情很好。说话轻快、爱开玩笑、容易笑。",
-        "fearful": "你感到害怕。说话小心翼翼、声音很小。",
+        "afraid": "你感到害怕。说话小心翼翼、声音很小。",
         "neutral": "你心情平静。说话正常，不兴奋也不低落。",
     }
-    behavior = emotion_behavior.get(mood, "")
+    behavior = emotion_behavior.get(emotion.dominant_emotion, "")  # #229: use English key
     blocks.append(
         f"""=== 你现在啥状态 ===
 {mood}{primary_hint}，{valence_desc}、{arousal_desc}的那种。
