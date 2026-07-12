@@ -1,7 +1,7 @@
 # AI-Friend 项目 Open Issues 修复报告
 
 **报告日期**：2026-07-12  
-**更新日期**：2026-07-12（标注已修复状态）  
+**更新日期**：2026-07-12（补充 Batch #58/#54/#45/#43/#23/#28/#24 修复关闭记录）  
 **调查范围**：GitHub 仓库 `OrinVoss/ai-friend` 当前所有 **open** issue  
 **代理编号**：10808  
 **数据来源**：`gh issue list --repo OrinVoss/ai-friend --state open`  
@@ -29,8 +29,12 @@
 3. **动态 SQL 与迁移机制缺失**：`storage/database.py` 中的 `ALTER TABLE` 使用字符串拼接，无白名单；`schema_version` 表仅写入不读取，无法支撑后续 schema 演进。
 4. **Tool 基类与实现签名不一致**：`Tool.execute` 声明为 `async`，但 8 个子类全部为同步实现，依赖运行时 `inspect.iscoroutinefunction` 分支，违反 LSP。
 
+**新增关闭（2026-07-12 第二批）**：
+- 在提交 `9296694` 中一次性修复并关闭 **7 个 issue**：`#58`、`#54`、`#45`、`#43`、`#23`、`#28`、`#24`。
+- 详见下文「十一、2026-07-12 批量修复关闭详情」。
+
 **建议策略**：
-- **已完成（2026-07-12）**：闭环全部 P1 Bug（修复 32 个 issue），包括安全/数据隔离/状态管理/Tool LSP/.format 安全/睡眠丢消息/消息大小限制等。
+- **已完成（2026-07-12）**：闭环全部 P1 Bug（修复 32 个 issue），包括安全/数据隔离/状态管理/Tool LSP/.format 安全/睡眠丢消息/消息大小限制等；同时完成第二批 7 个重构/安全/可配置性 issue。
 - **下一阶段**：按模块消化 P2/P3 质量改进项（23 个）。
 - **长期**：参考 #296-#293 的架构审查，做 Truth Maintenance、Context Manager、Prompt 架构的演进。
 
@@ -1391,7 +1395,33 @@ P2/P3 issue 数量较多，建议按模块分批处理。以下是关键模块�
 
 ---
 
-## 十、下一步行动建议
+## 十、2026-07-12 批量修复关闭详情
+
+> 提交：`9296694`  
+> 推送：`main` 分支  
+> GitHub 状态：已关闭 `#58`、`#54`、`#45`、`#43`、`#23`、`#28`、`#24`
+
+| Issue | 类别 | 修复内容 | 主要文件 |
+|-------|------|----------|---------|
+| #58 | 重构 | `main.py` / `web_main.py` 启动代码重复：提取 `core/embedding_server.py` 公共模块 | `core/embedding_server.py`, `main.py`, `web_main.py` |
+| #54 | 重构 | CSS 全部硬编码颜色：全面改用 CSS 变量，HTML/JS 内联颜色改为类名 | `web/static/style.css`, `web/static/index.html`, `web/static/app.js` |
+| #45 | 封装 | Web 层直接访问 `agent._xxx`：`WebAgent` 新增公共接口，隔离内部状态 | `web/session.py`, `web/server.py` |
+| #43 | 增强 | REST API 无 Pydantic 验证：新增 `web/schemas.py`，接口使用 Pydantic 模型 | `web/schemas.py`, `web/server.py` |
+| #23 | 重构 | `KimiProvider` 无抽象基类：新增 `LLMProvider(ABC)` | `core/provider.py`, `core/agent.py`, `web/session.py` |
+| #28 | 增强 | 对话示例硬编码：`config.py` 新增 `conversation_examples`，提示词动态渲染 | `config.py`, `prompts/system.py`, `core/message_handler.py`, `core/cli_controller.py` |
+| #24 | 安全 | CORS/速率限制/CSP 细化：新增 `allowed_origins`、内存滑动窗口限流、细化 CSP | `config.py`, `web/server.py`, `web/rate_limit.py`, `web/static/index.html` |
+
+### 验证结果
+
+- `python -m py_compile ...` 语法检查通过。
+- `python -m pytest tests/ -q --ignore=tests/real_api`：**312 passed**。
+- 新增测试文件：`tests/test_provider_abc.py`、`tests/test_rate_limit.py`、`tests/test_conversation_examples.py`。
+- 已按 `CLAUDE.md` 在 `changes/2026-07-12-修复issue-58-54-45-43-23-28-24.md` 记录修改。
+- 已更新 `doc/config-reference.md`，补充 `conversation_examples` 与 `allowed_origins` 说明。
+
+---
+
+## 十一、下一步行动建议
 
 1. **确认修复范围**：是否优先处理全部 v0.5 P1 bug，再处理历史版本 P1 bug？
 2. **确认 `relationship_metrics` 的隔离级别**：它是全局共享还是 per-session？这直接影响 #214 的修复范围。
