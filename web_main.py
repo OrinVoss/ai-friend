@@ -12,6 +12,22 @@ from config import load_config
 from core.logging_setup import setup_logging
 
 
+def _kill_existing_llama(logger):
+    """Kill any existing llama-server processes before starting a new one."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if "llama-server.exe" in result.stdout:
+            subprocess.run(["taskkill", "/F", "/IM", "llama-server.exe"],
+                          capture_output=True, timeout=5)
+            logger.info("[embed] killed existing llama-server process")
+    except Exception:
+        pass
+
+
 def _auto_start_embedding(logger, endpoint="http://localhost:8080/v1/embeddings"):
     """Start embedding server if not running. Non-blocking after launch."""
     import urllib.request
@@ -22,6 +38,9 @@ def _auto_start_embedding(logger, endpoint="http://localhost:8080/v1/embeddings"
         return
     except Exception:
         pass
+
+    # Kill stale llama process before starting fresh
+    _kill_existing_llama(logger)
 
     project = os.path.dirname(os.path.abspath(__file__))
     model = os.path.join(project, "memory", "Qwen3.5-0.8B-Q6_K.gguf")

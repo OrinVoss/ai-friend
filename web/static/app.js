@@ -107,12 +107,17 @@ function connect() {
                     break;
                 case 'segment':
                     hideTyping();
-                    // Append segment to last assistant bubble instead of creating new one
                     var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
                     if (lastBubble) {
-                        lastBubble.textContent += data.content;
+                        var raw = lastBubble.getAttribute('data-raw') || '';
+                        raw += data.content;
+                        lastBubble.setAttribute('data-raw', raw);
+                        // Show raw text during streaming to avoid broken markdown flash
+                        lastBubble.textContent = raw;
                     } else {
                         createMessage('assistant', data.content);
+                        var nb = document.querySelector('.message.assistant:last-child .bubble');
+                        if (nb) nb.setAttribute('data-raw', data.content);
                     }
                     scrollToBottom();
                     break;
@@ -121,6 +126,15 @@ function connect() {
                     updateSendButton();
                     setStatus('connected');
                     hideTyping();
+                    // Render full markdown on done
+                    if (typeof marked !== 'undefined') {
+                        var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
+                        if (lastBubble) {
+                            var raw = lastBubble.getAttribute('data-raw') || lastBubble.textContent;
+                            lastBubble.innerHTML = marked.parse(raw);
+                            lastBubble.removeAttribute('data-raw');
+                        }
+                    }
                     if (data.emotion) showEmotion(data.emotion);
                     break;
                 case 'error':
@@ -215,7 +229,11 @@ function createMessage(role, content) {
     av.textContent = role === 'user' ? '我' : '星';
     var bb = document.createElement('div');
     bb.className = 'bubble';
-    bb.textContent = content;
+    if (role === 'assistant' && typeof marked !== 'undefined') {
+        bb.innerHTML = marked.parse(content);
+    } else {
+        bb.textContent = content;
+    }
     div.appendChild(av);
     div.appendChild(bb);
     container.appendChild(div);
