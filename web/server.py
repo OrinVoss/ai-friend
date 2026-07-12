@@ -23,6 +23,13 @@ config = load_config()
 session_manager = SessionManager(config)
 
 
+def ensure_session():
+    """Synchronous guard — call before first request if lifespan didn't run."""
+    if session_manager.db is None:
+        import asyncio
+        asyncio.run(session_manager.open())
+
+
 # WS-028: Content-Security-Policy — restrict fetch/script origins to block inline
 # injection from any WebSocket-delivered content. Local dev allows self + localhost.
 CSP_HEADER = (
@@ -38,31 +45,25 @@ CSP_HEADER = (
 XFO_HEADER = "DENY"
 
 
-async def _add_security_headers(request: Request, call_next):
-    """Add CSP + X-Frame-Options + no-sniff on every response. (#WS-027/#WS-028)"""
-    response = await call_next(request)
-    response.headers["Content-Security-Policy"] = CSP_HEADER
-    response.headers["X-Frame-Options"] = XFO_HEADER
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return response
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Re-setup file logging — uvicorn resets root handlers on startup
     try:
-        from core.logging_setup import setup_logging as _re_setup
-        _re_setup(getattr(load_config(), 'log_level', 'INFO'))
-    except Exception:
-        pass
-    logger.info("Server starting...")
-    await session_manager.open()
-    yield
-    # #212: graceful shutdown — also evict stale sessions via cleanup_old
-    logger.info("Server shutting down...")
-    session_manager.cleanup_old()
-    await session_manager.shutdown()
+        # Re-setup file logging — uvicorn resets root handlers on startup
+        try:
+            from core.logging_setup import setup_logging as _re_setup
+            _re_setup(getattr(load_config(), 'log_level', 'INFO'))
+        except Exception:
+            pass
+        logger.info("Server starting...")
+        await session_manager.open()
+        yield
+        # #212: graceful shutdown — also evict stale sessions via cleanup_old
+        logger.info("Server shutting down...")
+        session_manager.cleanup_old()
+        await session_manager.shutdown()
+    except Exception as e:
+        logger.exception(f"Lifespan startup error: {e}")
+        raise
 
 
 # WS-003: CORS — only localhost origins may browse the API; cross-origin reads
@@ -80,20 +81,34 @@ app = FastAPI(
             allow_headers=["Content-Type"],
             allow_credentials=False,
         ),
-        Middleware(_add_security_headers),
     ],
 )
+
+
+@app.middleware("http")
+async def _add_security_headers(request: Request, call_next):
+    """Add CSP + X-Frame-Options + no-sniff on every response. (#WS-027/#WS-028)"""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = CSP_HEADER
+    response.headers["X-Frame-Options"] = XFO_HEADER
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 
 @app.get("/")
 async def index():
+    ensure_session()
     from fastapi.responses import FileResponse
     return FileResponse("web/static/index.html")
 
 
 @app.post("/api/chat")
 async def chat_api(body: dict):
+    ensure_session()
     session_id = body.get("session_id", "default")
     message = body.get("message", "")
     if not message.strip():
