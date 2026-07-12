@@ -82,6 +82,7 @@ class CliController:
                 logger.error(f"Error in state {a.state}: {e}", exc_info=True)
                 if a.ui:
                     a.ui.display.print_error(str(e))
+                a._reset_react()
                 time.sleep(1)
                 a.state = AgentState.IDLE
         self._on_shutdown()

@@ -10,7 +10,7 @@ FACT|分类|关键词|值|置信度|重要性|fact_type
   0.3~0.6 = 短期（如本周计划、当前项目）
   0.6~0.8 = 长期（如爱好、偏好、习惯）
   0.8~1.0 = 永久（如名字、身份、核心价值观）
-fact_type: 固定填 user_fact
+fact_type: user_fact（当前仅支持用户事实）
 
 === 重要：只提取用户说的关于自己的信息 ===
 以下内容**不算用户事实，不要提取**：
@@ -160,3 +160,13 @@ MEMORY_RERANK_PROMPT = """用户说: "{query}"
 
 相关序号：
 """
+
+
+def safe_format(template: str, **kwargs) -> str:
+    """Format a template with KeyError protection. Returns template unmodified on failure."""
+    try:
+        return template.format(**kwargs)
+    except (KeyError, IndexError, ValueError) as e:
+        import logging
+        logging.getLogger(__name__).warning(f"safe_format failed: {e}")
+        return template

@@ -48,6 +48,7 @@ class Config:
     max_facts: int = 200
     max_experiences: int = 100
     max_reflections: int = 50
+    max_tool_iterations: int = 5  # #152: ReAct loop max tool call iterations
     web_host: str = "0.0.0.0"
     web_port: int = 8000
     log_level: str = "INFO"
@@ -90,6 +91,7 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         "AI_FRIEND_LOG_LEVEL": "log_level",
         "AI_FRIEND_TEMPERATURE": "temperature",
         "AI_FRIEND_MAX_TOKENS": "max_tokens",
+        "AI_FRIEND_MAX_TOOL_ITERATIONS": "max_tool_iterations",
         "AI_FRIEND_TIMEOUT": "api_timeout",
         "AI_FRIEND_TYPING_SPEED": "typing_speed",
         "AI_FRIEND_WEB_HOST": "web_host",

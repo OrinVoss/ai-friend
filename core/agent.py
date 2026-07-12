@@ -77,7 +77,7 @@ class Agent:
         self._prompt_shown: bool = False
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
-        self._max_tool_iterations: int = 10
+        self._max_tool_iterations: int = getattr(config, 'max_tool_iterations', 5)
         self._tool_registry: ToolRegistry = ToolRegistry()
         self._tool_calls_pending: list = []
 
@@ -190,17 +190,17 @@ class Agent:
         if final_text:
             if add_to_history:
                 self.short_term.add_turn("assistant", final_text)
-            # #130: detect stage directions in assistant response → mark as tool_claim
-            is_claim = any(
-                final_text.strip().startswith(p)
-                for p in ['（调用', '(调用', '（前奏', '(前奏', '（搜索', '(搜索']
-            )
-            self.ltm.repo.insert_turn_sync(
-                self.turn_count, "assistant", final_text,
-                str(self.personality.emotion.to_dict()),
-                is_tool_claim=is_claim,
-            )
-            self.turn_count += 1
+                # #130: detect stage directions in assistant response → mark as tool_claim
+                is_claim = any(
+                    final_text.strip().startswith(p)
+                    for p in ['（调用', '(调用', '（前奏', '(前奏', '（搜索', '(搜索']
+                )
+                self.ltm.repo.insert_turn_sync(
+                    self.turn_count, "assistant", final_text,
+                    str(self.personality.emotion.to_dict()),
+                    is_tool_claim=is_claim,
+                )
+                self.turn_count += 1
 
         if not skip_post_process:
             self._process_emotion()

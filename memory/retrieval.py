@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 
 from models.conversation import MemoryContext
+from prompts.templates import safe_format
 from models.memory import UserFact
 from memory.long_term import LongTermMemory
 
@@ -235,7 +236,7 @@ class MemoryRetriever:
         for i, f in enumerate(candidates[:30]):
             candidate_lines.append(f"{i}. [{f.category}] {f.fact_key}: {f.fact_value}")
 
-        prompt = MEMORY_RERANK_PROMPT.format(
+        prompt = safe_format(MEMORY_RERANK_PROMPT, 
             query=query,
             candidates="\n".join(candidate_lines),
         )

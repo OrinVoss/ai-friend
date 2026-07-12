@@ -3,6 +3,8 @@ import logging
 import re
 from typing import Optional
 
+from prompts.templates import safe_format
+
 from memory.long_term import LongTermMemory
 from memory.short_term import ConversationBuffer
 from core.personality import Personality
@@ -131,7 +133,7 @@ class MemoryConsolidator:
         #200: on failure, returns (0.0, False, 0.5) — safe neutral fallback
         that skips intimacy updates in _update_relationship."""
         try:
-            prompt = EMOTION_ANALYSIS_PROMPT.format(text=text)
+            prompt = safe_format(EMOTION_ANALYSIS_PROMPT, text=text)
             result = self.llm(prompt, temperature=0.2)
             # TM-005: LLM may wrap JSON in markdown code fences; extract first
             # valid JSON object before passing to json.loads.
@@ -150,7 +152,7 @@ class MemoryConsolidator:
 
     def _extract_facts(self, turn_text: str) -> None:
         try:
-            prompt = FACT_EXTRACTION_PROMPT.format(text=turn_text)
+            prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
             result = self.llm(prompt, temperature=0.2)
             new_facts = []
             for line in result.strip().split("\n"):
@@ -203,7 +205,7 @@ class MemoryConsolidator:
     def _summarize_experience(self, turn_text: str,
                                short_term: ConversationBuffer) -> None:
         try:
-            prompt = EXPERIENCE_SUMMARIZATION_PROMPT.format(text=turn_text)
+            prompt = safe_format(EXPERIENCE_SUMMARIZATION_PROMPT, text=turn_text)
             result = self.llm(prompt, temperature=0.3)
 
             summary = ""
@@ -258,7 +260,7 @@ class MemoryConsolidator:
             fact_text = "\n".join(
                 f"- {f.fact_key}: {f.fact_value}" for f in facts
             ) or "暂无"
-            prompt = REFLECTION_L2_PROMPT.format(facts=fact_text, experiences=exp_text)
+            prompt = safe_format(REFLECTION_L2_PROMPT, facts=fact_text, experiences=exp_text)
             result = self.llm(prompt, temperature=0.4)
             content = ""
             significance = 0.5
@@ -296,7 +298,7 @@ class MemoryConsolidator:
                 f"- {f.fact_key}: {f.fact_value}" for f in facts
             ) or "暂无"
             pat_text = "\n".join(f"- {r.content}" for r in patterns) or "暂无"
-            prompt = REFLECTION_L3_PROMPT.format(
+            prompt = safe_format(REFLECTION_L3_PROMPT, 
                 facts=fact_text, experiences=exp_text,
                 relationship=relationship,
                 current_emotion=personality.emotion.dominant_emotion,
@@ -341,7 +343,7 @@ class MemoryConsolidator:
                 f"- {f.fact_key}: {f.fact_value}" for f in facts
             ) or "暂无"
 
-            prompt = REFLECTION_PROMPT.format(
+            prompt = safe_format(REFLECTION_PROMPT, 
                 experiences=exp_text,
                 reflections=ref_text,
                 facts=fact_text,

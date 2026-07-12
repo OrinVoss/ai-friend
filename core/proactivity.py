@@ -92,24 +92,26 @@ class ProactivityManager:
         return random.choice(topics)
 
     def check_rate_limit(self, action: str) -> bool:
-        """Check rate limits. explore: max 1/hr, chat: max 2/hr."""
+        """Check rate limits (read-only, does not update timestamps)."""
         now = time.time()
         if action == "explore":
             if now - self._last_explore_time < 3600:
                 logger.debug(f"[rate] explore blocked: {now - self._last_explore_time:.0f}s since last")
                 return False
-            self._last_explore_time = now
-            logger.info("[rate] explore allowed")
             return True
         elif action == "chat":
             if self._last_chat_time == 0:
-                self._last_chat_time = now
-                logger.info("[rate] chat allowed (first)")
                 return True
             if now - self._last_chat_time < 1800:
                 logger.debug(f"[rate] chat blocked: {now - self._last_chat_time:.0f}s since last")
                 return False
-            self._last_chat_time = now
-            logger.info("[rate] chat allowed")
             return True
         return True
+
+    def record_rate_limit(self, action: str) -> None:
+        """Record that an action was actually sent (updates timestamp)."""
+        now = time.time()
+        if action == "explore":
+            self._last_explore_time = now
+        elif action == "chat":
+            self._last_chat_time = now

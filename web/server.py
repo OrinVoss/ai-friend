@@ -282,6 +282,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                     response = None
                 if response:
                     ag.last_activity_time = time.time()
+                    ag._proactive.record_rate_limit(intent.action)
                     cooldown = 12
                     await _send_segments(active_ws, agent, response, agent.emotion)
             await asyncio.sleep(15)

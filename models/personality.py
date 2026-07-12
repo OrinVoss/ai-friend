@@ -289,7 +289,15 @@ class EmotionalState:
         }
         self.emotion_events.append(event)
         logger.info(f"[emotion] event: {dom} intensity={primary_intensity:.2f} trigger={trigger[:60]}")
-        # PS-013: deque(maxlen=MAX_EMOTION_EVENTS) handles truncation automatically
+        # #105: protect dream events from being evicted by non-dream events
+        if len(self.emotion_events) > MAX_EMOTION_EVENTS:
+            if "梦" in trigger and any("梦" not in e.get("trigger", "") for e in self.emotion_events):
+                for i, e in enumerate(self.emotion_events):
+                    if "梦" not in e.get("trigger", ""):
+                        self.emotion_events.pop(i)
+                        break
+            else:
+                self.emotion_events.pop(0)
 
     def get_recent_emotion_events(self, limit: int = 3, unresolved_only: bool = True) -> list[dict]:
         """Get recent emotion events for prompt injection."""

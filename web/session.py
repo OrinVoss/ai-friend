@@ -287,3 +287,9 @@ class SessionManager:
             except Exception as e:
                 logger.warning(f"[session] close shared embed engine failed: {e}")
             self._shared_embed_engine = None
+        # #27: close database connection
+        if self.db is not None:
+            try:
+                await self.db.close()
+            except Exception as e:
+                logger.warning(f"[session] close db failed: {e}")

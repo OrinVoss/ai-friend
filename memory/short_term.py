@@ -9,6 +9,8 @@ from models.conversation import Turn
 
 logger = logging.getLogger(__name__)
 
+MAX_TURN_LENGTH = 10000  # #176: max chars per turn (~2.5k-5k tokens)
+
 
 @dataclass
 class ConversationBuffer:
@@ -23,6 +25,10 @@ class ConversationBuffer:
 
     def add_turn(self, role: str, content: str,
                  metadata: Optional[dict] = None) -> Turn:
+        # #176: truncate oversized turns
+        if len(content) > MAX_TURN_LENGTH:
+            logger.warning(f"[mem] turn too long ({len(content)} chars), truncating to {MAX_TURN_LENGTH}")
+            content = content[:MAX_TURN_LENGTH] + "\n...[内容过长，已截断]"
         with self._lock:  # #245: lock before Turn construction for atomic ID+append
             turn = Turn(
                 turn_id=self._next_id,

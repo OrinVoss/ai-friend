@@ -36,7 +36,7 @@ class Tool:
     def parameters_schema(self) -> dict:
         raise NotImplementedError
 
-    async def execute(self, args: dict[str, Any]) -> ToolResult:
+    def execute(self, args: dict[str, Any]) -> ToolResult:
         raise NotImplementedError
 
     def spec(self) -> ToolSpec:

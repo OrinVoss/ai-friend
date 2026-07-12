@@ -68,6 +68,11 @@ class MessageHandler:
         a = self.a
 
         if a._sleeping:
+            # #185: preserve user input even during sleep
+            a.short_term.add_turn("user", user_input, metadata={"sleep": True})
+            a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
+                                   str(a.personality.emotion.to_dict()))
+            a.turn_count += 1
             a.last_activity_time = time.time()
             return random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
 
