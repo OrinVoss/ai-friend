@@ -243,9 +243,9 @@ body {
     height: 18px;
 }
 
-.panel-expand {
+.panel-expand-bar {
     position: absolute;
-    top: 12px;
+    top: 76px;
     width: 22px;
     height: 48px;
     display: none;
@@ -259,25 +259,25 @@ body {
     transition: background 0.15s, color 0.15s;
 }
 
-.panel-expand:hover {
+.panel-expand-bar:hover {
     background: var(--border-color);
     color: var(--accent-link);
 }
 
-.panel-expand svg {
+.panel-expand-bar svg {
     width: 16px;
     height: 16px;
 }
 
-.status-panel .panel-expand {
-    right: 0;
-    border-left: 1px solid var(--border-color);
+.status-expand {
+    left: 0;
+    border-right: 1px solid var(--border-color);
     border-radius: 0 10px 10px 0;
 }
 
-.logs-panel .panel-expand {
-    left: 0;
-    border-right: 1px solid var(--border-color);
+.logs-expand {
+    right: 0;
+    border-left: 1px solid var(--border-color);
     border-radius: 10px 0 0 10px;
 }
 
@@ -806,28 +806,15 @@ body {
 
 @media (min-width: 901px) {
     .side-panel.collapsed {
-        width: 28px;
-        overflow: hidden;
-        background: transparent;
-        border-right: none;
-        border-left: none;
+        display: none;
     }
 
-    .logs-panel.collapsed {
-        border-left: none;
-    }
-
-    .status-panel.collapsed {
-        border-right: none;
-    }
-
-    .side-panel.collapsed .panel-expand {
+    .side-panel.status-panel.collapsed + .status-expand {
         display: flex;
     }
 
-    .side-panel.collapsed .panel-header,
-    .side-panel.collapsed .panel-body {
-        display: none;
+    .side-panel.logs-panel.collapsed ~ .logs-expand {
+        display: flex;
     }
 
     .panel-collapse {

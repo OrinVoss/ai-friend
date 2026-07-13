@@ -523,7 +523,7 @@ function setupUI() {
         });
     });
 
-    document.querySelectorAll('.panel-expand').forEach(function(btn) {
+    document.querySelectorAll('.panel-expand-bar').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var panel = btn.getAttribute('data-panel');
             togglePanel(panel);
