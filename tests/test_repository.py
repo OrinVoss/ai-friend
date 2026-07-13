@@ -124,5 +124,79 @@ class TestRepositoryFacts(unittest.TestCase):
         self.assertEqual(len(results), 0)
 
 
+class TestRepositoryRelationship(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.db = Database(":memory:")
+        asyncio.run(cls.db.open())
+
+    def setUp(self):
+        self.repo = Repository(self.db)
+        self.repo.session_id = "sess_x"
+        async def _clean():
+            async with self.db.cursor() as c:
+                await c.execute("DELETE FROM relationship_metrics")
+                await c.execute("DELETE FROM relationship_snapshots")
+        asyncio.run(_clean())
+
+    def test_ensure_relationship_defaults_seeds_four_dimensions(self):
+        asyncio.run(self.repo.ensure_relationship_defaults())
+        rels = asyncio.run(self.repo.get_all_relationships())
+        self.assertEqual(set(rels.keys()), {"trust", "familiarity", "intimacy", "playfulness"})
+        for v in rels.values():
+            self.assertEqual(v, 0.3)
+
+    def test_upsert_relationship_inserts_and_updates(self):
+        asyncio.run(self.repo.upsert_relationship("trust", 0.55))
+        rels = asyncio.run(self.repo.get_all_relationships())
+        self.assertEqual(rels["trust"], 0.55)
+        asyncio.run(self.repo.upsert_relationship("trust", 0.77))
+        rels = asyncio.run(self.repo.get_all_relationships())
+        self.assertEqual(rels["trust"], 0.77)
+
+    def test_relationship_isolated_by_session(self):
+        asyncio.run(self.repo.upsert_relationship("trust", 0.9))
+        other = Repository(self.db)
+        other.session_id = "sess_y"
+        rels = asyncio.run(other.get_all_relationships())
+        self.assertEqual(rels, {})
+
+    def test_relationship_snapshot_created(self):
+        asyncio.run(self.repo.upsert_relationship("familiarity", 0.6))
+        history = asyncio.run(self.repo.get_relationship_history(days=7))
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["dimension"], "familiarity")
+        self.assertEqual(history[0]["value"], 0.6)
+
+
+class TestRepositorySessionRole(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.db = Database(":memory:")
+        asyncio.run(cls.db.open())
+
+    def setUp(self):
+        self.repo = Repository(self.db)
+        async def _clean():
+            async with self.db.cursor() as c:
+                await c.execute("DELETE FROM session_roles")
+        asyncio.run(_clean())
+
+    def test_set_and_get_role_for_session(self):
+        asyncio.run(self.repo.set_session_role("sess_1", "小星"))
+        role = asyncio.run(self.repo.get_role_for_session("sess_1"))
+        self.assertEqual(role, "小星")
+
+    def test_get_role_for_session_missing(self):
+        role = asyncio.run(self.repo.get_role_for_session("sess_unknown"))
+        self.assertIsNone(role)
+
+    def test_set_session_role_updates(self):
+        asyncio.run(self.repo.set_session_role("sess_1", "小星"))
+        asyncio.run(self.repo.set_session_role("sess_1", "default"))
+        role = asyncio.run(self.repo.get_role_for_session("sess_1"))
+        self.assertEqual(role, "default")
+
+
 if __name__ == "__main__":
     unittest.main()

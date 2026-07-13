@@ -25,132 +25,27 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9740189682917617,
-    "arousal": 0.893870572700544,
-    "baseline_valence": 0.48386406073334476,
-    "baseline_arousal": 0.7867131834959408,
+    "valence": 0.9754366299783522,
+    "arousal": 0.9083209916133119,
+    "baseline_valence": 0.5113723680999475,
+    "baseline_arousal": 0.6786357096063077,
     "decay_rate": 0.05,
     "mood_valence": 1.0,
-    "mood_arousal": 0.9895000000000002,
+    "mood_arousal": 1.0,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.8674749069925268,
-    "trust": 0.9466162329206574,
-    "fear": 0.01967382133709049,
-    "surprise": 0.18594929747572714,
-    "sadness": 0.01234855821496636,
-    "anticipation": 0.5389969476391572,
-    "anger": 0.012109695809286648,
-    "disgust": 0.10000000000001166,
+    "joy": 0.42992641128066994,
+    "trust": 0.9172154670157808,
+    "fear": 0.02002408170257773,
+    "surprise": 0.11050978762394359,
+    "sadness": 0.0962129044163407,
+    "anticipation": 0.25614415389735534,
+    "anger": 0.043966671644754485,
+    "disgust": 0.10000000000000335,
     "resentment": 0.0009822714738483844,
     "emotion_events": [
-      {
-        "timestamp": 1781360966.477332,
-        "trigger": "切",
-        "primary_emotion": "trusting",
-        "intensity": 0.9412744183006467,
-        "context": "切"
-      },
-      {
-        "timestamp": 1781360981.984162,
-        "trigger": "切",
-        "primary_emotion": "trusting",
-        "intensity": 0.9415521724627629,
-        "context": "切"
-      },
-      {
-        "timestamp": 1781361556.1501205,
-        "trigger": "测试",
-        "primary_emotion": "trusting",
-        "intensity": 0.9420401712843582,
-        "context": "测试"
-      },
-      {
-        "timestamp": 1781362088.6947584,
-        "trigger": "切",
-        "primary_emotion": "trusting",
-        "intensity": 0.9426314127762572,
-        "context": "切"
-      },
-      {
-        "timestamp": 1783845115.0677652,
-        "trigger": "你好",
-        "primary_emotion": "trusting",
-        "intensity": 0.9445992513936208,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1783845437.4590185,
-        "trigger": "你猜",
-        "primary_emotion": "trusting",
-        "intensity": 0.9448202862765189,
-        "context": "你猜"
-      },
-      {
-        "timestamp": 1783845487.6324866,
-        "trigger": "列出当前目录有哪些文件",
-        "primary_emotion": "trusting",
-        "intensity": 0.9449385436550627,
-        "context": "列出当前目录有哪些文件"
-      },
-      {
-        "timestamp": 1783845803.1078343,
-        "trigger": "帮我搜索项目中所有包含'Agent的Python文件",
-        "primary_emotion": "trusting",
-        "intensity": 0.9449916387961564,
-        "context": "帮我搜索项目中所有包含'Agent的Python文件"
-      },
-      {
-        "timestamp": 1783845850.7449028,
-        "trigger": "我搜索一下今天的新闻",
-        "primary_emotion": "trusting",
-        "intensity": 0.9450033549113154,
-        "context": "我搜索一下今天的新闻"
-      },
-      {
-        "timestamp": 1783845969.2212386,
-        "trigger": "当前目录的名称是什么",
-        "primary_emotion": "trusting",
-        "intensity": 0.9449890231256843,
-        "context": "当前目录的名称是什么"
-      },
-      {
-        "timestamp": 1783846017.1460996,
-        "trigger": "当前目录的名称是什么，列举目录",
-        "primary_emotion": "trusting",
-        "intensity": 0.9449586689847771,
-        "context": "当前目录的名称是什么，列举目录"
-      },
-      {
-        "timestamp": 1783846233.4573154,
-        "trigger": "笨蛋",
-        "primary_emotion": "trusting",
-        "intensity": 0.915540426988542,
-        "context": "笨蛋"
-      },
-      {
-        "timestamp": 1783846260.6511364,
-        "trigger": "笨蛋",
-        "primary_emotion": "trusting",
-        "intensity": 0.8692960180497179,
-        "context": "笨蛋"
-      },
-      {
-        "timestamp": 1783846471.665355,
-        "trigger": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗",
-        "primary_emotion": "trusting",
-        "intensity": 0.8444044979203026,
-        "context": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗"
-      },
-      {
-        "timestamp": 1783846795.7515717,
-        "trigger": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗",
-        "primary_emotion": "trusting",
-        "intensity": 0.8305376252705466,
-        "context": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗"
-      },
       {
         "timestamp": 1783847106.9074674,
         "trigger": "你猜",
@@ -437,17 +332,122 @@
         "primary_emotion": "trusting",
         "intensity": 0.9466162329206574,
         "context": "哈哈哈"
+      },
+      {
+        "timestamp": 1783943679.324145,
+        "trigger": "你是一个坏蛋。",
+        "primary_emotion": "trusting",
+        "intensity": 0.9132873614926156,
+        "context": "你是一个坏蛋。"
+      },
+      {
+        "timestamp": 1783943744.2220113,
+        "trigger": "你是一个坏蛋。",
+        "primary_emotion": "trusting",
+        "intensity": 0.8591881185841671,
+        "context": "你是一个坏蛋。"
+      },
+      {
+        "timestamp": 1783943757.237964,
+        "trigger": "你是一个坏蛋。",
+        "primary_emotion": "trusting",
+        "intensity": 0.8531960805329881,
+        "context": "你是一个坏蛋。"
+      },
+      {
+        "timestamp": 1783943768.595932,
+        "trigger": "你是一个坏蛋。",
+        "primary_emotion": "trusting",
+        "intensity": 0.7553874601233947,
+        "context": "你是一个坏蛋。"
+      },
+      {
+        "timestamp": 1783943812.2750368,
+        "trigger": "现在脑瘫复健医院也联网了吗，怎么康复期的病人都出来恶心人了",
+        "primary_emotion": "anxious",
+        "intensity": 0.7382532954696388,
+        "context": "现在脑瘫复健医院也联网了吗，怎么康复期的病人都出来恶心人了"
+      },
+      {
+        "timestamp": 1783943819.1551886,
+        "trigger": "看你这么凶，我的qq农场缺只狗，明天来上班",
+        "primary_emotion": "anxious",
+        "intensity": 0.7403032759795376,
+        "context": "看你这么凶，我的qq农场缺只狗，明天来上班"
+      },
+      {
+        "timestamp": 1783943843.3754432,
+        "trigger": "给你一毛钱   你擦一下那满嘴喷粪的坑吧",
+        "primary_emotion": "anxious",
+        "intensity": 0.6085484591139086,
+        "context": "给你一毛钱   你擦一下那满嘴喷粪的坑吧"
+      },
+      {
+        "timestamp": 1783943973.9865887,
+        "trigger": "我刚才说了什么？",
+        "primary_emotion": "neutral",
+        "intensity": 0.6201059211983149,
+        "context": "我刚才说了什么？"
+      },
+      {
+        "timestamp": 1783944779.3305216,
+        "trigger": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。",
+        "primary_emotion": "excited",
+        "intensity": 0.8473429635969935,
+        "context": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。"
+      },
+      {
+        "timestamp": 1783944804.3144243,
+        "trigger": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。",
+        "primary_emotion": "excited",
+        "intensity": 0.8890225728661301,
+        "context": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。"
+      },
+      {
+        "timestamp": 1783944839.476925,
+        "trigger": "哈哈哈哈",
+        "primary_emotion": "excited",
+        "intensity": 0.9047432830526871,
+        "context": "哈哈哈哈"
+      },
+      {
+        "timestamp": 1783945399.7763693,
+        "trigger": "在干嘛",
+        "primary_emotion": "excited",
+        "intensity": 0.8811562144104752,
+        "context": "在干嘛"
+      },
+      {
+        "timestamp": 1783945423.7788517,
+        "trigger": "音乐目录上有什么歌？",
+        "primary_emotion": "excited",
+        "intensity": 0.8662619013707965,
+        "context": "音乐目录上有什么歌？"
+      },
+      {
+        "timestamp": 1783945560.071759,
+        "trigger": "我要听音乐",
+        "primary_emotion": "trusting",
+        "intensity": 0.9278542753393161,
+        "context": "我要听音乐"
+      },
+      {
+        "timestamp": 1783945588.2068305,
+        "trigger": "音乐工具里面可以检索音乐目录里面的歌曲呀。",
+        "primary_emotion": "trusting",
+        "intensity": 0.9172154670157808,
+        "context": "音乐工具里面可以检索音乐目录里面的歌曲呀。"
       }
     ],
     "history": [
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
-      "trusting",
+      "anxious",
+      "anxious",
+      "neutral",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
       "trusting",
       "trusting"
     ],

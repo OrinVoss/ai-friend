@@ -268,7 +268,6 @@ class Repository:
     async def upsert_relationship(self, dimension: str, value: float) -> None:
         logger.info(f"[db] upsert_rel: {dimension}={value:.2f}")
         async with self.db.cursor() as c:
-            await c.execute("BEGIN")
             await c.execute("""
                 INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
                 VALUES (?, ?, CURRENT_TIMESTAMP, ?)

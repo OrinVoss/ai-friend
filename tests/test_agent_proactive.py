@@ -120,6 +120,56 @@ class TestAgentProactive(unittest.TestCase):
         result = self.agent.process_explore()
         self.assertIsNone(result)
 
+    def test_sleep_state_file_uses_session_id(self):
+        """Agent should namespace sleep state file by session_id."""
+        self.assertEqual(self.agent._sleep._session_id, "default")
+        self.assertTrue(
+            self.agent._sleep._sleep_state_file.endswith(".sleep_state.default")
+        )
+
+
+class TestAgentSessionId(unittest.TestCase):
+    """Test that Agent accepts and uses explicit session_id."""
+
+    def setUp(self):
+        from core.agent import Agent
+        from config import Config
+
+        self.cfg = Config()
+        self.cfg.max_tokens = 512
+        self.cfg.personality_file = "personality.json"
+        self.cfg.db_path = ":memory:"
+
+        personality = MagicMock()
+        personality.config.name = "TestBot"
+        personality.config.interests = []
+        personality.config.traits = []
+        personality.emotion.dominant_emotion = "neutral"
+        personality.emotion.valence = 0.4
+        personality.emotion.arousal = 0.5
+        personality.emotion.anger = 0.0
+        personality.emotion.sadness = 0.0
+        personality.emotion.disgust = 0.0
+        personality.emotion.resentment = 0.0
+        personality.emotion.emotion_events = []
+
+        self.agent = Agent(
+            personality=personality,
+            provider=MagicMock(),
+            ltm=MagicMock(),
+            retriever=MagicMock(),
+            consolidator=MagicMock(),
+            short_term=MagicMock(),
+            config=self.cfg,
+            session_id="小星",
+        )
+
+    def test_sleep_state_file_uses_custom_session_id(self):
+        self.assertEqual(self.agent._sleep._session_id, "小星")
+        self.assertTrue(
+            self.agent._sleep._sleep_state_file.endswith(".sleep_state.小星")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

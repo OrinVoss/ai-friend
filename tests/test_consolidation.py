@@ -115,5 +115,54 @@ class TestConsolidationFactChecker(unittest.TestCase):
         self.assertEqual(len(self.consolidator._seen_ids), 0)
 
 
+class TestConsolidationRelationship(unittest.TestCase):
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+        self.consolidator = MemoryConsolidator(self.ltm, self.llm)
+
+    def test_update_relationship_updates_all_dimensions(self):
+        """_update_relationship should update familiarity and at least one other dimension."""
+        from models.conversation import Turn
+        turn = Turn(turn_id=1, role="user", content="你好呀")
+        self.consolidator._pending_buffer = [turn]
+        self.consolidator.analyze_sentiment = MagicMock(return_value=(0.5, True, 0.6))
+        self.ltm.get_relationship.return_value = {
+            "familiarity": 0.3, "trust": 0.3, "intimacy": 0.3, "playfulness": 0.3,
+        }
+
+        personality = MagicMock()
+        personality.emotion.dominant_emotion = "joyful"
+        self.consolidator._update_relationship(personality)
+
+        calls = {c.args[0]: c.args[1] for c in self.ltm.update_relationship.call_args_list}
+        # familiarity always increases
+        self.assertAlmostEqual(calls.get("familiarity"), 0.32, places=6)
+        # joy emotion should increase playfulness
+        self.assertAlmostEqual(calls.get("playfulness"), 0.32, places=6)
+        # personal_sharing=True should increase intimacy
+        self.assertAlmostEqual(calls.get("intimacy"), 0.33, places=6)
+        # positive sentiment should increase trust
+        self.assertAlmostEqual(calls.get("trust"), 0.325, places=6)
+
+    def test_update_relationship_negative_emotion_erodes_trust(self):
+        """Negative dominant emotion should decrease trust."""
+        from models.conversation import Turn
+        turn = Turn(turn_id=1, role="user", content="讨厌")
+        self.consolidator._pending_buffer = [turn]
+        self.consolidator.analyze_sentiment = MagicMock(return_value=(-0.3, False, 0.5))
+        self.ltm.get_relationship.return_value = {
+            "familiarity": 0.5, "trust": 0.5, "intimacy": 0.5, "playfulness": 0.5,
+        }
+
+        personality = MagicMock()
+        personality.emotion.dominant_emotion = "angry"
+        self.consolidator._update_relationship(personality)
+
+        self.ltm.update_relationship.assert_any_call("trust", 0.48)
+        self.ltm.update_relationship.assert_any_call("playfulness", 0.48)
+
+
 if __name__ == "__main__":
     unittest.main()
