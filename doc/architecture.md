@@ -171,7 +171,7 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆表已按 `session_id` 隔离，包括 `user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`。`session_roles` 表额外记录 `session_id → role_id` 映射，实现「一个 session 一个角色实例」。
+长期记忆表已按 `session_id` 隔离，包括 `user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离：`session_roles` 表记录 `session_id → role_id` 的一一映射，实现「一个角色一份记忆」。
 
 ---
 

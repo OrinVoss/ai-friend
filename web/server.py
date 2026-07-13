@@ -454,6 +454,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 session_manager.register_proactive(session_id, task, websocket)
                 await websocket.send_text(json.dumps({
                     "type": "init_ok", "session_id": session_id,
+                    "role_id": agent.role_id,
                     "emotion": agent.emotion,
                     "name": agent.personality.config.name,
                 }, ensure_ascii=False))

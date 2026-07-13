@@ -182,7 +182,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 
 - **上下文压缩** — 180K 上下文 80% 阈值自动压缩，有递归保护
 - **token 动态调整** — max_tokens 随情绪变化（excited 768, neutral 512, sad 256）
-- **会话管理** — 角色与 session 一一绑定：一个 session 对应一个角色实例，拥有独立情绪、记忆、关系指标和睡眠状态。Web 前端支持角色选择与同角色下多 session 切换。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
+- **会话管理** — 角色与 session 严格一一对应：`session_id = role_id`。一个角色只有一份记忆、一种情绪、一组关系指标、一个睡眠状态，实现角色级持久化。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
 - **环境变量安全** — API Key 支持 `DEEPSEEK_API_KEY` 环境变量，优先级高于 config.json
 - **Provider 抽象层** — `LLMProvider(ABC)` 抽象基类，`DeepSeekProvider` 为默认实现，便于切换多模型
 - **REST API 类型安全** — 使用 Pydantic 模型校验请求/响应，自动返回 422 错误
@@ -269,7 +269,7 @@ python web_main.py
 ```
 
 - 新增角色：在 `personalities/` 下新建 `{role_id}.json`（可从 `default.json` 复制修改）。
-- 切换角色：Web 端顶部「切换」按钮选择角色，再选择/新建 session。
+- 切换角色：Web 端顶部「切换」按钮选择角色；每个角色只有一个 session，直接进入对应记忆。
 
 `emotional_state` 由系统自动维护，包含：
 - VAD 维度（valence/arousal）+ 8 Plutchik 情绪 + baseline + mood

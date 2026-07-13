@@ -300,11 +300,8 @@ class Repository:
             return row["role_id"] if row else None
 
     async def get_sessions_by_role(self, role_id: str) -> list[str]:
-        async with self.db.cursor() as c:
-            await c.execute("""
-                SELECT session_id FROM session_roles WHERE role_id = ? ORDER BY created_at DESC
-            """, (role_id,))
-            return [r["session_id"] for r in await c.fetchall()]
+        """一个角色只对应一个 session，session_id 即 role_id。"""
+        return [role_id]
 
     # ── Conversation Turns ──
 

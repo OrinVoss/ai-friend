@@ -253,6 +253,60 @@ class Database:
                 )
                 logger.info(f"[db] migrated default session to role={legacy_role}")
 
+            # #SR-002: enforce one role = one session. For each role, keep the
+            # old session with the most conversation turns as the canonical data
+            # and move it to session_id = role_id; discard data from stale sessions.
+            async def _move_session_data(old_sid: str, rid: str) -> None:
+                tables = [
+                    "user_facts", "experiences", "reflections",
+                    "conversation_turns", "relationship_snapshots",
+                ]
+                for table in tables:
+                    await c.execute(f"UPDATE {table} SET session_id = ? WHERE session_id = ?", (rid, old_sid))
+                # relationship_metrics has a composite PK (session_id, dimension);
+                # delete any pre-existing target rows before merging to avoid conflict.
+                await c.execute("DELETE FROM relationship_metrics WHERE session_id = ?", (rid,))
+                await c.execute("UPDATE relationship_metrics SET session_id = ? WHERE session_id = ?", (rid, old_sid))
+
+            await c.execute("SELECT session_id, role_id FROM session_roles WHERE session_id != role_id")
+            rows = await c.fetchall()
+            from collections import defaultdict
+            by_role: dict[str, list[str]] = defaultdict(list)
+            for old_sid, rid in rows:
+                by_role[rid].append(old_sid)
+
+            for rid, old_sids in by_role.items():
+                # Prefer an old session whose id already equals the role id.
+                if rid in old_sids:
+                    canonical = rid
+                    others = [s for s in old_sids if s != rid]
+                else:
+                    counts = {}
+                    for s in old_sids:
+                        await c.execute("SELECT COUNT(*) FROM conversation_turns WHERE session_id = ?", (s,))
+                        counts[s] = (await c.fetchone())[0]
+                    canonical = max(counts, key=counts.get)
+                    others = [s for s in old_sids if s != canonical]
+
+                logger.warning(f"[db] merging canonical session {canonical} into role session {rid}")
+                await _move_session_data(canonical, rid)
+                # Update or insert the canonical session_roles row.
+                await c.execute("SELECT 1 FROM session_roles WHERE session_id = ?", (rid,))
+                if await c.fetchone():
+                    await c.execute("DELETE FROM session_roles WHERE session_id = ?", (canonical,))
+                else:
+                    await c.execute(
+                        "UPDATE session_roles SET session_id = ? WHERE session_id = ?",
+                        (rid, canonical),
+                    )
+                # Drop stale sessions for the same role.
+                for stale in others:
+                    logger.warning(f"[db] dropping stale session {stale} for role {rid}")
+                    for table in ["user_facts", "experiences", "reflections", "conversation_turns", "relationship_snapshots"]:
+                        await c.execute(f"DELETE FROM {table} WHERE session_id = ?", (stale,))
+                    await c.execute("DELETE FROM relationship_metrics WHERE session_id = ?", (stale,))
+                    await c.execute("DELETE FROM session_roles WHERE session_id = ?", (stale,))
+
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
             # current schema version (1 = baseline with session_id columns) so

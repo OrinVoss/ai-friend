@@ -260,7 +260,14 @@ class SessionManager:
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:
         with self._lock:
-            sid = session_id or uuid.uuid4().hex[:12]
+            # 一个角色只有一个 session：session_id 与 role_id 保持一致
+            if role_id:
+                sid = role_id
+            elif session_id:
+                sid = session_id
+            else:
+                sid = "default"
+
             if sid in self._sessions:
                 logger.debug(f"[session] restore: {sid}")
                 return sid, self._sessions[sid]

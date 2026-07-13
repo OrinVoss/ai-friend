@@ -391,7 +391,9 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 }
 ```
 
-### 3.8 `GET /api/sessions` — 列出某角色的历史 session
+### 3.8 `GET /api/sessions` — 获取某角色的唯一 session
+
+当前架构下一个角色只对应一个 session，因此返回的 sessions 数组固定为 `[role_id]`。
 
 **Query Parameters**:
 
@@ -404,7 +406,7 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 ```json
 {
   "role_id": "小星",
-  "sessions": ["default", "a1b2c3d4e5f6"]
+  "sessions": ["小星"]
 }
 ```
 
@@ -567,21 +569,20 @@ class SessionManager:
 首次打开页面
     │
     ├── 无 role_id cookie → 显示角色选择弹窗
-    ├── 选择角色 → GET /api/sessions?role_id=xxx → 显示 session 选择弹窗
-    ├── 选择已有 session 或新建 session
+    ├── 选择角色
     │
     ├── connect() → WebSocket /ws
-    ├── send {"type":"init", "role_id":"小星", "session_id":"xxx"}
+    ├── send {"type":"init", "role_id":"小星", "session_id":"小星"}
     │
     ├── 服务端按 role_id 加载 personalities/小星.json
-    ├── 创建/恢复 WebAgent（uuid4 hex[:12]）
+    ├── 创建/恢复 WebAgent（session_id = role_id）
     ├── 注册 proactive 后台任务
     └── 返回 session_id / role_id → 存入 cookie（max-age=86400）
         │
         页面刷新
             │
             ├── connect() → WebSocket /ws
-            ├── send {"type":"init", "role_id":"小星", "session_id":"xxx"}  ← 从 cookie 读取
+            ├── send {"type":"init", "role_id":"小星", "session_id":"小星"}  ← 从 cookie 读取
             │
             ├── 服务端恢复已有 session（内存池）
             ├── 旧 proactive 任务被 cancel

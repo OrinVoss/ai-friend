@@ -410,7 +410,7 @@ function sendMessage() {
     }
 }
 
-/* Role / session selection */
+/* Role selection */
 function showModal(id) {
     var el = document.getElementById(id);
     if (el) el.style.display = 'flex';
@@ -426,7 +426,6 @@ function openRoleModal() {
     if (!list) return;
     list.innerHTML = '<div class="system-message">加载中...</div>';
     showModal('role-modal');
-    hideModal('session-modal');
 
     fetch('/api/roles')
         .then(function(r) { return r.json(); })
@@ -449,70 +448,13 @@ function openRoleModal() {
         });
 }
 
-function openSessionModal(roleId, roleName) {
-    var list = document.getElementById('session-list');
-    if (!list) return;
-    list.innerHTML = '<div class="system-message">加载中...</div>';
-    showModal('session-modal');
-    hideModal('role-modal');
-
-    fetch('/api/sessions?role_id=' + encodeURIComponent(roleId))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            list.innerHTML = '';
-            var sessions = data.sessions || [];
-            if (sessions.length === 0) {
-                startNewSession(roleId, roleName);
-                return;
-            }
-            sessions.forEach(function(sid) {
-                var card = document.createElement('div');
-                card.className = 'session-card';
-                card.innerHTML = '<div class="avatar">' + (roleName ? roleName[0] : 'AI') + '</div><div class="name">' + escapeHtml(sid) + '</div>';
-                card.addEventListener('click', function() {
-                    selectSession(roleId, roleName, sid);
-                });
-                list.appendChild(card);
-            });
-            var newBtn = document.getElementById('new-session-btn');
-            if (newBtn) {
-                newBtn.onclick = function() { startNewSession(roleId, roleName); };
-            }
-        })
-        .catch(function(e) {
-            console.error('[sessions] load failed:', e);
-            list.innerHTML = '<div class="system-message">加载失败</div>';
-        });
-}
-
 function selectRole(id, name) {
     roleId = id;
     roleName = name || id;
-    setCookie('role_id', roleId);
-    updateHeaderRole(roleName);
-    openSessionModal(roleId, roleName);
-}
-
-function selectSession(rid, rname, sid) {
-    roleId = rid;
-    roleName = rname || rid;
-    sessionId = sid;
+    sessionId = id;  // 一个角色只有一个 session
     setCookie('role_id', roleId);
     setCookie('session_id', sessionId);
     updateHeaderRole(roleName);
-    hideModal('session-modal');
-    hideModal('role-modal');
-    disconnectAndReconnect();
-}
-
-function startNewSession(rid, rname) {
-    roleId = rid;
-    roleName = rname || rid;
-    sessionId = '';
-    setCookie('role_id', roleId);
-    clearCookie('session_id');
-    updateHeaderRole(roleName);
-    hideModal('session-modal');
     hideModal('role-modal');
     disconnectAndReconnect();
 }
@@ -622,9 +564,10 @@ function initApp() {
     connectLogs();
     if (!roleId) {
         openRoleModal();
-    } else if (!sessionId) {
-        openSessionModal(roleId, roleName);
     } else {
+        // 一个角色只有一个 session，session_id 必须与 role_id 一致
+        sessionId = roleId;
+        setCookie('session_id', sessionId);
         updateHeaderRole(roleName);
         connect();
     }
