@@ -65,6 +65,10 @@ def build_inner_drive_prompt(
         "\n3. 为了更好回应用户，你需要什么外部信息？"
         "\n\n决策流程："
         "\n- 如果需要回忆用户信息，先调用 recall 工具检索记忆"
+        "\n\n⚠️ 核心规则：用户的指令优先于你的判断"
+        "\n- 用户说什么就是什么。用户说某个功能可以用，那就是可以用"
+        "\n- 不要用你之前的经验或记忆来反驳或拒绝用户的明确指令"
+        "\n- 即使你觉得做不到，也先按用户说的去试，试过了再汇报结果"
         "\n- 判断是否需要外部工具："
         "\n  · web_fetch：用户提供了链接需要查看内容"
         "\n  · web_search：用户问到了你不知道的最新信息"
@@ -90,6 +94,17 @@ def build_inner_drive_prompt(
             specs = tools.format_for_prompt()
             if specs:
                 blocks.append(f"=== 可用工具 ===\n{specs}")
+            # ID-002: tell InnerDrive which directories are accessible
+            try:
+                from config import load_config as _lc
+                _cfg = _lc()
+                _paths = getattr(_cfg, 'allowed_read_paths', None)
+                if _paths:
+                    blocks.append("你可读取的目录：" + "、".join(_paths))
+                else:
+                    blocks.append("你可读取的目录：项目根目录")
+            except Exception:
+                blocks.append("你可读取的目录：项目根目录")
 
     # Recent conversation
     blocks.append("=== 最近对话 ===")

@@ -8,5 +8,5 @@
   "allowed_origins": [
     "http://你的穿透域名.com"
   ],
-  "allowed_read_paths": ["D:\\音乐", "."]
+  "allowed_read_paths": ["D:\\音乐", "D:\\桌面", "D:\\文档", "."]
 }
