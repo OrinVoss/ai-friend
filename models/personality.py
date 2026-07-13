@@ -299,9 +299,11 @@ class EmotionalState:
                 for i, e in enumerate(self.emotion_events):
                     if "梦" not in e.get("trigger", ""):
                         self.emotion_events.pop(i)
+                        logger.debug("[emotion] event evicted to protect dream event")
                         break
             else:
                 self.emotion_events.pop(0)
+                logger.debug("[emotion] oldest event evicted")
 
     def get_recent_emotion_events(self, limit: int = 3, unresolved_only: bool = True) -> list[dict]:
         """Get recent emotion events for prompt injection."""

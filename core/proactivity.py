@@ -95,6 +95,7 @@ class ProactivityManager:
         fresh = [t for t in topics if t not in self._recent_topics]
         chosen = random.choice(fresh) if fresh else topics[0]
         self._recent_topics.append(chosen)
+        logger.debug(f"[proactive] topic chosen={chosen[:40]} filtered={len(topics) - len(fresh)} recent={list(self._recent_topics)}")
         return chosen
 
     def check_rate_limit(self, action: str) -> bool:

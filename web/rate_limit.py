@@ -36,14 +36,19 @@ class RateLimiter:
         window = self._windows.setdefault(key, deque())
 
         # Drop timestamps outside the window
+        evicted = 0
         while window and window[0] < now - window_seconds:
             window.popleft()
+            evicted += 1
+        if evicted:
+            logger.debug(f"[rate_limit] evicted {evicted} expired timestamps for {key}")
 
         if len(window) >= max_requests:
-            logger.warning(f"[rate_limit] blocked {client_ip} on {path}")
+            logger.warning(f"[rate_limit] blocked {client_ip} on {path} window={len(window)}/{max_requests}")
             return False
 
         window.append(now)
+        logger.debug(f"[rate_limit] allowed {client_ip}:{path} window={len(window)}/{max_requests}")
         return True
 
     def check(self, client_ip: str, path: str) -> bool:
@@ -78,8 +83,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = get_client_ip(request)
         if not self.limiter.check(client_ip, path):
+            logger.warning(f"[rate_limit] middleware blocked {client_ip} {request.method} {path}")
             return JSONResponse(
                 status_code=429,
                 content={"error": "Too many requests. Please slow down."},
             )
+        logger.debug(f"[rate_limit] middleware allowed {client_ip} {request.method} {path}")
         return await call_next(request)

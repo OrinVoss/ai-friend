@@ -91,6 +91,10 @@ class FactChecker:
                     f"'{best_match.fact_key}': '{best_match.fact_value}' vs '{new_fact.fact_value}'"
                 )
                 return best_match
+            logger.debug(
+                f"[fact_check] no semantic contradiction: best_sim={best_sim:.2f} "
+                f"threshold={SIMILARITY_THRESHOLD}"
+            )
         except Exception as e:
             logger.debug(f"[fact_check] embedding comparison failed: {e}")
 
@@ -124,6 +128,11 @@ class FactChecker:
             logger.info(
                 f"[fact_check] keyword contradiction overlap={best_overlap:.2f}: "
                 f"'{best_match.fact_key}': '{best_match.fact_value}' vs '{new_fact.fact_value}'"
+            )
+        else:
+            logger.debug(
+                f"[fact_check] no keyword contradiction: best_overlap={best_overlap:.2f} "
+                f"threshold={KEYWORD_OVERLAP_THRESHOLD}"
             )
         return best_match
 

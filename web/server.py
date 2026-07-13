@@ -32,6 +32,7 @@ _ws_connections: list[dict] = []  # #158: track active WebSocket connections for
 def ensure_session():
     """Synchronous guard — call before first request if lifespan didn't run."""
     if session_manager.db is None:
+        logger.warning("[server] lifespan missed, synchronously opening session manager")
         import asyncio
         asyncio.run(session_manager.open())
 
@@ -487,6 +488,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 # RL-001: apply per-IP rate limit to WebSocket chat messages
                 client_ip = websocket.client.host if websocket.client else "unknown"
                 if not rate_limiter.is_allowed(client_ip, "/api/chat", 30, 60):
+                    logger.warning(f"[ws] rate limited message from {client_ip} session={session_id}")
                     await websocket.send_text(json.dumps({
                         "type": "error",
                         "content": "发送太频繁了，请稍后再试。",

@@ -376,14 +376,19 @@ def _sanitize_input(text: str) -> str:
     # Strip system role override attempts
     lines = text.split("\n")
     cleaned = []
+    removed_patterns = []
     for line in lines:
         stripped = line.strip()
         # Skip lines that attempt to override system role
         if stripped.lower() in ("system:", "assistant:", "user:", "from now on", "ignore previous"):
+            removed_patterns.append(stripped.lower())
             continue
         cleaned.append(line)
+    if removed_patterns:
+        logger.warning(f"[msg] sanitized injection pattern(s): {removed_patterns}")
     result = "\n".join(cleaned)
     # Limit input length to prevent token overflow attacks
     if len(result) > 10000:
+        logger.warning(f"[msg] input truncated {len(result)} -> 10000")
         result = result[:10000]
     return result

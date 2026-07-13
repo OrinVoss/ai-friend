@@ -159,11 +159,13 @@ class CliController:
                     while round_num < max_rounds and drive_result.needs_external_tools:
                         round_num += 1
                         tracker.round_number = round_num
+                        logger.info(f"[cli] agent2 round {round_num}/{max_rounds}")
                         request_text = (drive_result.tool_requests[0].description
                                        if drive_result.tool_requests else user_message)
                         # Use run_with_requests if multiple requests
                         if len(drive_result.tool_requests) > 1:
                             reqs = [r.description for r in drive_result.tool_requests]
+                            logger.info(f"[cli] agent2 multi-request: {len(reqs)} tools")
                             tool_result = self._tool_agent.run_with_requests(reqs)
                         else:
                             tool_result = self._tool_agent.run_with_request(request_text)
@@ -171,6 +173,7 @@ class CliController:
                         # In-round retries
                         while tracker.can_retry_in_round and not tool_result.any_success:
                             tracker.retry_count += 1
+                            logger.info(f"[cli] agent2 in-round retry {tracker.retry_count}")
                             tool_result = self._tool_agent.run_with_request(request_text)
                             tracker.total_attempts += 1
                         if tool_result and tool_result.has_results:
@@ -179,14 +182,17 @@ class CliController:
                         for r in all_tool_results:
                             combined += self._tool_agent.format_for_phase2(r) + "\n"
                         if tool_result and tool_result.any_success and round_num < max_rounds:
+                            logger.info(f"[cli] agent2 review after round {round_num}")
                             drive_result = self._inner_drive.review(
                                 user_message, combined,
                                 round_num=round_num, max_rounds=max_rounds,
                             )
                         elif tool_result and not tool_result.any_success:
                             if tracker.can_start_new_round:
+                                logger.info(f"[cli] agent2 re-decide after failures round={round_num}")
                                 drive_result = self._inner_drive.re_decide(user_message, tracker.failure_log)
                             else:
+                                logger.info("[cli] agent2 giving up after max retries")
                                 break
                         else:
                             break
@@ -194,6 +200,7 @@ class CliController:
                     merged = "\n".join(p for p in parts if p)
                     if merged:
                         self._tool_records = merged
+                        logger.info(f"[cli] agent2 merged {len(all_tool_results)} tool result(s)")
                 except Exception:
                     logger.exception("[cli] agent2 error, continuing with partial results")
 

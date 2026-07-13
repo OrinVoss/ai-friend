@@ -112,10 +112,12 @@ class WebAgent:
         """Save personality at most once every 30s to reduce disk writes. (#44)"""
         now = time.time()
         if now - getattr(self, '_last_save_time', 0.0) < 30:
+            logger.debug(f"[session] personality save debounced for {self.session_id}")
             return
         self._last_save_time = now
         try:
             self.personality.save(self.personality_path)
+            logger.info(f"[session] personality saved: {self.session_id} -> {self.personality_path}")
         except Exception as e:
             logger.warning(f"[session] save personality failed: {e}")
 

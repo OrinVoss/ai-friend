@@ -29,8 +29,8 @@ def kill_existing_llama() -> None:
             logger.info("[embed] killed existing llama-server process")
             # Give Windows a moment to release the port
             time.sleep(1)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"[embed] failed to kill existing llama-server: {e}")
 
 
 def _is_server_ready(endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> bool:

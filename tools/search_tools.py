@@ -35,6 +35,7 @@ def _cache_set(key: str, val: str) -> None:
     if len(_SEARCH_CACHE) >= _SEARCH_CACHE_MAX:
         oldest = min(_SEARCH_CACHE.items(), key=lambda kv: kv[1][0])
         _SEARCH_CACHE.pop(oldest[0], None)
+        logger.debug(f"[tool] search cache evicted oldest key={oldest[0]}")
     _SEARCH_CACHE[key] = (time.time(), val)
 
 # #150: regex timeout to prevent ReDoS

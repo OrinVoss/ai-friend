@@ -1,6 +1,9 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 # #258: canonical list of external tool names, shared across modules
 EXTERNAL_TOOL_NAMES = [
@@ -99,7 +102,12 @@ class ToolRegistry:
             return False
         if not tool.required_permissions:
             return True
-        return user_role in tool.required_permissions
+        allowed = user_role in tool.required_permissions
+        if not allowed:
+            logger.warning(
+                f"[tool] permission denied: {name} required={tool.required_permissions} role={user_role}"
+            )
+        return allowed
 
     def to_json_schema(self, names: list[str] | None = None) -> dict:
         """Generate JSON Schema for structured tool call output.
