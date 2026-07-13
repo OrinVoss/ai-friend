@@ -85,7 +85,7 @@ class GlobTool(Tool):
     def description(self) -> str:
         return (
             "用 glob 模式搜索文件。支持 ** 递归匹配。例如 '**/*.py' 找所有 Python 文件。\n"
-            "搜索范围：项目根目录、D:\\音乐、D:\\桌面、Documents、Downloads"
+            "搜索范围：项目根目录、以及 config.json 中 allowed_read_paths 配置的目录"
         )
 
     def parameters_schema(self) -> dict:
@@ -174,7 +174,7 @@ class GrepTool(Tool):
     def description(self) -> str:
         return (
             "用正则表达式搜索文件内容。支持 glob 过滤文件、上下文行数。\n"
-            "搜索范围：项目根目录、D:\\音乐、D:\\桌面、Documents、Downloads"
+            "搜索范围：项目根目录、以及 config.json 中 allowed_read_paths 配置的目录"
         )
 
     def parameters_schema(self) -> dict:

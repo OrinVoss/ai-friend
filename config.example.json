@@ -7,5 +7,6 @@
   "temperature": 0.8,
   "allowed_origins": [
     "http://你的穿透域名.com"
-  ]
+  ],
+  "allowed_read_paths": ["D:\\音乐", "."]
 }
