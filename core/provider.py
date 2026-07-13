@@ -10,6 +10,8 @@ from requests.adapters import HTTPAdapter
 
 logger = logging.getLogger(__name__)
 
+from core.monitor import record_call
+
 # PR-013: cap streamed response at 1 MB to prevent unbounded memory growth
 STREAM_MAX_BYTES = 1_048_576  # 1 MiB
 
@@ -94,7 +96,21 @@ class DeepSeekProvider(LLMProvider):
         last_error = None
         for attempt in range(3):
             try:
-                return self._do_request(chat_url, payload, stream, on_token)
+                t0 = time.monotonic()
+                resp_text = self._do_request(chat_url, payload, stream, on_token)
+                elapsed = (time.monotonic() - t0) * 1000
+                # MN-001: record every successful API call to the monitor buffer
+                record_call(
+                    model=self.model,
+                    messages=messages,
+                    response=resp_text,
+                    duration_ms=elapsed,
+                    max_tokens=max_tokens or self.max_tokens,
+                    temperature=self.temperature,
+                    response_format=response_format,
+                    source="",
+                )
+                return resp_text
             except requests.exceptions.ConnectionError as e:
                 last_error = e
                 wait = 2 ** attempt

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 调用监控</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', monospace; background: #0d1117; color: #c9d1d9; padding: 16px; font-size: 13px; }
+  h1 { font-size: 16px; margin-bottom: 12px; color: #58a6ff; display: flex; align-items: center; gap: 12px; }
+  h1 small { font-size: 12px; color: #8b949e; font-weight: normal; }
+  .controls { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .controls button:hover { background: #30363d; }
+  .controls .count { color: #8b949e; font-size: 12px; }
+  .card { border: 1px solid #30363d; border-radius: 6px; margin-bottom: 6px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; user-select: none; background: #161b22; }
+  .card-header:hover { background: #1c2128; }
+  .card-header .arrow { color: #484f58; transition: transform 0.15s; font-size: 10px; }
+  .card-header .arrow.open { transform: rotate(90deg); }
+  .card-header .time { color: #8b949e; font-size: 11px; min-width: 60px; }
+  .card-header .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #21262d; color: #58a6ff; }
+  .card-header .model { font-size: 10px; color: #8b949e; }
+  .card-header .duration { font-size: 11px; margin-left: auto; }
+  .card-header .tokens { font-size: 10px; color: #8b949e; min-width: 70px; text-align: right; }
+  .card-body { display: none; padding: 8px 10px; border-top: 1px solid #21262d; background: #0d1117; }
+  .card-body.open { display: block; }
+  .card-body h3 { font-size: 11px; color: #8b949e; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card-body h3:first-child { margin-top: 0; }
+  .card-body pre { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; color: #e6edf3; }
+  .card-body .meta { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 11px; margin-bottom: 6px; }
+  .card-body .meta dt { color: #8b949e; }
+  .card-body .meta dd { color: #e6edf3; }
+  .fast { color: #3fb950; }
+  .medium { color: #d29922; }
+  .slow { color: #f85149; }
+  .no-records { text-align: center; padding: 40px; color: #484f58; font-size: 14px; }
+  .status-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #161b22; border-top: 1px solid #30363d; padding: 4px 16px; font-size: 11px; color: #8b949e; display: flex; gap: 16px; }
+</style>
+</head>
+<body>
+
+<h1>
+  🤖 LLM API 调用监控
+  <small>记录每次发往 DeepSeek 的请求与响应</small>
+</h1>
+
+<div class="controls">
+  <button onclick="fetchData()">🔄 刷新</button>
+  <button onclick="autoRefresh=!autoRefresh; this.textContent=autoRefresh?'⏹ 停止自动':'▶ 自动刷新'">▶ 自动刷新</button>
+  <button onclick="clearData()">🗑 清空</button>
+  <span class="count" id="count">0 条记录</span>
+</div>
+
+<div id="list"><div class="no-records">等待数据...</div></div>
+<div class="status-bar">
+  <span id="status">就绪</span>
+  <span id="auto-status">自动刷新：关</span>
+</div>
+
+<script>
+let autoRefresh = false;
+let refreshTimer = null;
+
+function fmtDuration(ms) {
+  if (ms < 1000) return ms + 'ms';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+function clsDuration(ms) {
+  if (ms < 2000) return 'fast';
+  if (ms < 6000) return 'medium';
+  return 'slow';
+}
+
+function trunc(s, n) {
+  if (!s) return '';
+  return s.length > n ? s.slice(0, n) + '...' : s;
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderCard(rec) {
+  const durCls = clsDuration(rec.duration_ms);
+  const sysPreview = esc(trunc(rec.system_msg_preview || '', 150));
+  const usrPreview = esc(trunc(rec.user_msg_preview || '', 150));
+  const respPreview = esc(trunc(rec.response_preview || '', 500));
+  const fullResp = esc(rec.full_response || '');
+
+  // Try to pretty-print the response as JSON
+  let respDisplay = respPreview;
+  if (fullResp) {
+    try {
+      const parsed = JSON.parse(rec.full_response);
+      respDisplay = esc(JSON.stringify(parsed, null, 2));
+    } catch(e) {
+      respDisplay = fullResp ? esc(trunc(rec.full_response, 3000)) : respPreview;
+    }
+  }
+
+  return `
+    <div class="card">
+      <div class="card-header" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('.arrow').classList.toggle('open')">
+        <span class="arrow">▶</span>
+        <span class="time">${esc(rec.timestamp)}</span>
+        <span class="source">${esc(rec.source || '?')}</span>
+        <span class="model">${esc(rec.model)}</span>
+        <span class="duration ${durCls}">${fmtDuration(rec.duration_ms)}</span>
+        <span class="tokens">${rec.full_messages_count} 条消息 / ${rec.full_response?.length || 0} 字符</span>
+      </div>
+      <div class="card-body">
+        <div class="meta">
+          <dt>温度</dt><dd>${rec.temperature}</dd>
+          <dt>max_tokens</dt><dd>${rec.max_tokens}</dd>
+          <dt>response_format</dt><dd>${rec.response_format ? esc(JSON.stringify(rec.response_format)) : '(无)'}</dd>
+        </div>
+        <h3>📥 System 提示词（前 200 字）</h3>
+        <pre>${sysPreview || '(无)'}</pre>
+        <h3>📥 用户消息（前 200 字）</h3>
+        <pre>${usrPreview || '(无)'}</pre>
+        <h3>📤 AI 响应</h3>
+        <pre>${respDisplay || '(空)'}</pre>
+      </div>
+    </div>
+  `;
+}
+
+function fetchData() {
+  document.getElementById('status').textContent = '加载中...';
+  fetch('/api/monitor?limit=100')
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('list');
+      if (!data || data.length === 0) {
+        list.innerHTML = '<div class="no-records">暂无记录</div>';
+      } else {
+        list.innerHTML = data.map(renderCard).join('');
+      }
+      document.getElementById('count').textContent = (data?.length || 0) + ' 条记录';
+      document.getElementById('status').textContent = '就绪';
+    })
+    .catch(e => {
+      document.getElementById('list').innerHTML = '<div class="no-records">加载失败: ' + e.message + '</div>';
+      document.getElementById('status').textContent = '错误: ' + e.message;
+    });
+}
+
+function clearData() {
+  fetch('/api/monitor/clear').then(() => fetchData());
+  document.getElementById('status').textContent = '已清空';
+}
+
+function toggleAuto() {
+  autoRefresh = !autoRefresh;
+  if (autoRefresh) {
+    refreshTimer = setInterval(fetchData, 3000);
+  } else {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+// Initial load
+fetchData();
+</script>
+</body>
+</html>

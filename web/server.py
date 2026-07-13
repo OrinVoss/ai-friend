@@ -292,6 +292,30 @@ def _calc_delay(emotion: str, seg_len: int) -> float:
     return base * (1.0 + seg_len / 80) * random.uniform(0.8, 1.3)
 
 
+# ── LLM API 调用监控 ──
+
+
+@app.get("/api/monitor")
+async def monitor_api(limit: int = 50):
+    """Return recent LLM API call records as JSON."""
+    from core.monitor import get_monitor
+    return get_monitor().get_all(limit=limit)
+
+
+@app.get("/api/monitor/clear")
+async def monitor_clear():
+    """Clear the monitor buffer."""
+    from core.monitor import get_monitor
+    get_monitor().clear()
+    return {"status": "cleared"}
+
+
+@app.get("/monitor")
+async def monitor_page():
+    """Serve the monitor HTML page."""
+    return FileResponse("web/static/monitor.html")
+
+
 def _split_segments(text: str) -> list[str]:
     # Step 1: split on sentence-ending punctuation (handles trailing quotes/brackets)
     parts = re.split(r'(?<=[。！？.!?\n])(?:[」"''）]?\s*)(?=\S)', text)
