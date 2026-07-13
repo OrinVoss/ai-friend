@@ -253,8 +253,8 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
                     await _send_segments(active_ws, agent, msg, agent.emotion)
                     # Store sleep/wake message in history so it survives page refresh
-                    agent.short_term.add_turn("assistant", msg, metadata={"add_to_history": False})
-                    agent.ltm.repo.insert_turn_sync(agent.turn_count, "assistant", msg)
+                    agent.short_term.add_turn("assistant", msg, metadata={"source": "sleep"})
+                    await agent.ltm.repo.insert_turn(agent.turn_count, "assistant", msg)
                     if should_sleep:
                         await agent.generate_dream()
             else:
@@ -377,7 +377,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not session_id:
                     session_id = "default"
                 _, agent = session_manager.get_or_create(session_id)
-                agent.last_activity = time.time()
+                agent.last_activity_time = time.time()
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(None, agent.process_message, content)
                 await _send_segments(websocket, agent, response, agent.emotion)

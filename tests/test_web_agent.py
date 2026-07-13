@@ -85,13 +85,13 @@ class TestWebAgentProactive(unittest.TestCase):
         self.assertEqual(self.agent.calculate_proactivity(120.0), 0.42)
 
     def test_check_rate_limit(self):
-        self.agent.agent._check_rate_limit = MagicMock(return_value=True)
+        self.agent.agent.check_rate_limit = MagicMock(return_value=True)
         self.assertTrue(self.agent.check_rate_limit("chat"))
 
     def test_record_rate_limit(self):
-        self.agent.agent._proactive = MagicMock()
+        self.agent.agent.record_rate_limit = MagicMock()
         self.agent.record_rate_limit("chat")
-        self.agent.agent._proactive.record_rate_limit.assert_called_once_with("chat")
+        self.agent.agent.record_rate_limit.assert_called_once_with("chat")
 
     def test_decide_proactive_action(self):
         intent = ProactiveIntent(action="chat", topic_hint="x", reasoning="y")

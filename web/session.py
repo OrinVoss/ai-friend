@@ -179,10 +179,10 @@ class WebAgent:
         return self.agent._calculate_proactivity(idle_duration)
 
     def check_rate_limit(self, action: str) -> bool:
-        return self.agent._check_rate_limit(action)
+        return self.agent.check_rate_limit(action)
 
     def record_rate_limit(self, action: str) -> None:
-        self.agent._proactive.record_rate_limit(action)
+        self.agent.record_rate_limit(action)
 
     def decide_proactive_action(self, idle_duration: float):
         return self.agent.decide_proactive_action(idle_duration)
