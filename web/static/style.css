@@ -654,6 +654,11 @@ body {
         display: flex;
     }
 
+    /* Hide close button on logs panel in mobile; bottom tab switches back to chat */
+    .logs-panel .panel-close {
+        display: none;
+    }
+
     .chat-section {
         width: 100%;
     }
