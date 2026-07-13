@@ -17,12 +17,12 @@ class TestNotifyTool(unittest.TestCase):
     def test_fail_when_title_missing(self):
         result = self.tool.execute({"message": "hello"})
         self.assertFalse(result.success)
-        self.assertIn("标题和内容不能为空", result.output)
+        self.assertIn("标题不能为空", result.output)
 
     def test_fail_when_message_missing(self):
         result = self.tool.execute({"title": "hi"})
         self.assertFalse(result.success)
-        self.assertIn("标题和内容不能为空", result.output)
+        self.assertIn("内容不能为空", result.output)
 
     def test_accept_content_alias(self):
         """LLM 经常传 content 而不是 message，需要兼容。"""
@@ -36,6 +36,20 @@ class TestNotifyTool(unittest.TestCase):
             })
         self.assertTrue(result.success)
         self.assertIn("已发送通知", result.output)
+
+    def test_accept_text_msg_body_aliases(self):
+        """兼容 text/msg/body 等常见别名。"""
+        with patch("tools.notify_tool.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = b""
+            mock_run.return_value.stderr = b""
+            for key in ("text", "msg", "body"):
+                with self.subTest(alias=key):
+                    result = self.tool.execute({
+                        "title": "标题",
+                        key: f"用 {key} 传的正文",
+                    })
+                    self.assertTrue(result.success, f"{key} 别名应被接受")
 
     def test_message_takes_precedence_over_content(self):
         with patch("tools.notify_tool.subprocess.run") as mock_run:

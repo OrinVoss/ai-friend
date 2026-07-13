@@ -23,11 +23,11 @@ class NotifyTool(Tool):
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "通知标题，简短醒目",
+                    "description": "通知标题，简短醒目（必填）",
                 },
                 "message": {
                     "type": "string",
-                    "description": "通知正文内容",
+                    "description": "通知正文内容（必填）。注意：请用 message 字段传正文，不要写成 content/text/msg",
                 },
                 "duration": {
                     "type": "integer",
@@ -40,12 +40,20 @@ class NotifyTool(Tool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         title = args.get("title", "").strip()
-        # LLM 经常把正文写成 content 而不是 message，这里做兼容
-        message = args.get("message", "").strip() or args.get("content", "").strip()
+        # LLM 经常把正文写成 content/text/msg 而不是 message，这里做兼容
+        message = (
+            args.get("message", "").strip()
+            or args.get("content", "").strip()
+            or args.get("text", "").strip()
+            or args.get("msg", "").strip()
+            or args.get("body", "").strip()
+        )
         logger.debug(f"[notify] args={args} resolved title={title!r} message={message!r}")
 
-        if not title or not message:
-            return ToolResult.fail("标题和内容不能为空")
+        if not title:
+            return ToolResult.fail(f"标题不能为空，收到的参数：{args}")
+        if not message:
+            return ToolResult.fail(f"内容不能为空，收到的参数：{args}")
 
         # #150: escape PowerShell injection
         esc_title = title.replace("'", "''")
