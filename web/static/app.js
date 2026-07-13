@@ -25,6 +25,16 @@ function formatDate(ts) {
     return (d.getMonth() + 1) + '/' + d.getDate();
 }
 
+function formatDateTime(ts) {
+    var d = new Date(ts);
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    var h = d.getHours();
+    var min = d.getMinutes();
+    return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + ' ' +
+           (h < 10 ? '0' + h : h) + ':' + (min < 10 ? '0' + min : min);
+}
+
 function insertTimeMarker(ts) {
     var container = document.getElementById('chat-messages');
     if (!container) return;
@@ -240,7 +250,7 @@ function renderStatus(data) {
             div.className = 'history-item';
             var dateDiv = document.createElement('div');
             dateDiv.className = 'history-date';
-            dateDiv.textContent = item.timestamp ? formatDate(item.timestamp) : '--';
+            dateDiv.textContent = item.timestamp ? formatDateTime(item.timestamp) : '--';
             var valsDiv = document.createElement('div');
             valsDiv.className = 'history-values';
             ['trust', 'familiarity', 'intimacy', 'fun'].forEach(function(k) {
