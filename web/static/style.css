@@ -631,8 +631,11 @@ body {
     }
 
     .status-panel {
-        left: 0;
-        transform: translateX(-100%);
+        right: 0;
+        left: auto;
+        border-left: 1px solid var(--border-color);
+        border-right: none;
+        transform: translateX(100%);
     }
 
     .status-panel.open {
@@ -641,8 +644,8 @@ body {
 
     .logs-panel {
         right: 0;
-        border-left: none;
-        border-right: 1px solid var(--border-color);
+        border-left: 1px solid var(--border-color);
+        border-right: none;
         transform: translateX(100%);
     }
 
