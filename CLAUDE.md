@@ -62,7 +62,7 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 
 - API 调用使用 `trust_env=False` 避免 Windows 系统代理拖慢请求
 - Web 端每次请求结束时调用 `record_emotion_event()` 记录强情绪
-- 主动回复不加入短期记忆（`add_to_history=False`）
+- 主动回复（handle_proactive/handle_explore）加入短期记忆和数据库（`add_to_history=True`），确保刷新后可见
 - 环境变量优先级高于 config.json（DEEPSEEK_API_KEY 等）
 - Provider 必须继承 `LLMProvider(ABC)`，通过抽象接口注入 Agent
 - Web 层通过 `WebAgent` 公共接口与 Agent 交互，禁止直接访问 `agent._xxx`

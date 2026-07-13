@@ -227,7 +227,7 @@ class MessageHandler:
             f"[proactive] chat: topic={topic} "
             f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
         )
-        return a._react_loop(messages, on_token, add_to_history=False)
+        return a._react_loop(messages, on_token, add_to_history=True)
 
     def handle_explore(self, intent=None) -> str | None:
         from prompts.system import build_system_prompt
@@ -284,7 +284,7 @@ class MessageHandler:
             f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
         )
         phase2_registry = self._make_internal_registry() if tool_records else None
-        result = a._react_loop(messages, on_token=None, add_to_history=False,
+        result = a._react_loop(messages, on_token=None, add_to_history=True,
                               tool_registry=phase2_registry)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
             logger.info(f"[explore] shared: {len(result)} chars")

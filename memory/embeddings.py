@@ -51,35 +51,51 @@ class EmbeddingEngine:
         try:
             if uncached:
                 idxs, new_texts = zip(*uncached)
-                resp = self._session.post(
-                    self._endpoint,
-                    json={"input": list(new_texts)},
-                    timeout=self._timeout,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                api_dim = len(data["data"][0]["embedding"])
-                if api_dim != self._dim:
-                    logger.warning(
-                        f"[embed] API returned dim={api_dim}, expected {self._dim}; "
-                        f"resetting cache and discarding old-dimension vectors"
+                # EM-001: llama.cpp /v1/embeddings returns 400 for empty strings;
+                # filter them out and provide zero-vector fallback.
+                filtered = [(i, t) for i, t in zip(idxs, new_texts) if t and t.strip()]
+                if filtered:
+                    fidxs, ftexts = zip(*filtered)
+                    resp = self._session.post(
+                        self._endpoint,
+                        json={"input": list(ftexts)},
+                        timeout=self._timeout,
                     )
-                    self._cache.clear()
-                    self._dim = api_dim
-                    # P0: drop old-dimension cached vectors to avoid np.stack crash
-                    vecs = [(i, v) for i, v in vecs if len(v) == api_dim]
-                new_vecs = np.array(
-                    [item["embedding"] for item in data["data"]],
-                    dtype=np.float32,
-                )
-                norms = np.linalg.norm(new_vecs, axis=1, keepdims=True)
-                norms = np.where(norms == 0, 1.0, norms)
-                new_vecs /= norms
-                for j, idx in enumerate(idxs):
-                    self._cache.set(new_texts[j], new_vecs[j])
-                    vecs.append((idx, new_vecs[j]))
-                elapsed = (time.time() - t0) * 1000
-                logger.debug(f"[embed] encoded {len(uncached)} texts in {elapsed:.0f}ms")
+                    resp.raise_for_status()
+                    data = resp.json()
+                    api_dim = len(data["data"][0]["embedding"])
+                    if api_dim != self._dim:
+                        logger.warning(
+                            f"[embed] API returned dim={api_dim}, expected {self._dim}; "
+                            f"resetting cache and discarding old-dimension vectors"
+                        )
+                        self._cache.clear()
+                        self._dim = api_dim
+                        # P0: drop old-dimension cached vectors to avoid np.stack crash
+                        vecs = [(i, v) for i, v in vecs if len(v) == api_dim]
+                    new_vecs = np.array(
+                        [item["embedding"] for item in data["data"]],
+                        dtype=np.float32,
+                    )
+                    norms = np.linalg.norm(new_vecs, axis=1, keepdims=True)
+                    norms = np.where(norms == 0, 1.0, norms)
+                    new_vecs /= norms
+                    for j, idx in enumerate(fidxs):
+                        self._cache.set(ftexts[j], new_vecs[j])
+                        vecs.append((idx, new_vecs[j]))
+                    # Zero vectors for empty texts that were filtered out
+                    empty_idxs = [i for i in idxs if i not in set(fidxs)]
+                    for idx in empty_idxs:
+                        vecs.append((idx, np.zeros(self._dim, dtype=np.float32)))
+                    elapsed = (time.time() - t0) * 1000
+                    logger.debug(f"[embed] encoded {len(ftexts)} texts, "
+                                 f"{len(empty_idxs)} empty fallback in {elapsed:.0f}ms")
+                else:
+                    # All uncached texts are empty — zero vectors for all
+                    elapsed = (time.time() - t0) * 1000
+                    for idx in idxs:
+                        vecs.append((idx, np.zeros(self._dim, dtype=np.float32)))
+                    logger.debug(f"[embed] all empty, {len(idxs)} zero vectors in {elapsed:.0f}ms")
         except Exception as e:
             # P0: API failed — skip uncached texts, use only cached results
             logger.warning(f"[embed] API failed: {e}, using {len(vecs)}/{len(texts)} cached")
