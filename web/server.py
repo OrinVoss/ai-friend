@@ -8,6 +8,7 @@ import re
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware import Middleware
@@ -165,6 +166,13 @@ async def status_api(session_id: str = "default"):
             val = row.get("value")
             if not ts:
                 continue
+            # Convert UTC timestamps stored in SQLite to Beijing time (UTC+8)
+            try:
+                dt = datetime.fromisoformat(str(ts).replace(" ", "T"))
+                dt = dt + timedelta(hours=8)
+                ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
             if ts not in groups:
                 groups[ts] = {"timestamp": ts}
             if dim == "playfulness":

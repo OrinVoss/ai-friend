@@ -435,9 +435,11 @@ class MemoryConsolidator:
             new_intimacy = min(1.0, relationship.get("intimacy", 0.3) + 0.02)
             self.ltm.update_relationship("intimacy", new_intimacy)
 
-        # playfulness (fun in UI): joyful/excited/surprised lifts it; negative emotions lower it
-        if dominant in {"joyful", "excited", "surprised"}:
-            new_fun = min(1.0, relationship.get("playfulness", 0.3) + 0.03)
+        # playfulness (fun in UI): positive/warm emotions lift it; negative emotions lower it
+        positive_fun = {"joyful", "excited", "surprised", "content",
+                        "engaged", "anticipating", "trusting"}
+        if dominant in positive_fun:
+            new_fun = min(1.0, relationship.get("playfulness", 0.3) + 0.02)
             self.ltm.update_relationship("playfulness", new_fun)
         elif dominant in negative_emotions:
             new_fun = max(0.0, relationship.get("playfulness", 0.3) - 0.02)
