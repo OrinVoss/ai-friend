@@ -95,8 +95,9 @@ class MessageHandler:
         if not drive_result.needs_external_tools:
             # No external tools needed → straight to Agent 3
             logger.info(f"[msg] agent1: no external tools needed")
-            return self._run_agent3(user_input, drive_result, tool_result=None,
-                                   on_token=on_token)
+            agent3_output = self._run_agent3(user_input, drive_result, tool_result=None,
+                                            on_token=on_token)
+            return self._handle_agent3_intent(user_input, agent3_output, on_token=on_token)
 
         # ── Agent 2: Multi-round tool execution ──
         self._ensure_tool_agent()
@@ -195,7 +196,8 @@ class MessageHandler:
 
         # ── Agent 3: Emotional expression ──
         return self._run_agent3(user_input, drive_result, tool_result,
-                               tool_records=tool_records, on_token=on_token)
+                               tool_records=tool_records, on_token=on_token,
+                               final_response=True)
 
     def handle_proactive(self, on_token=None, intent=None) -> str:
         from prompts.system import build_system_prompt
@@ -293,7 +295,7 @@ class MessageHandler:
         return None
 
     def _run_agent3(self, user_input: str, drive_result, tool_result,
-                    on_token=None, tool_records: str = "") -> str:
+                    on_token=None, tool_records: str = "", final_response: bool = False) -> str:
         """Run Agent 3: emotional expression with inner drive + tool results."""
         from prompts.system import build_system_prompt
         a = self.a
@@ -317,6 +319,7 @@ class MessageHandler:
             tool_call_history=a._tool_call_history,
             inner_drive_summary=drive_result.summary if drive_result else "",
             conversation_examples=a.config.conversation_examples,
+            final_response=final_response,
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         # Inject tool results as USER message (LLM respects user messages >> system messages)
@@ -325,6 +328,116 @@ class MessageHandler:
         phase2_registry = self._make_internal_registry() if tool_records else None
         return a._react_loop(messages, on_token, add_to_history=True,
                             tool_registry=phase2_registry)
+
+    def _parse_agent3_output(self, text: str) -> dict:
+        """Detect whether Agent 3 output is a JSON intent or plain text."""
+        import json
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                data = json.loads(stripped)
+                if "intent" in data and data.get("intent"):
+                    return {
+                        "type": "intent",
+                        "reply_to_user": data.get("reply_to_user", ""),
+                        "intent": data.get("intent", ""),
+                        "intent_description": data.get("intent_description", ""),
+                        "intent_target": data.get("intent_target", ""),
+                    }
+            except json.JSONDecodeError:
+                pass
+        return {"type": "plain", "text": text}
+
+    def _handle_agent3_intent(
+        self,
+        user_input: str,
+        agent3_output: str,
+        on_token=None,
+        max_loops: int = 2,
+    ) -> str:
+        """Handle Agent 3 JSON intent: ask Agent 1, execute if approved, otherwise fall back."""
+        parsed = self._parse_agent3_output(agent3_output)
+        if parsed["type"] == "plain":
+            return parsed["text"]
+
+        loop_count = 0
+        current_reply = parsed.get("reply_to_user", "")
+        current_intent = parsed.get("intent", "")
+        current_description = parsed.get("intent_description", "")
+        current_target = parsed.get("intent_target", "")
+
+        while loop_count < max_loops and parsed["type"] == "intent":
+            loop_count += 1
+            drive_result = self._inner_drive.assess_agent3_intent(
+                user_input=user_input,
+                intent=current_intent,
+                intent_description=current_description,
+                intent_target=current_target,
+            )
+
+            if not drive_result.needs_external_tools:
+                # Agent 1 rejected the intent; return the transitional reply
+                logger.info(f"[msg] agent1: rejected agent3 intent {current_intent}")
+                return current_reply or drive_result.summary or "让我直接回复你吧。"
+
+            logger.info(
+                f"[msg] agent1: approved agent3 intent {current_intent}, "
+                f"requests={len(drive_result.tool_requests)}"
+            )
+
+            # Execute tools via Agent 2
+            self._ensure_tool_agent()
+
+            if drive_result.tool_requests:
+                tool_result = self._tool_agent.run_with_requests(
+                    [req.description for req in drive_result.tool_requests]
+                )
+            else:
+                tool_result = self._tool_agent.run_with_request(user_input)
+
+            # Simple retry logic for Agent 3-triggered tool path
+            retry_count = 0
+            while retry_count < 3 and tool_result and not tool_result.any_success:
+                retry_count += 1
+                logger.info(f"[msg] agent2: retry {retry_count}/3")
+                retry_req = (drive_result.tool_requests[0].description
+                             if drive_result.tool_requests else user_input)
+                tool_result = self._tool_agent.run_with_request(retry_req)
+
+            tool_records = ""
+            if tool_result and tool_result.has_results:
+                tool_records = self._tool_agent.format_for_phase2(tool_result)
+                for rec in tool_result.records:
+                    a = self.a
+                    a._tool_call_history.append({
+                        "name": rec.name,
+                        "success": rec.success,
+                        "output": rec.output[:200],
+                        "time": time.time(),
+                    })
+                if len(a._tool_call_history) > 20:
+                    a._tool_call_history = a._tool_call_history[-20:]
+
+            # Agent 3 final response after tools; no more JSON allowed
+            final_text = self._run_agent3(
+                user_input, drive_result, tool_result,
+                tool_records=tool_records, on_token=on_token, final_response=True,
+            )
+
+            # If Agent 3 still emits an intent after tools, loop again (rare)
+            parsed = self._parse_agent3_output(final_text)
+            if parsed["type"] == "intent":
+                current_reply = parsed.get("reply_to_user", current_reply)
+                current_intent = parsed.get("intent", current_intent)
+                current_description = parsed.get("intent_description", current_description)
+                current_target = parsed.get("intent_target", current_target)
+                continue
+            return final_text
+
+        # Loop exhausted or no longer an intent
+        if parsed["type"] == "plain":
+            return parsed["text"]
+        return current_reply or "让我直接回复你吧。"
 
     def _build_messages(self, sys_prompt: str, user_input: str | None) -> list[dict]:
         a = self.a

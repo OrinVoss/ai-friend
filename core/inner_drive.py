@@ -358,6 +358,77 @@ class InnerDriveAgent:
         )
         return result
 
+    def assess_agent3_intent(
+        self,
+        user_input: str,
+        intent: str,
+        intent_description: str,
+        intent_target: str,
+    ) -> InnerDriveResult:
+        """Agent 3 proposed an action; Agent 1 decides whether to execute it.
+
+        This keeps Agent 3 from directly calling tools. Agent 3 only expresses
+        an intent in JSON; Agent 1 evaluates it with full context and returns
+        a normal InnerDriveResult (needs_external_tools + tool_requests).
+        """
+        from prompts.system import build_inner_drive_prompt
+
+        mem_ctx = self._retriever.retrieve_for_query(user_input)
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        sys_prompt = build_inner_drive_prompt(
+            personality=self._personality.config,
+            emotion=self._personality.emotion,
+            memory_context=mem_ctx,
+            conversation_history=conv_hist,
+            tools=self._full_registry,
+        )
+
+        intent_to_tool = {
+            "play_music": "music_play",
+            "send_notify": "notify",
+            "search_web": "web_search",
+            "fetch_url": "web_fetch",
+            "read_file": "read_file",
+        }
+        suggested_tool = intent_to_tool.get(intent, "")
+
+        user_msg = (
+            f"用户原始输入：{user_input}\n\n"
+            f"Agent 3（角色表达层）主动提议执行一个动作：\n"
+            f"- 动作类型：{intent}\n"
+            f"- 动作描述：{intent_description}\n"
+            f"- 动作目标：{intent_target or '（未指定）'}\n\n"
+            f"建议映射到的外部工具：{suggested_tool or '（无明确映射）'}\n\n"
+            "请判断：这个提议是否合理？是否符合用户当前意图和情绪？"
+            "如果合理，输出 needs_external_tools=true，并在 tool_requests 中描述具体要做什么。"
+            "如果不合理，输出 needs_external_tools=false，并解释原因。"
+            "输出 JSON 决策。"
+        )
+
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": user_msg},
+        ]
+
+        logger.info(f"[inner_drive] assess agent3 intent: {intent} | {intent_description[:60]}")
+        resp = self._provider.generate(
+            messages, stream=False, max_tokens=self._max_tokens_assess,
+            response_format=INNER_DRIVE_SCHEMA,
+        )
+        result = self._parse_json_decision(resp)
+        if result is None:
+            logger.warning("[inner_drive] assess_agent3_intent parse failed, defaulting to no tools")
+            return InnerDriveResult(
+                needs_external_tools=False,
+                reasoning="解析 Agent 3 意图失败，默认不执行",
+                summary="",
+            )
+        logger.info(
+            f"[inner_drive] assess agent3 intent result: needs_tools={result.needs_external_tools} "
+            f"reason={result.reasoning[:80]}"
+        )
+        return result
+
 
     def _parse_json_decision(self, resp: str) -> InnerDriveResult | None:
         """Parse InnerDrive's JSON-structured output into InnerDriveResult.

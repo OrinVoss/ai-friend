@@ -200,6 +200,40 @@ class TestAssess(unittest.TestCase):
         self.assertFalse(result.needs_external_tools)
         self.assertIn("最大轮次", result.reasoning)
 
+    def test_assess_agent3_intent_approved(self):
+        """Agent 1 should approve a reasonable Agent 3 intent."""
+        self.provider.generate.return_value = _fetch_json("https://example.com")
+        result = self.agent.assess_agent3_intent(
+            user_input="有点无聊",
+            intent="fetch_url",
+            intent_description="想分享一个有趣的链接",
+            intent_target="https://example.com",
+        )
+        self.assertTrue(result.needs_external_tools)
+        self.assertEqual(result.tool_requests[0].suggested_tool, "web_fetch")
+
+    def test_assess_agent3_intent_rejected(self):
+        """Agent 1 should reject an unreasonable Agent 3 intent."""
+        self.provider.generate.return_value = _no_tools_json()
+        result = self.agent.assess_agent3_intent(
+            user_input="我现在很忙",
+            intent="play_music",
+            intent_description="放首歌给用户听",
+            intent_target="",
+        )
+        self.assertFalse(result.needs_external_tools)
+
+    def test_assess_agent3_intent_parse_failure(self):
+        """If Agent 1 cannot parse the decision, default to no tools."""
+        self.provider.generate.return_value = "invalid json"
+        result = self.agent.assess_agent3_intent(
+            user_input="你好",
+            intent="search_web",
+            intent_description="搜索天气",
+            intent_target="今天天气",
+        )
+        self.assertFalse(result.needs_external_tools)
+
 
 class TestProactiveIntent(unittest.TestCase):
     def test_default_silent(self):

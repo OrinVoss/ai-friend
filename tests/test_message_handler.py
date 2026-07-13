@@ -126,6 +126,68 @@ class TestMessageHandler(unittest.TestCase):
         self.assertIsNotNone(result)
         self.agent._pick_proactive_topic.assert_not_called()
 
+    def test_parse_agent3_output_plain_text(self):
+        result = self.handler._parse_agent3_output("你好呀！")
+        self.assertEqual(result["type"], "plain")
+        self.assertEqual(result["text"], "你好呀！")
+
+    def test_parse_agent3_output_intent(self):
+        result = self.handler._parse_agent3_output(
+            '{"reply_to_user": "那我放首歌吧", "intent": "play_music", '
+            '"intent_description": "放首歌给用户听", "intent_target": ""}'
+        )
+        self.assertEqual(result["type"], "intent")
+        self.assertEqual(result["intent"], "play_music")
+        self.assertEqual(result["reply_to_user"], "那我放首歌吧")
+
+    def test_parse_agent3_output_invalid_json(self):
+        result = self.handler._parse_agent3_output("{不是json}")
+        self.assertEqual(result["type"], "plain")
+
+    def test_handle_agent3_intent_plain(self):
+        result = self.handler._handle_agent3_intent("你好", "嗨！今天怎么样？")
+        self.assertEqual(result, "嗨！今天怎么样？")
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_agent3_intent_rejected(self, _mock):
+        self.handler._ensure_inner_drive()
+        self.handler._inner_drive.assess_agent3_intent = MagicMock(
+            return_value=MagicMock(needs_external_tools=False, summary="用户很忙")
+        )
+        result = self.handler._handle_agent3_intent(
+            "我现在很忙",
+            '{"reply_to_user": "那我放首歌吧", "intent": "play_music", '
+            '"intent_description": "放首歌给用户听", "intent_target": ""}'
+        )
+        self.assertEqual(result, "那我放首歌吧")
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_agent3_intent_approved(self, _mock):
+        from core.inner_drive import InnerDriveResult, ToolRequest
+        self.handler._ensure_inner_drive()
+        self.handler._inner_drive.assess_agent3_intent = MagicMock(
+            return_value=InnerDriveResult(
+                needs_external_tools=True,
+                reasoning="合理",
+                tool_requests=[ToolRequest(description="播放音乐", suggested_tool="music_play")],
+            )
+        )
+        self.handler._ensure_tool_agent()
+        mock_result = MagicMock()
+        mock_result.has_results = True
+        mock_result.any_success = True
+        mock_result.records = [MagicMock(name="music_play", success=True, output="ok")]
+        self.handler._tool_agent.run_with_requests = MagicMock(return_value=mock_result)
+        self.handler._tool_agent.format_for_phase2 = MagicMock(return_value="[音乐播放成功]")
+        self.agent._react_loop.return_value = "给你放了首轻音乐~"
+
+        result = self.handler._handle_agent3_intent(
+            "有点无聊",
+            '{"reply_to_user": "那我放首歌吧", "intent": "play_music", '
+            '"intent_description": "放首歌给用户听", "intent_target": ""}'
+        )
+        self.assertEqual(result, "给你放了首轻音乐~")
+
 
 if __name__ == "__main__":
     unittest.main()
