@@ -243,7 +243,8 @@ class Agent:
             trigger=last_user_turn[:100] if last_user_turn else "",
             context=last_user_turn[:200] if last_user_turn else "",
         )
-        if self.turn_count % 3 == 0:
+        interval = getattr(self.config, 'consolidation_interval', 5)
+        if interval > 0 and self.turn_count % interval == 0:
             self.consolidator.add_pending(self.short_term.get_all()[-1])
             self.consolidator.consolidate(self.short_term, self.personality,
                                           max_facts=self.config.max_facts,
