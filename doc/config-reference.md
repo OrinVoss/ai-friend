@@ -1,6 +1,6 @@
 # 配置参考
 
-> 项目所有配置项的完整说明，包括 `config.json` 和 `personality.json`。
+> 项目所有配置项的完整说明，包括 `config.json` 和 `personalities/{role_id}.json`。
 
 ---
 
@@ -59,7 +59,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `personality_file` | string | `"personality.json"` | 人格定义文件路径 |
+| `personality_file` | string | `"personalities/default.json"` | 默认人格模板路径；新建角色时会复制此文件 |
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
@@ -132,9 +132,13 @@
 
 ---
 
-## personality.json
+## personalities/{role_id}.json
 
-人格定义和情绪状态持久化文件，同时包含**静态人格定义**（可编辑）和**运行时状态**（自动更新，建议不手动改）。
+人格定义和情绪状态持久化文件，每个角色一份。同时包含**静态人格定义**（可编辑）和**运行时状态**（自动更新，建议不手动改）。
+
+- `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的默认模板。
+- 新增角色时，系统会复制该模板到 `personalities/{role_id}.json`。
+- 旧版根目录 `personality.json` 保留为备份，不再被系统读取。
 
 ### 静态部分 — 人格定义（可编辑）
 
@@ -180,6 +184,7 @@
 
 ```json
 {
+  "id": "小星",
   "personality": {
     "name": "小星",
     "traits": {

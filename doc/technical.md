@@ -1116,7 +1116,7 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000 --workers 4
 
 | 文件 | 说明 | gitignore |
 |------|------|-----------|
-| `personality.json` | 人格定义 + 情绪状态持久化 | 否 |
+| `personalities/*.json` | 角色定义 + 情绪状态持久化 | 否 |
 | `data/ai_friend.db` | SQLite 数据库 | 是 |
 | `config.json` | 用户配置 | 是 |
 

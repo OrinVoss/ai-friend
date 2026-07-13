@@ -92,7 +92,7 @@ SessionManager.get_or_create() → WebAgent
 `WebAgent` 内部负责：
 - 为每个 session 创建独立的 `Personality` / `ConversationBuffer` / `LongTermMemory`
 - 复用 `SessionManager` 共享的 `LLMProvider` 与 `EmbeddingEngine`（SN-005/006）
-- 30s 防抖保存 `personality.json`（#44）
+- 30s 防抖保存 `personalities/{role_id}.json`（#44）
 - 在 session 移除/关闭时调用 `close()` 持久化情绪状态
 
 ---
@@ -482,7 +482,7 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │     facts ≤ 200, experiences ≤ 100       │
     │     reflections ≤ 50                     │
     │                                          │
-    │  ⑤ 每 10 轮保存 personality.json          │
+    │  ⑤ 每 10 轮保存 personalities/{role_id}.json │
     └─────────────────────────────────────────┘
 ```
 
@@ -567,4 +567,4 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 | SQLite reflections | data/ai_friend.db | 永久 | 反思洞察 |
 | SQLite relationship_metrics | data/ai_friend.db | 永久 | 关系指标 |
 | SQLite conversation_turns | data/ai_friend.db | 永久 | 对话历史 |
-| EmotionalState | 内存 + personality.json | 进程 + 持久化 | 当前情绪 |
+| EmotionalState | 内存 + personalities/{role_id}.json | 进程 + 持久化 | 当前情绪 |

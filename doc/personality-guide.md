@@ -6,7 +6,7 @@
 
 ## 快速上手
 
-编辑 `personality.json` 的 `personality` 块，重新启动即可生效。
+角色文件位于 `personalities/{role_id}.json`。编辑对应角色文件后重启即可生效。
 
 ### 最简单的定制
 
@@ -16,6 +16,7 @@
 
 ```json
 {
+  "id": "小星",
   "personality": {
     "name": "小星",
     "speaking_style": "幽默、嘴贫、爱开玩笑",
@@ -120,7 +121,7 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 ```
 
 - 每条包含 `user`（用户说的话）和 `replies`（AI 的若干种可能回复）。
-- 修改后重启生效，无需改动 `personality.json`。
+- 修改后重启生效，无需改动角色 JSON 文件。
 - 留空数组则系统 prompt 中不注入示例。
 
 ### interests — 兴趣领域
@@ -219,7 +220,7 @@ AI 的"出厂情绪设置"：
 
 ## 关于情绪状态（不要手动改）
 
-`personality.json` 中的 `emotional_state` 部分是**运行时状态**，由情绪引擎自动更新：
+每个角色文件中的 `emotional_state` 部分是**运行时状态**，由情绪引擎自动更新：
 
 - 每次对话后自动更新
 - 包含 VAD 三维 + 8 维 Plutchik 情绪 + 怨恨值
@@ -227,11 +228,25 @@ AI 的"出厂情绪设置"：
 
 手动修改会导致情绪状态突变或丢失上下文。如果要重置情绪，直接删除 `emotional_state` 键或将其设为 `{}`，系统会自动用 baseline 重建。
 
-## 切换人格
+## 多角色与切换人格
 
-1. 编辑 `personality.json` 的 `personality` 部分
-2. 删除 `emotional_state`（或留空让系统重建）
-3. 可选：删除 `data/ai_friend.db` 清空所有记忆（完全重置）
-4. 重启应用
+### Web 端切换角色
 
-不需要删除数据库也可以，但 AI 会保留旧人格时期的记忆，可能产生"性格变化"的对话体验。
+1. 点击顶部「切换」按钮
+2. 选择角色
+3. 选择该角色下的已有 session，或点击「新建对话」
+
+### 手动新增角色
+
+1. 复制 `personalities/default.json` 为 `personalities/{role_id}.json`
+2. 修改 `id`、`personality.name`、特质、风格、背景故事等
+3. 可选：删除 `emotional_state` 让系统用 baseline 重建
+4. 重启 Web 服务后，新角色会出现在角色选择弹窗中
+
+### 完全重置某个角色
+
+1. 删除对应的 `personalities/{role_id}.json`
+2. 删除数据库中该角色相关 session 的数据（或整库重置）
+3. 重启应用
+
+同一个角色可以拥有多个 session，每个 session 的情绪、记忆、关系指标相互独立。

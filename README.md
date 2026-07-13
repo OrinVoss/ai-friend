@@ -31,11 +31,11 @@
 
 ### 人格系统
 
-`personality.json` 完全可定制：
-- 名字、性格特质（playfulness/warmth/humor/empathy/sass 等，0~1 连续值）
-- 说话风格描述、背景故事、兴趣领域
-- 情绪基线（valence + arousal）和衰减速率
-- 情绪状态由系统自动维护，手动修改可强制干预
+角色文件位于 `personalities/{role_id}.json`：
+- 每个角色有独立的 `personality`（名字、性格特质、说话风格、背景故事、兴趣领域）
+- 每个角色有独立的 `emotional_state`（情绪状态），由系统自动维护
+- `config.json` 中的 `personality_file` 作为新建角色的模板
+- 系统默认提供 `personalities/default.json`（Luna），原 `personality.json` 保留为备份
 
 ### 记忆系统
 
@@ -43,12 +43,14 @@
 短期记忆（ConversationBuffer）
     │ deque, 线程安全, 重启从 DB 恢复最近 30 轮
     ▼
-长期记忆（SQLite 5 表）
+长期记忆（SQLite 6 表）
     ├── user_facts          用户事实（评分 + 置信度 + 重要性）
     ├── experiences         共享体验（情感色调 + 重要性，软删除）
     ├── reflections         反思洞察（类型 + 重要性，软删除）
     ├── conversation_turns  完整对话历史
-    └── relationship_metrics 关系指标
+    ├── relationship_metrics 关系指标（按 session_id 隔离）
+    └── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
+    外加 session_roles 表记录 session_id → role_id 映射
 ```
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
@@ -105,7 +107,7 @@ Agent 2: ToolAgent ──── (闲聊跳过) ────┐
     ▼                                   │
 Agent 3: Roleplay Agent (core/agent.py)◄┘
     │  temp=0.8, 完整人格 + 情绪 + 记忆
-    │  personality.json → PersonalityConfig + EmotionalState
+    │  personalities/{role_id}.json → PersonalityConfig + EmotionalState
     │  analyze_sentiment(user_input) → sentiment 值
     │  estimate_emotional_impact(sentiment) → trait 调制 → shift()
     │  _cross_modulate() → 情绪互相制约
@@ -122,8 +124,8 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 ### 人格实现
 
 四层实现：
-1. `personality.json` — 名字、特质、说话风格、背景故事、兴趣
-2. `EmotionalState` — VAD + 8 Plutchik + resentment + emotion_events（运行时动态）
+1. `personalities/{role_id}.json` — 名字、特质、说话风格、背景故事、兴趣
+2. `EmotionalState` — VAD + 8 Plutchik + resentment + emotion_events（运行时动态，每个角色/会话独立）
 3. `Personality.estimate_emotional_impact()` — 特质调制情绪变化幅度（高 empathy → 响应 ×1.5）
 4. `prompts/system.py` — 人格翻译为自然语言 + 对话示例 + 破防/怨恨/梦境注入
 
@@ -137,7 +139,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 | 驱动 | 状态机循环 | 事件驱动 |
 | 输入 | stdin 线程 | WebSocket |
 | 输出 | 打字机效果 | 分段独立气泡 + 情绪调速（6 级 fallback 分段） |
-| 主题 | - | 暗色主题，响应式 |
+| 主题 | - | 浅色主题，响应式 |
 
 ### 自主行为系统
 
@@ -180,7 +182,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 
 - **上下文压缩** — 180K 上下文 80% 阈值自动压缩，有递归保护
 - **token 动态调整** — max_tokens 随情绪变化（excited 768, neutral 512, sad 256）
-- **会话管理** — session_id cookie 持久化，多标签页独立会话，短期记忆重启恢复。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
+- **会话管理** — 角色与 session 一一绑定：一个 session 对应一个角色实例，拥有独立情绪、记忆、关系指标和睡眠状态。Web 前端支持角色选择与同角色下多 session 切换。每个 session 只有一个 active proactive 任务，新标签页连接自动取消旧任务并接管，消除多标签页并发竞争
 - **环境变量安全** — API Key 支持 `DEEPSEEK_API_KEY` 环境变量，优先级高于 config.json
 - **Provider 抽象层** — `LLMProvider(ABC)` 抽象基类，`DeepSeekProvider` 为默认实现，便于切换多模型
 - **REST API 类型安全** — 使用 Pydantic 模型校验请求/响应，自动返回 422 错误
@@ -239,29 +241,35 @@ python web_main.py
 
 ## 人格定制
 
-编辑 `personality.json`：
+角色文件位于 `personalities/{role_id}.json`。例如 `personalities/小星.json`：
 
 ```json
 {
-  "name": "小星",
-  "traits": {
-    "playfulness": 0.95,
-    "warmth": 0.85,
-    "humor": 0.9,
-    "empathy": 0.8,
-    "sass": 0.75
-  },
-  "speaking_style": "幽默、嘴贫、爱开玩笑，说话带点损但其实是关心…",
-  "backstory": "一个嘴欠但心暖的损友，日常就是和朋友互怼互夸…",
-  "interests": ["聊天互怼", "吃瓜", "打游戏", "摄影", "音乐"],
-  "emotional_baseline": {
-    "valence": 0.4,
-    "arousal": 0.3
-  },
-  "emotional_decay_rate": 0.05,
-  "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
+  "id": "小星",
+  "personality": {
+    "name": "小星",
+    "traits": {
+      "playfulness": 0.95,
+      "warmth": 0.85,
+      "humor": 0.9,
+      "empathy": 0.8,
+      "sass": 0.75
+    },
+    "speaking_style": "幽默、嘴贫、爱开玩笑，说话带点损但其实是关心…",
+    "backstory": "一个嘴欠但心暖的损友，日常就是和朋友互怼互夸…",
+    "interests": ["聊天互怼", "吃瓜", "打游戏", "摄影", "音乐"],
+    "emotional_baseline": {
+      "valence": 0.4,
+      "arousal": 0.3
+    },
+    "emotional_decay_rate": 0.05,
+    "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
+  }
 }
 ```
+
+- 新增角色：在 `personalities/` 下新建 `{role_id}.json`（可从 `default.json` 复制修改）。
+- 切换角色：Web 端顶部「切换」按钮选择角色，再选择/新建 session。
 
 `emotional_state` 由系统自动维护，包含：
 - VAD 维度（valence/arousal）+ 8 Plutchik 情绪 + baseline + mood
@@ -295,7 +303,10 @@ ai-friend/
 ├── web_main.py                Web 入口
 ├── config.py / config.json    配置系统（dataclass + JSON + 环境变量）
 ├── requirements.txt           依赖锁定（含 aiosqlite 等）
-├── personality.json           人格定义 + 情绪状态
+├── personalities/             角色定义目录（每个角色独立 JSON）
+│   ├── default.json             默认角色模板（Luna）
+│   └── 小星.json                 示例角色
+├── personality.json           旧版人格文件（保留为备份）
 ├── CLAUDE.md                  AI 协作规则
 ├── data/                      SQLite 数据库（WAL 模式）
 ├── logs/                      运行日志（YYYY-MM-DD.log，含 API/情绪/睡眠/工具追踪）
@@ -380,7 +391,7 @@ ai-friend/
     ├── session.py              SessionManager + WebAgent（会话隔离 + Agent 私有接口封装）
     ├── schemas.py              Pydantic 请求/响应模型（ChatRequest / ChatResponse / ...）
     ├── rate_limit.py           内存滑动窗口限流中间件
-    └── static/                 前端（HTML + CSS + JS，暗色主题，CSS 变量统一颜色）
+    └── static/                 前端（HTML + CSS + JS，浅色响应式主题，CSS 变量统一颜色）
 ```
 
 ---

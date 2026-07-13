@@ -32,15 +32,19 @@ python web_main.py
 
 ### 自定义人格
 
-编辑 `personality.json`：
+角色文件位于 `personalities/{role_id}.json`。编辑对应角色文件即可：
 
 | 字段 | 说明 |
 |------|------|
-| `name` | AI 名字 |
-| `traits` | 性格特质及强度 (0~1) |
-| `speaking_style` | 说话风格描述 |
-| `backstory` | 背景故事 |
-| `interests` | 兴趣领域 |
+| `id` | 角色 ID（建议与文件名一致） |
+| `personality.name` | AI 名字 |
+| `personality.traits` | 性格特质及强度 (0~1) |
+| `personality.speaking_style` | 说话风格描述 |
+| `personality.backstory` | 背景故事 |
+| `personality.interests` | 兴趣领域 |
+
+- `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的模板。
+- Web 端启动时选择角色；一个角色可拥有多个 session，每个 session 的情绪与记忆相互独立。
 
 ### CLI 内置命令
 
@@ -64,10 +68,11 @@ python web_main.py
     └── Web: python web_main.py → FastAPI + WebSocket
               │
               ├── web/server.py  (HTTP + WS + proactive_loop + Pydantic + 滑动窗口限流)
-              ├── web/session.py (SessionManager + WebAgent 封装 Agent 公共接口)
+              ├── web/session.py (SessionManager + WebAgent：按角色加载 personality，session 隔离)
               ├── web/schemas.py (Pydantic 请求/响应模型)
               ├── web/rate_limit.py (内存滑动窗口限流)
-              └── web/static/    (HTML + CSS 变量 + JS)
+              ├── web/static/    (HTML + CSS 变量 + JS，浅色响应式)
+              └── personalities/ (角色定义目录，每个角色独立 JSON)
     │
     ▼
 Agent 1: core/inner_drive.py  (InnerDriveAgent)
@@ -102,7 +107,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   └── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
-    ├── storage/             (aiosqlite 异步, WAL, 版本化迁移)
+    ├── storage/             (aiosqlite 异步, WAL, 版本化迁移；session_roles 记录 session→role 映射)
     ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
     └── models/              (EmotionalState, EmotionEvent)
 
@@ -165,6 +170,8 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 通过本地 llama-server /v1/embeddings API 计算余弦相似度。嵌入服务器不可用时自动降级为纯关键词检索。
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
+
+长期记忆表已按 `session_id` 隔离，包括 `user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`。`session_roles` 表额外记录 `session_id → role_id` 映射，实现「一个 session 一个角色实例」。
 
 ---
 
@@ -290,7 +297,10 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── web_main.py              Web 入口
 ├── config.py / config.json  配置系统
 ├── requirements.txt         依赖锁定
-├── personality.json         人格 + 情绪状态
+├── personalities/           角色定义目录（每个角色独立 JSON）
+│   ├── default.json           默认角色模板
+│   └── 小星.json               示例角色
+├── personality.json         旧版人格文件（保留为备份）
 ├── data/                    SQLite 数据库
 ├── changes/                 修改记录
 ├── doc/                     文档

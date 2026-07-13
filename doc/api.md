@@ -29,6 +29,10 @@
 | `/ws` | WebSocket | 双向实时通信（主力通道） |
 | `/api/chat` | POST | REST 聊天（WebSocket 降级备用） |
 | `/api/status` | GET | 获取关系状态和统计 |
+| `/api/chat/history` | GET | 获取最近对话轮次 |
+| `/api/roles` | GET | 列出所有可用角色 |
+| `/api/sessions` | GET | 列出某角色下的历史 session |
+| `/api/logs` | GET | 实时服务日志（SSE） |
 | `/static/*` | GET | 静态资源（CSS/JS） |
 
 **数据格式**: 全部使用 `JSON` 编码，`ensure_ascii=False`（支持中文直出）。
@@ -54,12 +58,15 @@ wss://<生产域名>/ws
   │                               ├── accept()
   │                               │
   ├── {"type":"init", ──────────▶  │
-  │     "session_id":"xxx"}        │
-  │                               ├── get_or_create(session_id)
+  │     "session_id":"xxx",         │
+  │     "role_id":"小星"}           │
+  │                               ├── get_or_create(session_id, role_id)
   │                               ├── create_task(_proactive_loop)
   │                               ├── {"type":"init_ok", ←─────────┐
   │                               │    "session_id":"xxx",          │
-  │                               │    "emotion":"engaged"}         │
+  │                               │    "role_id":"小星",            │
+  │                               │    "emotion":"engaged",         │
+  │                               │    "name":"小星"}               │
   │                               │                                 │
   ├── {"type":"message", ──────▶  │
   │     "content":"你好"}         │
@@ -88,7 +95,8 @@ wss://<生产域名>/ws
 ```json
 {
   "type": "init",
-  "session_id": "a1b2c3d4e5f6"
+  "session_id": "a1b2c3d4e5f6",
+  "role_id": "小星"
 }
 ```
 
@@ -96,9 +104,10 @@ wss://<生产域名>/ws
 |------|------|------|------|
 | `type` | string | ✓ | 固定 `"init"` |
 | `session_id` | string | — | 已有 session_id 传此值恢复会话；省略则服务端新生成 |
+| `role_id` | string | — | 要绑定的角色 ID（如 `小星`）；恢复已有 session 时此值会被忽略 |
 
 - 连接建立后**必须先发 init**，否则后续 `message` 消息无可用 session
-- session_id 存储在 cookie 中（`setCookie('session_id', ...)`），页面刷新后携带以恢复会话
+- `session_id` 与 `role_id` 均存储在 cookie 中，页面刷新后携带以恢复会话
 
 #### `message` — 发送聊天消息
 
@@ -133,7 +142,9 @@ wss://<生产域名>/ws
 {
   "type": "init_ok",
   "session_id": "a1b2c3d4e5f6",
-  "emotion": "engaged"
+  "role_id": "小星",
+  "emotion": "engaged",
+  "name": "小星"
 }
 ```
 
@@ -141,11 +152,14 @@ wss://<生产域名>/ws
 |------|------|------|
 | `type` | string | 固定 `"init_ok"` |
 | `session_id` | string | 实际使用的 session_id（客户端应保存到 cookie） |
+| `role_id` | string | 实际绑定的角色 ID |
 | `emotion` | string | 当前 AI 情绪标签，用于前端 UI 展示 |
+| `name` | string | 角色名字，用于前端标题/头像 |
 
 前端收到后行为：
-- 保存 `session_id` 到 cookie（有效期 24h）
+- 保存 `session_id` 与 `role_id` 到 cookie（有效期 24h）
 - 调用 `showEmotion(data.emotion)` 更新 UI 情绪显示
+- 使用 `data.name` 更新顶部角色名
 
 #### `segment` — 分段回复
 
@@ -362,6 +376,38 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 **错误处理**: 若当天日志文件不存在，返回 `data: [no log file]`。
 
+### 3.7 `GET /api/roles` — 列出可用角色
+
+返回 `personalities/` 目录下的所有角色。
+
+**Response**:
+
+```json
+{
+  "roles": [
+    { "id": "default", "name": "Luna" },
+    { "id": "小星", "name": "小星" }
+  ]
+}
+```
+
+### 3.8 `GET /api/sessions` — 列出某角色的历史 session
+
+**Query Parameters**:
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `role_id` | string | ✓ | 角色 ID |
+
+**Response**:
+
+```json
+{
+  "role_id": "小星",
+  "sessions": ["default", "a1b2c3d4e5f6"]
+}
+```
+
 ---
 
 ## 4. 分段推送
@@ -508,7 +554,7 @@ class SessionManager:
 
 | 方法 | 说明 |
 |------|------|
-| `get_or_create(session_id)` | 获取或创建 WebAgent，返回 `(sid, agent)` |
+| `get_or_create(session_id, role_id)` | 获取或创建 WebAgent；新 session 绑定 `role_id`，已有 session 忽略 `role_id` |
 | `remove(session_id)` | 移除会话、cancel 后台任务、清理 WS |
 | `register_proactive(sid, task, ws)` | 注册/替换 proactive 任务（新标签页 cancel 旧任务） |
 | `get_active_ws(session_id)` | 获取当前活跃的 WebSocket（多标签页切换） |
@@ -520,17 +566,22 @@ class SessionManager:
 ```
 首次打开页面
     │
-    ├── connect() → WebSocket /ws
-    ├── send {"type":"init"}  ← cookie 中无 session_id
+    ├── 无 role_id cookie → 显示角色选择弹窗
+    ├── 选择角色 → GET /api/sessions?role_id=xxx → 显示 session 选择弹窗
+    ├── 选择已有 session 或新建 session
     │
-    ├── 服务端创建新 session（uuid4 hex[:12]）
+    ├── connect() → WebSocket /ws
+    ├── send {"type":"init", "role_id":"小星", "session_id":"xxx"}
+    │
+    ├── 服务端按 role_id 加载 personalities/小星.json
+    ├── 创建/恢复 WebAgent（uuid4 hex[:12]）
     ├── 注册 proactive 后台任务
-    └── 返回 session_id → 存入 cookie（max-age=86400）
+    └── 返回 session_id / role_id → 存入 cookie（max-age=86400）
         │
         页面刷新
             │
             ├── connect() → WebSocket /ws
-            ├── send {"type":"init", "session_id":"xxx"}  ← 从 cookie 读取
+            ├── send {"type":"init", "role_id":"小星", "session_id":"xxx"}  ← 从 cookie 读取
             │
             ├── 服务端恢复已有 session（内存池）
             ├── 旧 proactive 任务被 cancel
@@ -541,9 +592,11 @@ class SessionManager:
 
 | 隔离级别 | 当前状态 |
 |----------|----------|
-| 独立 Personality | ✓ 每个 WebAgent 独立 Personality 实例 |
+| 独立 Personality | ✓ 每个 WebAgent 按 role_id 加载独立 personality 文件 |
+| 独立 EmotionalState | ✓ 同一角色的不同 session 也拥有独立情绪状态 |
 | 独立 ConversationBuffer | ✓ 每个 WebAgent 独立短期记忆 |
-| SQLite session_id 过滤 | ✓ R-005/011/012/015/020/021 全部补齐 |
+| SQLite session_id 过滤 | ✓ user_facts / experiences / reflections / conversation_turns / relationship_metrics / relationship_snapshots 全部按 session_id 隔离 |
+| session → role 映射 | ✓ `session_roles` 表持久化 `session_id → role_id` |
 | 共享 Provider/Embedding | ✓ SN-005/006：SessionManager 级别共享 HTTP 会话 |
 | 共享 EmbeddingCache | ✓ 只读 LRU 无竞争 |
 | 睡眠状态隔离 | ✓ SL-001：`.sleep_state.{session_id}` 每会话一文件 |

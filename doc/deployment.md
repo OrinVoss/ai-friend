@@ -162,7 +162,7 @@ ai-friend.example.com {
 | 文件 | 说明 | 备份建议 |
 |------|------|----------|
 | `data/ai_friend.db` | SQLite 数据库（全部记忆） | 每日备份 |
-| `personality.json` | 人格定义 + 情绪状态 | 定期备份 |
+| `personalities/*.json` | 角色定义 + 情绪状态 | 定期备份 |
 
 ### 备份脚本
 
@@ -172,7 +172,7 @@ ai-friend.example.com {
 set BACKUP_DIR=D:\backups\ai-friend
 mkdir %BACKUP_DIR% 2>nul
 copy data\ai_friend.db %BACKUP_DIR%\ai_friend_%date:~0,4%%date:~5,2%%date:~8,2%.db
-copy personality.json %BACKUP_DIR%\personality_%date:~0,4%%date:~5,2%%date:~8,2%.json
+xcopy /I /E personalities %BACKUP_DIR%\personalities_%date:~0,4%%date:~5,2%%date:~8,2%
 ```
 
 ### 数据库维护

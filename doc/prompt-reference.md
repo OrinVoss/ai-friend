@@ -25,7 +25,7 @@
 === Block 0: 当前时间 ===
 === Block 1: Agent 2 工具结果 ===    # tool_records（需要时）
 === Block 1b: Agent 1 内驱判断 ===   # inner_drive_summary（需要时）
-=== Block 2: 身份核心 ===            # personality.json 的 name/traits/speaking_style/backstory
+=== Block 2: 身份核心 ===            # personalities/{role_id}.json 的 name/traits/speaking_style/backstory
 === Block 3: 对话风格示例 ===        # config.conversation_examples（#28 可配置）
 === Block 4: 当前情绪状态 ===        # EmotionalState.dominant_emotion + valence/arousal
 === Block 4b: 怨恨状态 ===           # resentment > 0.2 时注入
@@ -47,7 +47,7 @@
 | Block 0 | `datetime.now()` | 当前时间，格式 `YYYY-MM-DD HH:mm Weekday` |
 | Block 1 | `tool_records` | Agent 2 外部工具执行结果 |
 | Block 1b | `inner_drive_summary` | Agent 1 自主推理摘要 |
-| Block 2 | `personality.json → PersonalityConfig` | 人格核心定义 |
+| Block 2 | `personalities/{role_id}.json → PersonalityConfig` | 人格核心定义 |
 | Block 3 | `config.conversation_examples` | 可配置对话风格示例（#28） |
 | Block 4 | `EmotionalState` | VAD + 8 Plutchik + history |
 | Block 4b | `EmotionalState.resentment` | 怨恨值 > 0.2 时注入 |
