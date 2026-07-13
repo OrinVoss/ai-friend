@@ -40,7 +40,8 @@ class NotifyTool(Tool):
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         title = args.get("title", "").strip()
-        message = args.get("message", "").strip()
+        # LLM 经常把正文写成 content 而不是 message，这里做兼容
+        message = args.get("message", "").strip() or args.get("content", "").strip()
 
         if not title or not message:
             return ToolResult.fail("标题和内容不能为空")

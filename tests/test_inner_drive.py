@@ -1,12 +1,12 @@
 """Tests for core/inner_drive.py"""
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from core.inner_drive import (
     InnerDriveAgent, InnerDriveResult, ToolRequest,
     ProactiveIntent,
-    EXTERNAL_TOOL_NAMES,
 )
+from tools.traits import EXTERNAL_TOOL_NAMES
 from tests.mocks import mock_tool_registry
 
 
@@ -17,6 +17,29 @@ def _make_memory_mock():
     m.reflections = []
     m.relationship = {"trust": 0.5, "familiarity": 0.5, "intimacy": 0.5, "playfulness": 0.5}
     return m
+
+
+def _no_tools_json():
+    return (
+        '{"needs_external_tools": false, "reasoning": "只是闲聊", "summary": "", '
+        '"tool_requests": []}'
+    )
+
+
+def _fetch_json(url="https://example.com"):
+    return (
+        '{"needs_external_tools": true, "reasoning": "需要获取网页", "summary": "", '
+        '"tool_requests": [{"description": "获取 %s", "suggested_tool": "web_fetch", '
+        '"params_hint": {"url": "%s"}}]}' % (url, url)
+    )
+
+
+def _search_json(query="最新AI新闻"):
+    return (
+        '{"needs_external_tools": true, "reasoning": "需要搜索", "summary": "", '
+        '"tool_requests": [{"description": "搜索 %s", "suggested_tool": "web_search", '
+        '"params_hint": {"query": "%s"}}]}' % (query, query)
+    )
 
 
 class TestInnerDriveResult(unittest.TestCase):
@@ -35,7 +58,7 @@ class TestInnerDriveResult(unittest.TestCase):
         self.assertEqual(len(r.tool_requests), 1)
 
 
-class TestParseDecision(unittest.TestCase):
+class TestParseJsonDecision(unittest.TestCase):
     def setUp(self):
         self.agent = InnerDriveAgent(
             provider=MagicMock(),
@@ -46,44 +69,67 @@ class TestParseDecision(unittest.TestCase):
             tool_registry=mock_tool_registry(),
         )
 
-    def test_no_need_explicit(self):
-        result = self.agent._parse_decision("决策：不需要外部工具\n理由：只是打招呼")
+    def test_no_tools(self):
+        result = self.agent._parse_json_decision(_no_tools_json())
+        self.assertIsNotNone(result)
         self.assertFalse(result.needs_external_tools)
-
-    def test_no_need_NO_TOOLS(self):
-        result = self.agent._parse_decision("NO_TOOLS")
-        self.assertFalse(result.needs_external_tools)
+        self.assertEqual(result.reasoning, "只是闲聊")
 
     def test_needs_web_fetch(self):
-        result = self.agent._parse_decision(
-            "决策：需要外部工具\n理由：用户提供链接\n工具请求：需要调用 web_fetch 获取 https://example.com"
-        )
+        result = self.agent._parse_json_decision(_fetch_json("https://example.com"))
         self.assertTrue(result.needs_external_tools)
-        self.assertTrue(any(t.suggested_tool == "web_fetch" for t in result.tool_requests))
+        self.assertEqual(len(result.tool_requests), 1)
+        self.assertEqual(result.tool_requests[0].suggested_tool, "web_fetch")
+        self.assertIn("https://example.com", result.tool_requests[0].description)
 
     def test_needs_web_search(self):
-        result = self.agent._parse_decision(
-            "决策：需要外部工具\n理由：用户想知道最新消息\n工具请求：需要搜索：最新AI新闻"
-        )
+        result = self.agent._parse_json_decision(_search_json("最新AI新闻"))
         self.assertTrue(result.needs_external_tools)
-        self.assertTrue(any(t.suggested_tool == "web_search" for t in result.tool_requests))
+        self.assertEqual(len(result.tool_requests), 1)
+        self.assertEqual(result.tool_requests[0].suggested_tool, "web_search")
+        self.assertIn("最新AI新闻", result.tool_requests[0].description)
 
-    def test_chat_no_tools(self):
-        result = self.agent._parse_decision("用户只是打招呼，直接回复即可")
+    def test_multiple_requests(self):
+        text = (
+            '{"needs_external_tools": true, "reasoning": "需要多个工具", "summary": "", '
+            '"tool_requests": ['
+            '{"description": "获取 https://a.com", "suggested_tool": "web_fetch", "params_hint": {"url": "https://a.com"}}, '
+            '{"description": "搜索 test query", "suggested_tool": "web_search", "params_hint": {"query": "test query"}}'
+            ']}'
+        )
+        result = self.agent._parse_json_decision(text)
+        self.assertTrue(result.needs_external_tools)
+        self.assertEqual(len(result.tool_requests), 2)
+        tools = [r.suggested_tool for r in result.tool_requests]
+        self.assertIn("web_fetch", tools)
+        self.assertIn("web_search", tools)
+
+    def test_strips_think_blocks(self):
+        text = '<think>让我想想</think>' + _no_tools_json()
+        result = self.agent._parse_json_decision(text)
+        self.assertIsNotNone(result)
         self.assertFalse(result.needs_external_tools)
 
-    def test_url_extraction(self):
-        result = self.agent._parse_decision(
-            "需要获取 https://example.com/page 和 https://test.com/doc 的内容"
-        )
-        self.assertTrue(result.needs_external_tools)
-        self.assertGreaterEqual(len(result.tool_requests), 1)
+    def test_invalid_json_returns_none(self):
+        result = self.agent._parse_json_decision("这不是 JSON")
+        self.assertIsNone(result)
+
+    def test_missing_needs_tools_defaults_to_false(self):
+        result = self.agent._parse_json_decision('{"reasoning": "缺少 needs_external_tools"}')
+        self.assertIsNotNone(result)
+        self.assertFalse(result.needs_external_tools)
+
+    def test_empty_tool_requests(self):
+        text = '{"needs_external_tools": false, "reasoning": "x", "summary": "y"}'
+        result = self.agent._parse_json_decision(text)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.tool_requests, [])
 
 
 class TestAssess(unittest.TestCase):
     def setUp(self):
         self.provider = MagicMock()
-        self.provider.generate.return_value = "决策：不需要外部工具\n理由：闲聊"
+        self.provider.generate.return_value = _no_tools_json()
         self.personality = MagicMock()
         self.personality.config.traits = []
         self.personality.config.name = "TestBot"
@@ -110,26 +156,23 @@ class TestAssess(unittest.TestCase):
         self.provider.generate.assert_called()
 
     def test_assess_with_url(self):
-        self.provider.generate.return_value = (
-            "决策：需要外部工具\n理由：用户给了链接\n"
-            "工具请求：需要调用 web_fetch 获取 https://example.com/article"
-        )
+        self.provider.generate.return_value = _fetch_json("https://example.com/article")
         result = self.agent.assess("看看这个 https://example.com/article")
         self.assertTrue(result.needs_external_tools)
+        self.assertEqual(result.tool_requests[0].suggested_tool, "web_fetch")
 
     def test_re_decide(self):
-        self.provider.generate.return_value = (
-            "决策：需要外部工具\n理由：换个方式\n工具请求：需要搜索 example article"
-        )
+        self.provider.generate.return_value = _search_json("example article")
         result = self.agent.re_decide(
             "看看链接",
             [{"name": "web_fetch", "output": "连接超时"}],
         )
         self.assertTrue(result.needs_external_tools)
+        self.assertEqual(result.tool_requests[0].suggested_tool, "web_search")
 
     def test_review_sufficient(self):
         """Agent 1 reviews results and decides no more tools needed."""
-        self.provider.generate.return_value = "决策：不需要外部工具\n理由：结果足够"
+        self.provider.generate.return_value = _no_tools_json()
         result = self.agent.review(
             "搜索AI新闻",
             "[调用 1] web_search（成功）:\n找到了5条AI新闻...",
@@ -139,9 +182,7 @@ class TestAssess(unittest.TestCase):
 
     def test_review_needs_more(self):
         """Agent 1 reviews results and decides more tools needed."""
-        self.provider.generate.return_value = (
-            "决策：需要外部工具\n理由：搜索结果中有链接\n工具请求：需要调用 web_fetch 获取 https://example.com"
-        )
+        self.provider.generate.return_value = _fetch_json("https://example.com")
         result = self.agent.review(
             "搜索AI新闻",
             "[调用 1] web_search（成功）:\n找到了链接 https://example.com",
@@ -158,46 +199,6 @@ class TestAssess(unittest.TestCase):
         )
         self.assertFalse(result.needs_external_tools)
         self.assertIn("最大轮次", result.reasoning)
-
-
-class TestExtractToolRequests(unittest.TestCase):
-    def setUp(self):
-        self.agent = InnerDriveAgent(
-            provider=MagicMock(),
-            personality=MagicMock(),
-            ltm=MagicMock(),
-            retriever=MagicMock(),
-            short_term=MagicMock(),
-            tool_registry=mock_tool_registry(),
-        )
-
-    def test_extract_url(self):
-        requests = self.agent._extract_tool_requests(
-            "需要获取 https://example.com/page 的内容"
-        )
-        self.assertGreaterEqual(len(requests), 1)
-        self.assertEqual(requests[0].suggested_tool, "web_fetch")
-
-    def test_extract_search(self):
-        requests = self.agent._extract_tool_requests(
-            "需要搜索：最新AI新闻，了解最近动态"
-        )
-        self.assertGreaterEqual(len(requests), 1)
-        self.assertEqual(requests[0].suggested_tool, "web_search")
-        self.assertIn("最新AI新闻", requests[0].description)
-
-    def test_extract_file(self):
-        requests = self.agent._extract_tool_requests(
-            "需要读取：D:\\文档\\notes.txt"
-        )
-        self.assertGreaterEqual(len(requests), 1)
-        self.assertEqual(requests[0].suggested_tool, "read_file")
-
-    def test_multiple_requests(self):
-        requests = self.agent._extract_tool_requests(
-            "需要获取 https://a.com 的内容，同时搜索：test query"
-        )
-        self.assertGreaterEqual(len(requests), 2)
 
 
 class TestProactiveIntent(unittest.TestCase):
