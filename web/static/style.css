@@ -241,6 +241,25 @@ body {
     padding: 16px;
 }
 
+/* Status panel: fixed top sections, only history scrolls */
+#status-body {
+    display: flex;
+    flex-direction: column;
+    overflow-y: hidden;
+}
+
+#status-body > .status-section:last-child {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-top: 20px;
+}
+
+#status-body > .status-section:last-child > h3 {
+    flex-shrink: 0;
+}
+
 /* Status panel */
 .status-card {
     background: var(--bg-body);
@@ -303,9 +322,30 @@ body {
 }
 
 .history-list {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+/* Thin scrollbar for history list */
+.history-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.history-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+.history-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
 }
 
 .history-item {
