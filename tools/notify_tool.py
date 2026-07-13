@@ -42,6 +42,7 @@ class NotifyTool(Tool):
         title = args.get("title", "").strip()
         # LLM 经常把正文写成 content 而不是 message，这里做兼容
         message = args.get("message", "").strip() or args.get("content", "").strip()
+        logger.debug(f"[notify] args={args} resolved title={title!r} message={message!r}")
 
         if not title or not message:
             return ToolResult.fail("标题和内容不能为空")
