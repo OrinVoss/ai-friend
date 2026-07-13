@@ -398,7 +398,8 @@ class MemoryConsolidator:
 
     def _update_relationship(self, personality: Personality) -> None:
         relationship = self.ltm.get_relationship()
-        sentiment = 0  # default neutral
+        sentiment = 0.0
+        personal_sharing = False
 
         if self._pending_buffer:
             last_user_turns = [
@@ -408,16 +409,39 @@ class MemoryConsolidator:
                 sentiment, personal_sharing, _ = self.analyze_sentiment(
                     last_user_turns[-1].content
                 )
-                if personal_sharing:
-                    new_val = min(1.0, relationship.get("intimacy", 0.3) + 0.03)
-                    self.ltm.update_relationship("intimacy", new_val)
 
+        dominant = personality.emotion.dominant_emotion
+        negative_emotions = {"angry", "frustrated", "afraid", "anxious",
+                             "disgusted", "melancholy", "sad"}
+
+        # familiarity: grows with every consolidation as we simply know each other longer
         new_familiarity = min(1.0, relationship.get("familiarity", 0.3) + 0.02)
         self.ltm.update_relationship("familiarity", new_familiarity)
 
-        if sentiment > 0.3:
-            new_trust = min(1.0, relationship.get("trust", 0.3) + sentiment * 0.05)
+        # trust: trusting emotion or positive sentiment builds it; negative emotions erode it
+        if dominant == "trusting" or sentiment > 0.3:
+            delta = 0.05 if dominant == "trusting" else sentiment * 0.05
+            new_trust = min(1.0, relationship.get("trust", 0.3) + delta)
             self.ltm.update_relationship("trust", new_trust)
+        elif dominant in negative_emotions:
+            new_trust = max(0.0, relationship.get("trust", 0.3) - 0.02)
+            self.ltm.update_relationship("trust", new_trust)
+
+        # intimacy: personal sharing or warm/connected emotions deepen it
+        if personal_sharing:
+            new_intimacy = min(1.0, relationship.get("intimacy", 0.3) + 0.03)
+            self.ltm.update_relationship("intimacy", new_intimacy)
+        elif dominant in {"content", "engaged", "trusting"}:
+            new_intimacy = min(1.0, relationship.get("intimacy", 0.3) + 0.02)
+            self.ltm.update_relationship("intimacy", new_intimacy)
+
+        # playfulness (fun in UI): joyful/excited/surprised lifts it; negative emotions lower it
+        if dominant in {"joyful", "excited", "surprised"}:
+            new_fun = min(1.0, relationship.get("playfulness", 0.3) + 0.03)
+            self.ltm.update_relationship("playfulness", new_fun)
+        elif dominant in negative_emotions:
+            new_fun = max(0.0, relationship.get("playfulness", 0.3) - 0.02)
+            self.ltm.update_relationship("playfulness", new_fun)
 
     def _prune(self, max_facts: int, max_experiences: int, max_reflections: int) -> None:
         pruned_f = run_async(self.ltm.repo.prune_facts(max_facts))
