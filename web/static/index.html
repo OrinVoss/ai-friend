@@ -6,7 +6,7 @@
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'">
     <title>AI 朋友</title>
-    <link rel="stylesheet" href="/static/style.css?v=10">
+    <link rel="stylesheet" href="/static/style.css?v=11">
     <script src="/static/marked.min.js"></script>
 </head>
 <body>
@@ -28,12 +28,6 @@
         </div>
         <div class="header-right">
             <button id="switch-role-btn" class="text-btn" title="切换角色/会话" aria-label="切换角色/会话">切换</button>
-            <button id="logs-toggle" class="icon-btn" title="切换日志面板" aria-label="切换日志面板">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
-            </button>
-            <button id="status-toggle" class="icon-btn" title="切换状态面板" aria-label="切换状态面板">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-            </button>
         </div>
     </header>
 
@@ -42,6 +36,9 @@
         <aside class="side-panel status-panel" id="status-panel">
             <div class="panel-header">
                 <h2>状态</h2>
+                <button class="panel-collapse" data-panel="status" aria-label="收起状态面板">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
                 <button class="panel-close" data-panel="status" aria-label="关闭状态面板">✕</button>
             </div>
             <div class="panel-body" id="status-body">
@@ -82,6 +79,9 @@
         <aside class="side-panel logs-panel" id="logs-panel">
             <div class="panel-header">
                 <h2>服务日志</h2>
+                <button class="panel-collapse" data-panel="logs" aria-label="收起日志面板">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
                 <button class="panel-close" data-panel="logs" aria-label="关闭日志面板">✕</button>
             </div>
             <div class="panel-body">
@@ -114,6 +114,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=10"></script>
+    <script src="/static/app.js?v=11"></script>
 </body>
 </html>

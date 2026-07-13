@@ -509,32 +509,19 @@ function switchMobileTab(tab) {
 }
 
 function setupUI() {
-    var logsToggle = document.getElementById('logs-toggle');
-    var statusToggle = document.getElementById('status-toggle');
     var switchRoleBtn = document.getElementById('switch-role-btn');
     if (switchRoleBtn) {
         switchRoleBtn.addEventListener('click', function() {
             openRoleModal();
         });
     }
-    if (logsToggle) {
-        logsToggle.addEventListener('click', function() {
-            if (window.innerWidth <= 900) {
-                switchMobileTab('logs');
-            } else {
-                togglePanel('logs');
-            }
+
+    document.querySelectorAll('.panel-collapse').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var panel = btn.getAttribute('data-panel');
+            togglePanel(panel);
         });
-    }
-    if (statusToggle) {
-        statusToggle.addEventListener('click', function() {
-            if (window.innerWidth <= 900) {
-                switchMobileTab('status');
-            } else {
-                togglePanel('status');
-            }
-        });
-    }
+    });
 
     document.querySelectorAll('.panel-close').forEach(function(btn) {
         btn.addEventListener('click', function() {

@@ -218,7 +218,8 @@ body {
     color: var(--text-primary);
 }
 
-.panel-close {
+.panel-close,
+.panel-collapse {
     width: 28px;
     height: 28px;
     border: none;
@@ -231,8 +232,14 @@ body {
     justify-content: center;
 }
 
-.panel-close:hover {
+.panel-close:hover,
+.panel-collapse:hover {
     background: var(--border-color);
+}
+
+.panel-collapse svg {
+    width: 18px;
+    height: 18px;
 }
 
 .panel-body {
@@ -704,12 +711,9 @@ body {
         transform: translateX(0);
     }
 
-    .panel-close {
-        display: flex;
-    }
-
-    /* Hide panel close buttons in mobile; bottom tab switches back to chat */
-    .panel-close {
+    /* Hide collapse/close buttons in mobile; bottom tab switches back to chat */
+    .panel-close,
+    .panel-collapse {
         display: none;
     }
 
@@ -731,9 +735,7 @@ body {
         font-size: 15px;
     }
 
-    .header-right {
-        display: none;
-    }
+
 
     .chat-messages {
         padding: 12px;
@@ -765,6 +767,14 @@ body {
 
 @media (min-width: 901px) {
     .side-panel.collapsed {
+        display: none;
+    }
+
+    .panel-collapse {
+        display: flex;
+    }
+
+    .panel-close {
         display: none;
     }
 
