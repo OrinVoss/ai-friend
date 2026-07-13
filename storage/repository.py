@@ -330,6 +330,17 @@ class Repository:
         rows.reverse()
         return [{"role": r[0], "content": r[1]} for r in rows]
 
+    async def get_max_turn_number(self, session_id: str | None = None) -> int:
+        """Return the largest turn_number persisted for this session."""
+        async with self.db.cursor() as c:
+            sid = session_id or self.session_id
+            await c.execute("""
+                SELECT COALESCE(MAX(turn_number), 0) FROM conversation_turns
+                WHERE session_id = ?
+            """, (sid,))
+            row = await c.fetchone()
+            return row[0] if row else 0
+
     # ── Pruning ──
 
     async def prune_facts(self, max_count: int) -> int:

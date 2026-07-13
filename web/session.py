@@ -99,6 +99,12 @@ class WebAgent:
             config=config,
         )
         self.agent._tool_registry = registry
+        # Restore turn counter so page refreshes don't reset it (#RS-001)
+        try:
+            max_turn = run_async(self.repo.get_max_turn_number())
+            self.agent.turn_count = max_turn
+        except Exception as e:
+            logger.warning(f"[session] restore turn_count failed: {e}")
         self._last_save_time: float = 0.0  # #44: debounce personality save
         self._ensure_relationship_defaults()
 
