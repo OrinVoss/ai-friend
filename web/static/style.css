@@ -194,7 +194,8 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    transition: transform 0.25s ease;
+    transition: transform 0.25s ease, width 0.2s ease;
+    position: relative;
 }
 
 .logs-panel {
@@ -240,6 +241,44 @@ body {
 .panel-collapse svg {
     width: 18px;
     height: 18px;
+}
+
+.panel-expand {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 28px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-panel);
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 5;
+    transition: background 0.15s, color 0.15s;
+}
+
+.panel-expand:hover {
+    background: var(--border-color);
+    color: var(--accent-link);
+}
+
+.panel-expand svg {
+    width: 18px;
+    height: 18px;
+}
+
+.status-panel .panel-expand {
+    right: 0;
+    border-left: 1px solid var(--border-color);
+    border-radius: 0 12px 12px 0;
+}
+
+.logs-panel .panel-expand {
+    left: 0;
+    border-right: 1px solid var(--border-color);
+    border-radius: 12px 0 0 12px;
 }
 
 .panel-body {
@@ -767,6 +806,27 @@ body {
 
 @media (min-width: 901px) {
     .side-panel.collapsed {
+        width: 28px;
+        overflow: hidden;
+        background: transparent;
+        border-right: none;
+        border-left: none;
+    }
+
+    .logs-panel.collapsed {
+        border-left: none;
+    }
+
+    .status-panel.collapsed {
+        border-right: none;
+    }
+
+    .side-panel.collapsed .panel-expand {
+        display: flex;
+    }
+
+    .side-panel.collapsed .panel-header,
+    .side-panel.collapsed .panel-body {
         display: none;
     }
 

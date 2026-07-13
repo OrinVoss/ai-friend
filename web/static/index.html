@@ -6,7 +6,7 @@
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'">
     <title>AI 朋友</title>
-    <link rel="stylesheet" href="/static/style.css?v=11">
+    <link rel="stylesheet" href="/static/style.css?v=12">
     <script src="/static/marked.min.js"></script>
 </head>
 <body>
@@ -34,6 +34,9 @@
     <main class="app-main">
         <!-- 左侧状态面板 -->
         <aside class="side-panel status-panel" id="status-panel">
+            <button class="panel-expand" data-panel="status" aria-label="展开状态面板">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </button>
             <div class="panel-header">
                 <h2>状态</h2>
                 <button class="panel-collapse" data-panel="status" aria-label="收起状态面板">
@@ -66,7 +69,6 @@
             </div>
         </aside>
 
-        <!-- 中间聊天区 -->
         <section class="chat-section" id="chat-section">
             <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="聊天记录"></div>
             <div class="chat-input-area">
@@ -77,6 +79,9 @@
 
         <!-- 右侧日志面板 -->
         <aside class="side-panel logs-panel" id="logs-panel">
+            <button class="panel-expand" data-panel="logs" aria-label="展开日志面板">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
             <div class="panel-header">
                 <h2>服务日志</h2>
                 <button class="panel-collapse" data-panel="logs" aria-label="收起日志面板">
@@ -114,6 +119,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=11"></script>
+    <script src="/static/app.js?v=12"></script>
 </body>
 </html>

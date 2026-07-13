@@ -523,6 +523,13 @@ function setupUI() {
         });
     });
 
+    document.querySelectorAll('.panel-expand').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var panel = btn.getAttribute('data-panel');
+            togglePanel(panel);
+        });
+    });
+
     document.querySelectorAll('.panel-close').forEach(function(btn) {
         btn.addEventListener('click', function() {
             var panel = btn.getAttribute('data-panel');
