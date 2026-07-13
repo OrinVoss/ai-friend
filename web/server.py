@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import load_config
@@ -162,6 +162,41 @@ async def chat_history_api(session_id: str = "default"):
             "content": t.content,
         })
     return HistoryResponse(turns=turns, session_id=session_id)
+
+
+@app.get("/api/logs")
+async def logs_api(request: Request):
+    """SSE stream of today's log file. (#console)"""
+    from datetime import datetime
+
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+    today = datetime.now().strftime("%Y-%m-%d")
+    log_file = os.path.join(log_dir, f"{today}.log")
+
+    async def event_stream():
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8") as f:
+                # Send the last 100 lines on connect
+                lines = f.readlines()
+                for line in lines[-100:]:
+                    yield f"data: {line.rstrip()}\n\n"
+                # Tail the file for new lines
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    line = f.readline()
+                    if line:
+                        yield f"data: {line.rstrip()}\n\n"
+                    else:
+                        await asyncio.sleep(0.5)
+        else:
+            yield "data: [no log file]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _calc_delay(emotion: str, seg_len: int) -> float:

@@ -346,6 +346,22 @@ WebSocket 不可用时的降级方案。请求/响应使用 Pydantic 模型校�
 
 FastAPI `StaticFiles` 挂载，提供 `app.js`、`style.css` 等前端资源。
 
+### 3.6 `GET /api/logs` — 实时服务日志（SSE）
+
+Server-Sent Events 流，推送当天 `logs/YYYY-MM-DD.log` 内容。连接时先发送最近 100 行历史日志，随后持续 tail 新写入的日志行。
+
+**Query Parameters**: 无
+
+**Response**: `text/event-stream`
+
+```
+data: 2026-07-13 12:24:38 [INFO] web.server: [ws] accepted: 127.0.0.1:9559 (1 total)
+
+data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
+```
+
+**错误处理**: 若当天日志文件不存在，返回 `data: [no log file]`。
+
 ---
 
 ## 4. 分段推送

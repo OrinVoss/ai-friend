@@ -2,38 +2,96 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="referrer" content="no-referrer">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'">
     <title>AI 朋友</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=3">
     <script src="/static/marked.min.js"></script>
 </head>
 <body>
-    <div class="chat-header">
-        <div class="avatar" aria-hidden="true">星</div>
-        <div class="info">
-            <h1>小星</h1>
-            <div class="status" role="status" aria-live="polite">
-                <span class="dot" id="status-dot"></span>
-                <span id="status-text">连接中...</span>
-                <span class="typing-dots" id="typing-dots" style="display:none">
-                    <span></span><span></span><span></span>
-                </span>
-                <span class="status-separator">|</span>
-                <span class="emotion-text" id="emotion-text"></span>
+    <header class="app-header">
+        <div class="header-left">
+            <div class="avatar" aria-hidden="true">星</div>
+            <div class="info">
+                <h1>小星</h1>
+                <div class="status" role="status" aria-live="polite">
+                    <span class="dot" id="status-dot"></span>
+                    <span id="status-text">连接中...</span>
+                    <span class="typing-dots" id="typing-dots" style="display:none">
+                        <span></span><span></span><span></span>
+                    </span>
+                    <span class="status-separator">|</span>
+                    <span class="emotion-text" id="emotion-text"></span>
+                </div>
             </div>
         </div>
-    </div>
+        <div class="header-right">
+            <button id="logs-toggle" class="icon-btn" title="切换日志面板" aria-label="切换日志面板">📝</button>
+            <button id="status-toggle" class="icon-btn" title="切换状态面板" aria-label="切换状态面板">📊</button>
+        </div>
+    </header>
 
-    <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="聊天记录">
-    </div>
+    <main class="app-main">
+        <!-- 左侧状态面板 -->
+        <aside class="side-panel status-panel" id="status-panel">
+            <div class="panel-header">
+                <h2>状态</h2>
+                <button class="panel-close" data-panel="status" aria-label="关闭状态面板">✕</button>
+            </div>
+            <div class="panel-body" id="status-body">
+                <div class="status-card">
+                    <div class="status-label">对话轮次</div>
+                    <div class="status-value" id="status-turn">--</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-label">当前情绪</div>
+                    <div class="status-value" id="status-emotion">--</div>
+                </div>
+                <div class="status-section">
+                    <h3>关系指标</h3>
+                    <div class="relationship-grid" id="relationship-grid">
+                        <div class="rel-item"><span class="rel-name">信任</span><span class="rel-value" data-key="trust">--</span></div>
+                        <div class="rel-item"><span class="rel-name">熟悉</span><span class="rel-value" data-key="familiarity">--</span></div>
+                        <div class="rel-item"><span class="rel-name">亲密</span><span class="rel-value" data-key="intimacy">--</span></div>
+                        <div class="rel-item"><span class="rel-name">乐趣</span><span class="rel-value" data-key="fun">--</span></div>
+                    </div>
+                </div>
+                <div class="status-section">
+                    <h3>历史变化</h3>
+                    <div class="history-list" id="relationship-history"></div>
+                </div>
+            </div>
+        </aside>
 
-    <div class="chat-input-area">
-        <textarea id="input" placeholder="说点什么..." rows="1" aria-label="输入消息"></textarea>
-        <button id="send-btn" disabled aria-label="发送">➤</button>
-    </div>
+        <!-- 中间聊天区 -->
+        <section class="chat-section" id="chat-section">
+            <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-label="聊天记录"></div>
+            <div class="chat-input-area">
+                <textarea id="input" placeholder="说点什么..." rows="1" aria-label="输入消息"></textarea>
+                <button id="send-btn" disabled aria-label="发送">➤</button>
+            </div>
+        </section>
 
-    <script src="/static/app.js?v=2"></script>
+        <!-- 右侧日志面板 -->
+        <aside class="side-panel logs-panel" id="logs-panel">
+            <div class="panel-header">
+                <h2>服务日志</h2>
+                <button class="panel-close" data-panel="logs" aria-label="关闭日志面板">✕</button>
+            </div>
+            <div class="panel-body">
+                <pre class="logs-content" id="logs-content"></pre>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 移动端底部 Tab -->
+    <nav class="mobile-tabs" id="mobile-tabs">
+        <button class="tab-btn active" data-tab="chat">💬 聊天</button>
+        <button class="tab-btn" data-tab="status">📊 状态</button>
+        <button class="tab-btn" data-tab="logs">📝 日志</button>
+    </nav>
+
+    <script src="/static/app.js?v=3"></script>
 </body>
 </html>

@@ -3,11 +3,6 @@ let sessionId = getCookie('session_id') || '';
 let aiName = '星';
 let isProcessing = false;
 let lastMessageTime = 0;
-let logsEnabled = true;
-let eventSource = null;
-let currentMobileTab = 'chat';
-let reconnectDelay = 2000;
-const maxReconnectDelay = 30000;
 
 function formatTime(ts) {
     var d = new Date(ts);
@@ -16,14 +11,8 @@ function formatTime(ts) {
     return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
 }
 
-function formatDate(ts) {
-    var d = new Date(ts);
-    return (d.getMonth() + 1) + '/' + d.getDate();
-}
-
 function insertTimeMarker(ts) {
     var container = document.getElementById('chat-messages');
-    if (!container) return;
     var div = document.createElement('div');
     div.className = 'time-marker';
     div.textContent = formatTime(ts);
@@ -32,7 +21,7 @@ function insertTimeMarker(ts) {
 
 function maybeInsertTimeMarker() {
     var now = Date.now();
-    if (now - lastMessageTime > 120000) {
+    if (now - lastMessageTime > 120000) {  // 2 min gap
         insertTimeMarker(now);
     }
     lastMessageTime = now;
@@ -52,7 +41,6 @@ function connect() {
     ws = new WebSocket(proto + '//' + location.host + '/ws');
 
     ws.onopen = function() {
-        reconnectDelay = 2000;
         ws.send(JSON.stringify({ type: 'init', session_id: sessionId }));
         setStatus('connected');
     };
@@ -65,12 +53,15 @@ function connect() {
                     sessionId = data.session_id;
                     setCookie('session_id', sessionId);
                     showEmotion(data.emotion);
+                    // FJ-007/FH-003: dynamic personality name
                     if (data.name) {
                         aiName = data.name;
-                        updateAIName(aiName);
+                        var titleEl = document.querySelector('.chat-header .info h1');
+                        if (titleEl) titleEl.textContent = aiName;
+                        var avatarEl = document.querySelector('.chat-header .avatar');
+                        if (avatarEl) avatarEl.textContent = aiName;
                     }
                     loadHistory();
-                    loadStatus();
                     break;
                 case 'segment':
                     hideTyping();
@@ -101,15 +92,8 @@ function connect() {
                         }
                     }
                     if (data.emotion) showEmotion(data.emotion);
-                    loadStatus();
                     break;
                 case 'error':
-                    addSystemMessage(data.content || '出错了');
-                    isProcessing = false;
-                    updateSendButton();
-                    hideTyping();
-                    setStatus('connected');
-                    break;
                 case 'pong':
                     break;
             }
@@ -118,17 +102,25 @@ function connect() {
         }
     };
 
+    var reconnectDelay = 2000;
+    const maxReconnectDelay = 30000;
+
     ws.onclose = function() {
-        setStatus('disconnected');
-        hideTyping();
+        setStatus('disconnected'); hideTyping();
+        // #277: exponential backoff for reconnect
         setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
 
-    ws.onerror = function() {
-        setStatus('error');
+    ws.onopen = function() {
+        reconnectDelay = 2000;  // reset on successful connection
+        ws.send(JSON.stringify({ type: 'init', session_id: sessionId }));
+        setStatus('connected');
     };
 
+    ws.onerror = function() { setStatus('error'); };
+
+    // Keepalive ping every 25s to prevent proxy timeout
     setInterval(function() {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -136,122 +128,23 @@ function connect() {
     }, 25000);
 }
 
-function updateAIName(name) {
-    var titleEl = document.querySelector('.app-header .info h1');
-    if (titleEl) titleEl.textContent = name;
-    var avatarEl = document.querySelector('.app-header .avatar');
-    if (avatarEl) avatarEl.textContent = name;
-}
-
 function loadHistory() {
     var sid = getCookie('session_id');
     if (!sid) return;
+    // FJ-009: AbortController 15s timeout
     var controller = new AbortController();
     setTimeout(function() { controller.abort(); }, 15000);
     fetch('/api/chat/history?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            var container = document.getElementById('chat-messages');
-            if (!container) return;
-            container.innerHTML = '';
             var turns = data.turns || [];
             for (var i = 0; i < turns.length; i++) {
                 var t = turns[i];
-                createMessage(t.role === 'user' ? 'user' : 'assistant', t.content, false);
+                createMessage(t.role === 'user' ? 'user' : 'assistant', t.content);
             }
-            if (turns.length) lastMessageTime = Date.now();
             scrollToBottom();
         })
         .catch(function(e) { console.error('[history] load failed:', e); });
-}
-
-function loadStatus() {
-    var sid = getCookie('session_id') || 'default';
-    var controller = new AbortController();
-    setTimeout(function() { controller.abort(); }, 15000);
-    fetch('/api/status?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            renderStatus(data);
-        })
-        .catch(function(e) { console.error('[status] load failed:', e); });
-}
-
-function renderStatus(data) {
-    var turnEl = document.getElementById('status-turn');
-    var emotionEl = document.getElementById('status-emotion');
-    if (turnEl) turnEl.textContent = data.turn !== undefined ? data.turn : '--';
-    if (emotionEl) emotionEl.textContent = data.emotion || '--';
-
-    var rel = data.relationship || {};
-    document.querySelectorAll('#relationship-grid .rel-value').forEach(function(el) {
-        var key = el.getAttribute('data-key');
-        var val = rel[key];
-        el.textContent = val !== undefined ? val.toFixed(2) : '--';
-    });
-
-    var historyList = document.getElementById('relationship-history');
-    if (historyList) {
-        historyList.innerHTML = '';
-        var hist = data.relationship_history || [];
-        hist.slice().reverse().forEach(function(item) {
-            var div = document.createElement('div');
-            div.className = 'history-item';
-            var dateDiv = document.createElement('div');
-            dateDiv.className = 'history-date';
-            dateDiv.textContent = item.timestamp ? formatDate(item.timestamp) : '--';
-            var valsDiv = document.createElement('div');
-            valsDiv.className = 'history-values';
-            ['trust', 'familiarity', 'intimacy', 'fun'].forEach(function(k) {
-                var span = document.createElement('span');
-                span.textContent = k + ': ' + (item[k] !== undefined ? item[k].toFixed(2) : '--');
-                valsDiv.appendChild(span);
-            });
-            div.appendChild(dateDiv);
-            div.appendChild(valsDiv);
-            historyList.appendChild(div);
-        });
-    }
-}
-
-function connectLogs() {
-    if (eventSource) {
-        eventSource.close();
-    }
-    if (!logsEnabled) return;
-
-    var content = document.getElementById('logs-content');
-    if (!content) return;
-
-    eventSource = new EventSource('/api/logs');
-    eventSource.onmessage = function(e) {
-        appendLogLine(e.data);
-    };
-    eventSource.onerror = function(e) {
-        console.error('[logs] sse error:', e);
-    };
-}
-
-function appendLogLine(line) {
-    var content = document.getElementById('logs-content');
-    if (!content) return;
-    var div = document.createElement('div');
-    div.className = 'log-line';
-
-    var levelMatch = line.match(/\[(INFO|WARNING|ERROR|CRITICAL|DEBUG)\]/);
-    if (levelMatch) {
-        div.classList.add('level-' + levelMatch[1]);
-    }
-
-    div.textContent = line;
-    content.appendChild(div);
-
-    // Keep last 500 lines
-    while (content.children.length > 500) {
-        content.removeChild(content.firstChild);
-    }
-
-    content.scrollTop = content.scrollHeight;
 }
 
 function setStatus(s) {
@@ -285,12 +178,11 @@ function showEmotion(emotion) {
 
 function scrollToBottom() {
     var c = document.getElementById('chat-messages');
-    if (c) c.scrollTop = c.scrollHeight;
+    c.scrollTop = c.scrollHeight;
 }
 
 function addSystemMessage(text) {
     var c = document.getElementById('chat-messages');
-    if (!c) return;
     var d = document.createElement('div');
     d.className = 'system-message';
     d.textContent = text;
@@ -298,10 +190,8 @@ function addSystemMessage(text) {
     scrollToBottom();
 }
 
-function createMessage(role, content, autoScroll) {
-    autoScroll = autoScroll !== false;
+function createMessage(role, content) {
     var container = document.getElementById('chat-messages');
-    if (!container) return;
     maybeInsertTimeMarker();
     var div = document.createElement('div');
     div.className = 'message ' + role;
@@ -318,20 +208,18 @@ function createMessage(role, content, autoScroll) {
     div.appendChild(av);
     div.appendChild(bb);
     container.appendChild(div);
-    if (autoScroll) scrollToBottom();
+    scrollToBottom();
     return div;
 }
 
 function updateSendButton() {
     var b = document.getElementById('send-btn');
     var i = document.getElementById('input');
-    if (!b || !i) return;
     b.disabled = isProcessing || !i.value.trim();
 }
 
 function sendMessage() {
     var input = document.getElementById('input');
-    if (!input) return;
     var text = input.value.trim();
     if (!text || isProcessing) return;
     input.value = '';
@@ -345,6 +233,7 @@ function sendMessage() {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'message', content: text }));
     } else {
+        // FJ-009: AbortController 15s timeout for REST fallback
         var controller = new AbortController();
         setTimeout(function() { controller.abort(); }, 15000);
         fetch('/api/chat', {
@@ -360,7 +249,6 @@ function sendMessage() {
             createMessage('assistant', resp);
             if (data.emotion) showEmotion(data.emotion);
             isProcessing = false; updateSendButton(); setStatus('connected');
-            loadStatus();
         })
         .catch(function(err) {
             console.error('[rest] chat failed:', err);
@@ -369,81 +257,11 @@ function sendMessage() {
     }
 }
 
-/* UI interactions */
-function togglePanel(panelName) {
-    var panel = document.getElementById(panelName + '-panel');
-    if (!panel) return;
-    panel.classList.toggle('open');
-    panel.classList.toggle('collapsed');
-}
-
-function switchMobileTab(tab) {
-    currentMobileTab = tab;
-    var chatSection = document.getElementById('chat-section');
-    var statusPanel = document.getElementById('status-panel');
-    var logsPanel = document.getElementById('logs-panel');
-
-    document.querySelectorAll('.tab-btn').forEach(function(btn) {
-        btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
-    });
-
-    if (tab === 'chat') {
-        chatSection.classList.remove('hidden-mobile');
-        statusPanel.classList.remove('open');
-        logsPanel.classList.remove('open');
-    } else if (tab === 'status') {
-        chatSection.classList.add('hidden-mobile');
-        statusPanel.classList.add('open');
-        logsPanel.classList.remove('open');
-    } else if (tab === 'logs') {
-        chatSection.classList.add('hidden-mobile');
-        statusPanel.classList.remove('open');
-        logsPanel.classList.add('open');
-    }
-}
-
-function setupUI() {
-    var logsToggle = document.getElementById('logs-toggle');
-    var statusToggle = document.getElementById('status-toggle');
-    if (logsToggle) {
-        logsToggle.addEventListener('click', function() {
-            if (window.innerWidth <= 900) {
-                switchMobileTab('logs');
-            } else {
-                togglePanel('logs');
-            }
-        });
-    }
-    if (statusToggle) {
-        statusToggle.addEventListener('click', function() {
-            if (window.innerWidth <= 900) {
-                switchMobileTab('status');
-            } else {
-                togglePanel('status');
-            }
-        });
-    }
-
-    document.querySelectorAll('.panel-close').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var panel = btn.getAttribute('data-panel');
-            if (window.innerWidth <= 600) {
-                switchMobileTab('chat');
-            } else {
-                togglePanel(panel);
-            }
-        });
-    });
-
-    document.querySelectorAll('.tab-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            switchMobileTab(btn.getAttribute('data-tab'));
-        });
-    });
-
-    var input = document.getElementById('input');
-    var btn = document.getElementById('send-btn');
-    if (input) {
+(function() {
+    document.addEventListener('DOMContentLoaded', function() {
+        connect();
+        var input = document.getElementById('input');
+        var btn = document.getElementById('send-btn');
         input.addEventListener('input', function() {
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
@@ -452,15 +270,7 @@ function setupUI() {
         input.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
         });
-    }
-    if (btn) btn.addEventListener('click', sendMessage);
-    updateSendButton();
-}
-
-(function() {
-    document.addEventListener('DOMContentLoaded', function() {
-        connect();
-        connectLogs();
-        setupUI();
+        btn.addEventListener('click', sendMessage);
+        updateSendButton();
     });
 })();
