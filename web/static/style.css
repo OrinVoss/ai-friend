@@ -139,6 +139,7 @@ body {
 
 .message {
     display: flex;
+    align-items: flex-start;
     gap: 10px;
     max-width: 80%;
     animation: fadeIn 0.3s ease;
@@ -176,10 +177,10 @@ body {
 }
 
 .message .bubble {
-    padding: 10px 14px;
+    padding: 6px 14px;
     border-radius: 14px;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.35;
     word-break: break-word;
     white-space: pre-wrap;
     max-width: 100%;
