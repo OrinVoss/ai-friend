@@ -43,6 +43,9 @@ class SleepManager:
         try:
             with open(self._sleep_state_file) as f:
                 return f.read().strip() == "1"
+        except FileNotFoundError:
+            logger.debug(f"[sleep] state file not found, assuming awake: {self._sleep_state_file}")
+            return False
         except Exception as e:
             logger.warning(f"Failed to read sleep state: {e}")
             return False

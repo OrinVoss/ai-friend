@@ -39,7 +39,8 @@ class Agent:
     def __init__(self, personality: Personality, provider: LLMProvider,
                  ltm: LongTermMemory, retriever: MemoryRetriever,
                  consolidator: MemoryConsolidator, short_term: ConversationBuffer,
-                 config: Config, ui: Optional[ConsoleInterface] = None):
+                 config: Config, ui: Optional[ConsoleInterface] = None,
+                 session_id: str = "default"):
         self.personality = personality
         self.provider = provider
         self.ltm = ltm
@@ -61,7 +62,7 @@ class Agent:
         # Sleep state is persisted in the project root (same directory as the DB)
         # rather than next to the personality file, which now lives in personalities/.
         sleep_dir = os.path.dirname(os.path.abspath(config.db_path))
-        session_tag = getattr(config, "session_id", None) or "default"
+        session_tag = session_id or "default"
         sleep_file = os.path.join(sleep_dir, f".sleep_state.{session_tag}")
         self._sleep = SleepManager(
             sleep_state_file=sleep_file,

@@ -96,7 +96,7 @@ class WebAgent:
             personality=self.personality, provider=self.provider,
             ltm=self.ltm, retriever=self.retriever,
             consolidator=self.consolidator, short_term=self.short_term,
-            config=config,
+            config=config, session_id=self.session_id,
         )
         self.agent._tool_registry = registry
         # Restore turn counter so page refreshes don't reset it (#RS-001)
