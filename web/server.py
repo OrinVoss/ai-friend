@@ -248,10 +248,13 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                 should_sleep, msg = await agent.get_sleep_state()
                 if msg:
                     logger.info(f"Sleep/wake message: sleeping={agent.is_sleeping} msg={msg[:50]}")
-                    agent.last_activity = time.time()
+                    agent.last_activity_time = time.time()
                     cooldown = 60
                     sleep_cooldown = 120  # 10 min cooldown on sleep transitions
                     await _send_segments(active_ws, agent, msg, agent.emotion)
+                    # Store sleep/wake message in history so it survives page refresh
+                    agent.short_term.add_turn("assistant", msg, metadata={"add_to_history": False})
+                    agent.ltm.repo.insert_turn_sync(agent.turn_count, "assistant", msg)
                     if should_sleep:
                         await agent.generate_dream()
             else:
@@ -260,7 +263,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                 await asyncio.sleep(30)
                 continue
 
-            idle = time.time() - agent.last_activity
+            idle = time.time() - agent.last_activity_time
             if idle < 30 or cooldown > 0:
                 cooldown = max(0, cooldown - 1)
                 await asyncio.sleep(5)
@@ -290,7 +293,7 @@ async def _proactive_loop(websocket: WebSocket, session_id: str):
                         logger.debug(f"[proactive] rate limit blocked action={intent.action}")
                     response = None
                 if response:
-                    agent.last_activity = time.time()
+                    agent.last_activity_time = time.time()
                     agent.record_rate_limit(intent.action)
                     cooldown = 12
                     await _send_segments(active_ws, agent, response, agent.emotion)

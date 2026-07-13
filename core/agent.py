@@ -274,8 +274,11 @@ class Agent:
 
     # ── Proactivity forwarding ──
 
-    def _check_rate_limit(self, action: str) -> bool:
+    def check_rate_limit(self, action: str) -> bool:
         return self._proactive.check_rate_limit(action)
+
+    def record_rate_limit(self, action: str) -> None:
+        return self._proactive.record_rate_limit(action)
 
     def _calculate_proactivity(self, idle_duration: float) -> float:
         return self._proactive.calculate_proactivity(idle_duration)
