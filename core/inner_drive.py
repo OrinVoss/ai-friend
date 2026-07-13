@@ -2,19 +2,16 @@
 
 Perceive user input → retrieve memory → identify information gaps → decide:
   - No external tools needed → direct to Agent 3 (expression)
-  - External tools needed → natural language tool request to Agent 2
+  - External tools needed → structured tool request to Agent 2
 
-The inner drive is a ReAct-style reasoning loop using internal tools (recall, remember)
-to build context, then producing a decision + natural language tool request.
+Uses JSON Schema response_format instead of keyword/regex parsing. (#ID-001)
 """
-
 import logging
 import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-from tools.traits import EXTERNAL_TOOL_NAMES
 
 
 @dataclass
@@ -32,6 +29,7 @@ class InnerDriveResult:
     reasoning: str = ""                        # Why this decision
     tool_requests: list[ToolRequest] = field(default_factory=list)
     summary: str = ""                          # Compact summary for Agent 3
+    recall_query: str = ""                     # Internal recall query (if needed)
 
 
 @dataclass
@@ -40,6 +38,61 @@ class ProactiveIntent:
     action: str = "silent"      # "chat", "explore", or "silent"
     topic_hint: str = ""        # What to talk about or explore
     reasoning: str = ""         # Why this decision (serves as context for Agent 3)
+
+
+# ID-001: JSON Schema for InnerDrive's structured decision output.
+# Forces the LLM to produce clean structured data instead of free-form text
+# that requires keyword/regex guessing. The schema includes an optional
+# recall_query field so internal memory recall can be requested as part of
+# the same structured output, eliminating the separate ReAct loop.
+INNER_DRIVE_SCHEMA = {
+    "type": "json_object",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "needs_external_tools": {
+                "type": "boolean",
+                "description": "是否需要调用外部工具（web_fetch/web_search/read_file/glob/grep/music_play/notify）",
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "推理过程：解释为什么需要或不需要外部工具。带情绪表达，Agent 3 会看到这段文字",
+            },
+            "summary": {
+                "type": "string",
+                "description": "向 Agent 3（角色扮演层）传递的简洁结论摘要",
+            },
+            "recall_query": {
+                "type": "string",
+                "description": "如需要先回忆用户信息，填写具体查询内容（如'用户喜欢的音乐类型'），否则留空",
+            },
+            "tool_requests": {
+                "type": "array",
+                "description": "需要 Agent 2 执行的外部工具请求。needs_external_tools=true 时必填",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "description": "用自然语言描述需要做什么，例如'需要获取https://xxx的网页内容'",
+                        },
+                        "suggested_tool": {
+                            "type": "string",
+                            "description": "建议使用的工具名（web_fetch/web_search/read_file/glob/grep/music_play/notify），可选",
+                        },
+                        "params_hint": {
+                            "type": "object",
+                            "description": "工具参数提示，例如{\"url\": \"https://...\", \"query\": \"搜索词\"}",
+                            "additionalProperties": True,
+                        },
+                    },
+                    "required": ["description"],
+                },
+            },
+        },
+        "required": ["needs_external_tools", "reasoning", "summary"],
+    },
+}
 
 
 class InnerDriveAgent:
@@ -58,15 +111,15 @@ class InnerDriveAgent:
         self._short_term = short_term
         self._full_registry = tool_registry
         self._max_iterations = max_iterations
-        self._max_tokens_assess = max_tokens_assess      # #257
+        self._max_tokens_assess = max_tokens_assess
         self._max_tokens_proactive = max_tokens_proactive
         self._max_tokens_review = max_tokens_review
         self._conv_hist_tokens = conv_hist_tokens
 
     def assess(self, user_input: str) -> InnerDriveResult:
-        """Run inner drive reasoning loop, return decision."""
+        """Run inner drive reasoning, return structured decision via JSON schema."""
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import parse_tool_calls, execute_tool_calls
+        from core.dispatcher import execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
@@ -80,34 +133,42 @@ class InnerDriveAgent:
 
         messages = [
             {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": f"用户输入：{user_input}\n\n请进行内驱推理，判断是否需要外部工具。"},
+            {"role": "user", "content": f"用户输入：{user_input}\n\n请进行内驱推理，输出 JSON 决策。"},
         ]
 
         logger.info(f"[inner_drive] start len={len(user_input)}")
 
         for _idx in range(self._max_iterations):
-            logger.debug(f"[inner_drive] iter={_idx+1}/{self._max_iterations}")
-            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_assess)
-            cleaned, calls = parse_tool_calls(resp)
-
-            if not calls:
-                result = self._parse_decision(cleaned)
-                logger.info(
-                    f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
-                    f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
+            resp = self._provider.generate(
+                messages, stream=False, max_tokens=self._max_tokens_assess,
+                response_format=INNER_DRIVE_SCHEMA,
+            )
+            result = self._parse_json_decision(resp)
+            if result is None:
+                logger.warning("[inner_drive] JSON parse failed, defaulting to no tools")
+                return InnerDriveResult(
+                    needs_external_tools=False,
+                    reasoning="解析失败，默认不需要外部工具",
+                    summary="",
                 )
-                return result
 
-            # Internal tools called (recall/remember)
-            logger.info(f"[inner_drive] internal tools: {[c['name'] for c in calls]}")
-            messages.append({"role": "assistant", "content": resp})
-            results = execute_tool_calls(self._full_registry, calls)
-            success_count = sum(1 for r in results if r["success"])
-            logger.info(f"[inner_drive] internal done: {success_count}/{len(results)} ok")
-            result_text = self._format_internal_results(results)
-            messages.append({"role": "user", "content": result_text})
+            # If recall_query is set, execute internal recall and loop
+            if result.recall_query:
+                logger.info(f"[inner_drive] internal recall: {result.recall_query[:60]}")
+                messages.append({"role": "assistant", "content": resp})
+                calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
+                exec_results = execute_tool_calls(self._full_registry, calls)
+                result_text = self._format_internal_results(exec_results)
+                messages.append({"role": "user", "content": result_text})
+                continue
 
-        # Max iterations reached without decision
+            # No recall needed → final decision
+            logger.info(
+                f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
+                f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
+            )
+            return result
+
         logger.warning("[inner_drive] max iterations, defaulting to no tools")
         return InnerDriveResult(
             needs_external_tools=False,
@@ -172,7 +233,7 @@ class InnerDriveAgent:
             )
 
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import parse_tool_calls, execute_tool_calls
+        from core.dispatcher import execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
@@ -189,9 +250,7 @@ class InnerDriveAgent:
             f"用户原始输入：{user_input}\n\n"
             f"=== 第 {round_num} 轮工具执行结果 ===\n"
             f"{tool_records_text[:3000]}\n\n"
-            f"请判断：以上结果是否足够回复用户？\n"
-            f"- 如果足够 → 回复 '决策：不需要外部工具' + 理由\n"
-            f"- 如果还需要更多信息 → 回复 '决策：需要外部工具' + 新的工具请求\n"
+            f"请判断：以上结果是否足够回复用户？输出 JSON 格式决策。\n"
             f"（还剩 {max_rounds - round_num} 轮可用）"
         )
 
@@ -201,18 +260,34 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] review round={round_num}/{max_rounds}")
-        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
-        cleaned, calls = parse_tool_calls(resp)
+        resp = self._provider.generate(
+            messages, stream=False, max_tokens=self._max_tokens_review,
+            response_format=INNER_DRIVE_SCHEMA,
+        )
+        result = self._parse_json_decision(resp)
+        if result is None:
+            return InnerDriveResult(
+                needs_external_tools=False,
+                reasoning="解析失败，默认不需要更多工具",
+                summary=tool_records_text[:200],
+            )
 
-        if calls:
+        # Handle recall within review if needed
+        for _ in range(self._max_iterations):
+            if not result.recall_query:
+                break
             messages.append({"role": "assistant", "content": resp})
-            results = execute_tool_calls(self._full_registry, calls)
-            result_text = self._format_internal_results(results)
-            messages.append({"role": "user", "content": result_text})
-            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
-            cleaned, _ = parse_tool_calls(resp)
+            calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
+            exec_results = execute_tool_calls(self._full_registry, calls)
+            messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
+            resp = self._provider.generate(
+                messages, stream=False, max_tokens=self._max_tokens_review,
+                response_format=INNER_DRIVE_SCHEMA,
+            )
+            result = self._parse_json_decision(resp)
+            if result is None:
+                break
 
-        result = self._parse_decision(cleaned)
         logger.info(
             f"[inner_drive] review: needs_tools={result.needs_external_tools} "
             f"reason={result.reasoning[:80]}"
@@ -222,7 +297,7 @@ class InnerDriveAgent:
     def re_decide(self, user_input: str, failure_log: list[dict]) -> InnerDriveResult:
         """Re-decide after Agent 2 tool failures. Try alternative approaches."""
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import parse_tool_calls, execute_tool_calls
+        from core.dispatcher import execute_tool_calls
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
@@ -249,106 +324,92 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] re-decide after {len(failure_log)} failures")
-        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
-        cleaned, calls = parse_tool_calls(resp)
+        resp = self._provider.generate(
+            messages, stream=False, max_tokens=self._max_tokens_review,
+            response_format=INNER_DRIVE_SCHEMA,
+        )
+        result = self._parse_json_decision(resp)
+        if result is None:
+            return InnerDriveResult(
+                needs_external_tools=False,
+                reasoning="解析失败，默认放弃工具调用",
+                summary="",
+            )
 
-        # Execute any internal tool calls from re-decision
-        if calls:
+        # Handle recall within re-decide if needed
+        for _ in range(self._max_iterations):
+            if not result.recall_query:
+                break
             messages.append({"role": "assistant", "content": resp})
-            results = execute_tool_calls(self._full_registry, calls)
-            result_text = self._format_internal_results(results)
-            messages.append({"role": "user", "content": result_text})
-            resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_review)
-            cleaned, _ = parse_tool_calls(resp)
+            calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
+            exec_results = execute_tool_calls(self._full_registry, calls)
+            messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
+            resp = self._provider.generate(
+                messages, stream=False, max_tokens=self._max_tokens_review,
+                response_format=INNER_DRIVE_SCHEMA,
+            )
+            result = self._parse_json_decision(resp)
+            if result is None:
+                break
 
-        result = self._parse_decision(cleaned)
         logger.info(
             f"[inner_drive] re-decide: needs_tools={result.needs_external_tools} "
             f"reason={result.reasoning[:80]}"
         )
         return result
 
-    def _parse_decision(self, text: str) -> InnerDriveResult:
-        """Parse Agent 1's natural language output into structured decision."""
-        text = text.strip()
 
-        # Check for explicit "no need" signal
-        no_need = any(kw in text for kw in ["NO_NEED", "不需要外部工具", "不需要工具",
-                                              "无需工具", "直接回复", "没有外部工具"])
-        if no_need:
-            return InnerDriveResult(
-                needs_external_tools=False,
-                reasoning=text[:300],
-                summary=text[:200],
-            )
+    def _parse_json_decision(self, resp: str) -> InnerDriveResult | None:
+        """Parse InnerDrive's JSON-structured output into InnerDriveResult.
 
-        # Check for external tool references
-        has_external = any(
-            name in text for name in EXTERNAL_TOOL_NAMES
-        ) or any(kw in text for kw in [
-            "需要调用", "需要外部", "需要获取", "需要搜索", "需要读取",
-            "调用web", "用web", "需要查", "需要打开",
-        ])
+        The LLM outputs JSON matching INNER_DRIVE_SCHEMA via response_format.
+        This method unmarshals it and constructs the result. No keyword/regex
+        guessing needed — the schema enforces structure at the LLM level.
+        """
+        import json
+        text = resp.strip()
+        # Strip any <think> blocks that may appear even in JSON mode
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
 
-        if not has_external:
-            return InnerDriveResult(
-                needs_external_tools=False,
-                reasoning=text[:300],
-                summary=text[:200],
-            )
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to find JSON object in the text
+            brace_start = text.find('{')
+            brace_end = text.rfind('}')
+            if brace_start >= 0 and brace_end > brace_start:
+                try:
+                    data = json.loads(text[brace_start:brace_end + 1])
+                except json.JSONDecodeError:
+                    logger.warning(f"[inner_drive] JSON fallback parse failed: {text[:100]}")
+                    return None
+            else:
+                logger.warning(f"[inner_drive] no JSON found in response: {text[:100]}")
+                return None
 
-        # Extract tool requests from text
-        requests = self._extract_tool_requests(text)
+        needs_tools = data.get("needs_external_tools", False)
+        reasoning = data.get("reasoning", "")[:300]
+        summary = data.get("summary", "")[:200]
+        recall_query = data.get("recall_query", "") or ""
+
+        # Parse tool_requests array from JSON
+        raw_requests = data.get("tool_requests") or []
+        tool_requests = []
+        for r in raw_requests:
+            if isinstance(r, dict) and r.get("description"):
+                tool_requests.append(ToolRequest(
+                    description=r["description"],
+                    suggested_tool=r.get("suggested_tool", ""),
+                    params_hint=r.get("params_hint", {}),
+                ))
+
         return InnerDriveResult(
-            needs_external_tools=bool(requests),
-            reasoning=text[:300],
-            tool_requests=requests,
-            summary=text[:200],
+            needs_external_tools=needs_tools,
+            reasoning=reasoning,
+            tool_requests=tool_requests,
+            summary=summary,
+            recall_query=recall_query,
         )
-
-    def _extract_tool_requests(self, text: str) -> list[ToolRequest]:
-        """Extract natural language tool requests from Agent 1's output."""
-        requests = []
-
-        # Look for URL patterns to suggest web_fetch
-        urls = re.findall(r'https?://[^\s一-鿿]+', text)
-        for url in urls:
-            url = url.rstrip('.,;:)】」\'\"')
-            requests.append(ToolRequest(
-                description=f"需要获取网页内容：{url}",
-                suggested_tool="web_fetch",
-                params_hint={"url": url},
-            ))
-
-        # Look for search intent
-        search_matches = re.findall(r'(?:搜索|查询|搜一下|搜)[：:]\s*(.+?)(?:[，。,\.\n]|$)', text)
-        for query in search_matches:
-            if query.strip():
-                requests.append(ToolRequest(
-                    description=f"需要搜索：{query.strip()}",
-                    suggested_tool="web_search",
-                    params_hint={"query": query.strip()},
-                ))
-
-        # Look for file-related intent
-        file_matches = re.findall(r'(?:读取|打开|查看)[：:]\s*(.+?)(?:[，。,\.\n]|$)', text)
-        for path in file_matches:
-            if path.strip():
-                requests.append(ToolRequest(
-                    description=f"需要读取文件：{path.strip()}",
-                    suggested_tool="read_file",
-                    params_hint={"path": path.strip()},
-                ))
-
-        # If no structured matches but has_external was True, make a generic request
-        if not requests:
-            requests.append(ToolRequest(
-                description=text[:500],
-                suggested_tool="",
-                params_hint={},
-            ))
-
-        return requests
 
     def _parse_proactive_intent(self, text: str) -> ProactiveIntent:
         """Parse the LLM's proactive decision output into a ProactiveIntent."""

@@ -71,16 +71,16 @@ def build_inner_drive_prompt(
         "\n  · read_file/glob/grep：用户提到了文件需要读取"
         "\n  · music_play：用户想听音乐"
         "\n  · notify：用户需要提醒"
-        "\n\n输出格式（严格遵守）："
-        "\n如果不需要外部工具："
-        '\n  决策：不需要外部工具'
-        "\n  理由：（一句话说明为什么不需要）"
-        "\n\n如果需要外部工具："
-        "\n  决策：需要外部工具"
-        "\n  理由：（为什么要获取这个信息）"
-        "\n  工具请求："
-        "\n    需要调用 [工具名] [具体描述]"
-        "\n    参数：[参数名] = [参数值]"
+        "\n\n输出格式：JSON（严格遵守以下结构）"
+        "\n你的输出将被作为 JSON 解析，必须包含以下字段："
+        '\n  - needs_external_tools: true/false — 是否需要外部工具'
+        "\n  - reasoning: 你的推理过程和情绪表达，Agent 3 会看到这段文字"
+        "\n  - summary: 向 Agent 3 传递的简洁结论"
+        "\n  - recall_query: 如果需要先回忆用户信息，写查询内容；否则留空"
+        '\n  - tool_requests: needs_external_tools=true 时必填，数组格式：'
+        '\n      [{"description": "需要做什么", '
+        '\n        "suggested_tool": "工具名（可选）", '
+        '\n        "params_hint": {"参数名": "参数值"}}]'
     )
 
     # Tools available
