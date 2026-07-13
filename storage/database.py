@@ -25,6 +25,7 @@ ALLOWED_ALTERATIONS = {
     ("reflections", "session_id"),
     ("conversation_turns", "session_id"),
     ("relationship_metrics", "session_id"),
+    ("relationship_snapshots", "session_id"),
 }
 
 
@@ -138,9 +139,11 @@ class Database:
                 );
 
                 CREATE TABLE IF NOT EXISTS relationship_metrics (
-                    dimension TEXT PRIMARY KEY,
+                    dimension TEXT NOT NULL,
                     value REAL DEFAULT 0.3,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT DEFAULT 'default',
+                    PRIMARY KEY (session_id, dimension)
                 );
 
                 CREATE TABLE IF NOT EXISTS conversation_turns (
@@ -149,19 +152,27 @@ class Database:
                     role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
                     content TEXT NOT NULL,
                     emotional_state TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT DEFAULT 'default'
                 );
 
-                INSERT OR IGNORE INTO relationship_metrics (dimension, value) VALUES
-                    ('trust', 0.3),
-                    ('familiarity', 0.3),
-                    ('intimacy', 0.3),
-                    ('playfulness', 0.3);
+                INSERT OR IGNORE INTO relationship_metrics (dimension, value, session_id) VALUES
+                    ('trust', 0.3, 'default'),
+                    ('familiarity', 0.3, 'default'),
+                    ('intimacy', 0.3, 'default'),
+                    ('playfulness', 0.3, 'default');
 
                 CREATE TABLE IF NOT EXISTS relationship_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     dimension TEXT NOT NULL,
                     value REAL DEFAULT 0.3,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT DEFAULT 'default'
+                );
+
+                CREATE TABLE IF NOT EXISTS session_roles (
+                    session_id TEXT PRIMARY KEY,
+                    role_id TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -189,6 +200,7 @@ class Database:
                 ("reflections", "session_id", "TEXT", "'default'"),         # #40
                 ("conversation_turns", "session_id", "TEXT", "'default'"),  # #40
                 ("relationship_metrics", "session_id", "TEXT", "'default'"),# #40
+                ("relationship_snapshots", "session_id", "TEXT", "'default'"),# #132
             ]
             for table, column, col_type, default_val in alterations:
                 # #215: whitelist validation — reject unknown alterations
@@ -200,6 +212,46 @@ class Database:
                 if column not in columns:
                     await c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
                     logger.info(f"Schema migration: added {table}.{column}")
+
+            # #RM-001: migrate relationship_metrics from the old single-column
+            # primary key (dimension) to composite (session_id, dimension).
+            await c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='relationship_metrics'")
+            row = await c.fetchone()
+            metrics_sql = row[0] if row else ""
+            if metrics_sql and "dimension TEXT PRIMARY KEY" in metrics_sql:
+                logger.warning("[db] migrating relationship_metrics to composite PK (session_id, dimension)")
+                await c.executescript("""
+                    ALTER TABLE relationship_metrics RENAME TO _old_relationship_metrics;
+                    CREATE TABLE relationship_metrics (
+                        dimension TEXT NOT NULL,
+                        value REAL DEFAULT 0.3,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        session_id TEXT DEFAULT 'default',
+                        PRIMARY KEY (session_id, dimension)
+                    );
+                    INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
+                        SELECT dimension, value, updated_at, COALESCE(session_id, 'default')
+                        FROM _old_relationship_metrics;
+                    DROP TABLE _old_relationship_metrics;
+                """)
+
+            # #SR-001: one-time migration — map the pre-existing default session
+            # to the role name found in the legacy personality.json.
+            await c.execute("SELECT COUNT(*) FROM session_roles")
+            if (await c.fetchone())[0] == 0:
+                legacy_role = "default"
+                try:
+                    import json, os
+                    if os.path.exists("personality.json"):
+                        with open("personality.json", encoding="utf-8") as f:
+                            legacy_role = json.load(f).get("personality", {}).get("name", "default") or "default"
+                except Exception:
+                    pass
+                await c.execute(
+                    "INSERT OR IGNORE INTO session_roles (session_id, role_id) VALUES (?, ?)",
+                    ("default", legacy_role),
+                )
+                logger.info(f"[db] migrated default session to role={legacy_role}")
 
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
@@ -216,6 +268,8 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_reflections_session ON reflections(session_id, is_active);
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, id);
                 CREATE INDEX IF NOT EXISTS idx_relationship_session ON relationship_metrics(session_id);
+                CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_session ON relationship_snapshots(session_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_session_roles_role ON session_roles(role_id, created_at);
             """)
             logger.info("[db] indexes created/verified")
         await self.commit()

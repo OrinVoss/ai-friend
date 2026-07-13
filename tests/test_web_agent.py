@@ -17,6 +17,8 @@ class TestWebAgentProactive(unittest.TestCase):
 
         self.agent = WebAgent.__new__(WebAgent)
         self.agent.config = cfg
+        self.agent.role_id = "testbot"
+        self.agent.personality_path = "personalities/testbot.json"
         self.agent.personality = MagicMock()
         self.agent.personality.config.name = "TestBot"
         self.agent.personality.save = MagicMock()
@@ -101,7 +103,7 @@ class TestWebAgentProactive(unittest.TestCase):
 
     def test_save_personality(self):
         self.agent.save_personality()
-        self.agent.personality.save.assert_called_once_with("personality.json")
+        self.agent.personality.save.assert_called_once_with(self.agent.personality_path)
 
 
 if __name__ == "__main__":

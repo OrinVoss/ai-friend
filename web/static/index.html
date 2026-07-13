@@ -27,6 +27,7 @@
             </div>
         </div>
         <div class="header-right">
+            <button id="switch-role-btn" class="text-btn" title="切换角色/会话" aria-label="切换角色/会话">切换</button>
             <button id="logs-toggle" class="icon-btn" title="切换日志面板" aria-label="切换日志面板">📝</button>
             <button id="status-toggle" class="icon-btn" title="切换状态面板" aria-label="切换状态面板">📊</button>
         </div>
@@ -91,6 +92,21 @@
         <button class="tab-btn" data-tab="status">📊 状态</button>
         <button class="tab-btn" data-tab="logs">📝 日志</button>
     </nav>
+
+    <!-- 角色/会话选择弹窗 -->
+    <div class="modal-overlay" id="role-modal" style="display:none">
+        <div class="modal">
+            <h2>选择一个角色</h2>
+            <div class="role-list" id="role-list"></div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="session-modal" style="display:none">
+        <div class="modal">
+            <h2>选择对话</h2>
+            <div class="session-list" id="session-list"></div>
+            <button class="new-session-btn" id="new-session-btn">+ 新建对话</button>
+        </div>
+    </div>
 
     <script src="/static/app.js?v=3"></script>
 </body>

@@ -1,4 +1,5 @@
 import asyncio
+import glob
 import json
 import logging
 import os
@@ -147,12 +148,13 @@ async def status_api(session_id: str = "default"):
     # Normalize dimensions for UI: trust/familiarity/intimacy/fun
     # The DB uses 'playfulness' for the fun dimension.
     def _normalize_rel(dims: dict) -> dict:
-        return {
-            "trust": dims.get("trust", 0.3),
-            "familiarity": dims.get("familiarity", 0.3),
-            "intimacy": dims.get("intimacy", 0.3),
-            "fun": dims.get("playfulness", dims.get("fun", 0.3)),
-        }
+        rel = {}
+        for k, v in dims.items():
+            if k == "playfulness":
+                rel["fun"] = v
+            else:
+                rel[k] = v
+        return rel
 
     def _normalize_history(rows: list[dict]) -> list[dict]:
         # Group flat rows by timestamp and aggregate into one record per timestamp
@@ -160,7 +162,7 @@ async def status_api(session_id: str = "default"):
         for row in rows:
             ts = row.get("created_at") or row.get("timestamp")
             dim = row.get("dimension", "")
-            val = row.get("value", 0.3)
+            val = row.get("value")
             if not ts:
                 continue
             if ts not in groups:
@@ -171,14 +173,7 @@ async def status_api(session_id: str = "default"):
                 groups[ts][dim] = val
         result = []
         for ts in sorted(groups.keys()):
-            g = groups[ts]
-            result.append({
-                "timestamp": ts,
-                "trust": g.get("trust", 0.3),
-                "familiarity": g.get("familiarity", 0.3),
-                "intimacy": g.get("intimacy", 0.3),
-                "fun": g.get("fun", 0.3),
-            })
+            result.append(groups[ts])
         return result
 
     relationship = _normalize_rel(raw_rel)
@@ -190,6 +185,31 @@ async def status_api(session_id: str = "default"):
         relationship=relationship,
         relationship_history=relationship_history,
     )
+
+
+@app.get("/api/roles")
+async def roles_api():
+    """List available roles from personalities/*.json."""
+    ensure_session()
+    roles = []
+    for path in sorted(glob.glob("personalities/*.json")):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            cfg = data.get("personality", data)
+            role_id = data.get("id") or os.path.splitext(os.path.basename(path))[0]
+            roles.append({"id": role_id, "name": cfg.get("name", role_id)})
+        except Exception as e:
+            logger.warning(f"[api/roles] failed to read {path}: {e}")
+    return {"roles": roles}
+
+
+@app.get("/api/sessions")
+async def sessions_api(role_id: str):
+    """Return session IDs previously created for a given role."""
+    ensure_session()
+    sessions = await session_manager.repo.get_sessions_by_role(role_id)
+    return {"role_id": role_id, "sessions": sessions}
 
 
 @app.get("/api/chat/history", response_model=HistoryResponse)
@@ -426,8 +446,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if msg_type == "init":
                 sid = data.get("session_id")
-                session_id, agent = session_manager.get_or_create(sid)
-                logger.info(f"[ws] init session={session_id} sid_param={sid}")
+                role_id = data.get("role_id")
+                session_id, agent = session_manager.get_or_create(sid, role_id)
+                logger.info(f"[ws] init session={session_id} role={agent.role_id} sid_param={sid}")
                 # Register proactive task per-session (replaces old task if exists)
                 task = asyncio.create_task(_proactive_loop(websocket, session_id))
                 session_manager.register_proactive(session_id, task, websocket)

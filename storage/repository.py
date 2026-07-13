@@ -241,6 +241,19 @@ class Repository:
             await c.execute("SELECT dimension, value FROM relationship_metrics WHERE session_id = ?", (self.session_id,))
             return {r["dimension"]: r["value"] for r in await c.fetchall()}
 
+    async def ensure_relationship_defaults(self) -> None:
+        """Seed the four base relationship dimensions for the current session."""
+        async with self.db.cursor() as c:
+            await c.execute("SELECT dimension FROM relationship_metrics WHERE session_id = ?", (self.session_id,))
+            existing = {r["dimension"] for r in await c.fetchall()}
+            for dim in ("trust", "familiarity", "intimacy", "playfulness"):
+                if dim not in existing:
+                    await c.execute("""
+                        INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, ?)
+                    """, (dim, 0.3, self.session_id))
+            await self.db.commit()
+
     async def upsert_relationship(self, dimension: str, value: float) -> None:
         logger.info(f"[db] upsert_rel: {dimension}={value:.2f}")
         async with self.db.cursor() as c:
@@ -248,14 +261,14 @@ class Repository:
             await c.execute("""
                 INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
                 VALUES (?, ?, CURRENT_TIMESTAMP, ?)
-                ON CONFLICT(dimension) DO UPDATE SET
-                    value = ?, updated_at = CURRENT_TIMESTAMP
-            """, (dimension, value, self.session_id, value))
+                ON CONFLICT(session_id, dimension) DO UPDATE SET
+                    value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """, (dimension, value, self.session_id))
             # #132: insert snapshot for time-series tracking
             await c.execute("""
-                INSERT INTO relationship_snapshots (dimension, value)
-                VALUES (?, ?)
-            """, (dimension, value))
+                INSERT INTO relationship_snapshots (dimension, value, session_id)
+                VALUES (?, ?, ?)
+            """, (dimension, value, self.session_id))
             await self.db.commit()
 
     async def get_relationship_history(self, days: int = 30) -> list[dict]:
@@ -264,11 +277,34 @@ class Repository:
             await c.execute("""
                 SELECT dimension, value, created_at
                 FROM relationship_snapshots
-                WHERE created_at >= datetime('now', ?)
+                WHERE session_id = ? AND created_at >= datetime('now', ?)
                 ORDER BY created_at ASC
-            """, (f'-{days} days',))
+            """, (self.session_id, f'-{days} days'))
             return [{"dimension": r["dimension"], "value": r["value"],
                      "created_at": r["created_at"]} for r in await c.fetchall()]
+
+    # ── Session/Role mapping ──
+
+    async def set_session_role(self, session_id: str, role_id: str) -> None:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                INSERT INTO session_roles (session_id, role_id) VALUES (?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET role_id = excluded.role_id
+            """, (session_id, role_id))
+            await self.db.commit()
+
+    async def get_role_for_session(self, session_id: str) -> str | None:
+        async with self.db.cursor() as c:
+            await c.execute("SELECT role_id FROM session_roles WHERE session_id = ?", (session_id,))
+            row = await c.fetchone()
+            return row["role_id"] if row else None
+
+    async def get_sessions_by_role(self, role_id: str) -> list[str]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT session_id FROM session_roles WHERE role_id = ? ORDER BY created_at DESC
+            """, (role_id,))
+            return [r["session_id"] for r in await c.fetchall()]
 
     # ── Conversation Turns ──
 

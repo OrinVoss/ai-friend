@@ -36,7 +36,7 @@ class Config:
     api_timeout: int = 180
     thinking: str = "disabled"
     reasoning_effort: str = ""
-    personality_file: str = "personality.json"
+    personality_file: str = "personalities/default.json"
     db_path: str = "data/ai_friend.db"
     short_term_capacity: int = 500
     consolidation_interval: int = 5

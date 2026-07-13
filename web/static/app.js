@@ -1,6 +1,8 @@
 let ws = null;
 let sessionId = getCookie('session_id') || '';
+let roleId = getCookie('role_id') || '';
 let aiName = '星';
+let roleName = '';
 let isProcessing = false;
 let lastMessageTime = 0;
 let logsEnabled = true;
@@ -8,6 +10,8 @@ let eventSource = null;
 let currentMobileTab = 'chat';
 let reconnectDelay = 2000;
 const maxReconnectDelay = 30000;
+let wsIntentionalClose = false;
+let reconnectTimer = null;
 
 function formatTime(ts) {
     var d = new Date(ts);
@@ -47,13 +51,28 @@ function setCookie(name, value) {
     document.cookie = name + '=' + value + '; path=/; max-age=86400';
 }
 
+function clearCookie(name) {
+    document.cookie = name + '=; path=/; max-age=0';
+}
+
 function connect() {
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        return;
+    }
+    wsIntentionalClose = false;
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host + '/ws');
 
     ws.onopen = function() {
         reconnectDelay = 2000;
-        ws.send(JSON.stringify({ type: 'init', session_id: sessionId }));
+        var init = { type: 'init' };
+        if (sessionId) init.session_id = sessionId;
+        if (roleId) init.role_id = roleId;
+        ws.send(JSON.stringify(init));
         setStatus('connected');
     };
 
@@ -121,7 +140,8 @@ function connect() {
     ws.onclose = function() {
         setStatus('disconnected');
         hideTyping();
-        setTimeout(connect, reconnectDelay);
+        if (wsIntentionalClose) return;
+        reconnectTimer = setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
 
@@ -136,11 +156,32 @@ function connect() {
     }, 25000);
 }
 
+function disconnectAndReconnect() {
+    wsIntentionalClose = true;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (ws) {
+        try { ws.close(); } catch(e) {}
+    }
+    reconnectDelay = 2000;
+    connect();
+}
+
 function updateAIName(name) {
     var titleEl = document.querySelector('.app-header .info h1');
     if (titleEl) titleEl.textContent = name;
     var avatarEl = document.querySelector('.app-header .avatar');
     if (avatarEl) avatarEl.textContent = name;
+}
+
+function updateHeaderRole(name) {
+    roleName = name || roleId;
+    var titleEl = document.querySelector('.app-header .info h1');
+    if (titleEl && roleName) {
+        titleEl.textContent = roleName;
+    }
 }
 
 function loadHistory() {
@@ -369,6 +410,119 @@ function sendMessage() {
     }
 }
 
+/* Role / session selection */
+function showModal(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
+}
+
+function hideModal(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+}
+
+function openRoleModal() {
+    var list = document.getElementById('role-list');
+    if (!list) return;
+    list.innerHTML = '<div class="system-message">加载中...</div>';
+    showModal('role-modal');
+    hideModal('session-modal');
+
+    fetch('/api/roles')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            list.innerHTML = '';
+            var roles = data.roles || [];
+            roles.forEach(function(role) {
+                var card = document.createElement('div');
+                card.className = 'role-card';
+                card.innerHTML = '<div class="avatar">' + (role.name ? role.name[0] : 'AI') + '</div><div class="name">' + escapeHtml(role.name || role.id) + '</div>';
+                card.addEventListener('click', function() {
+                    selectRole(role.id, role.name);
+                });
+                list.appendChild(card);
+            });
+        })
+        .catch(function(e) {
+            console.error('[roles] load failed:', e);
+            list.innerHTML = '<div class="system-message">加载失败</div>';
+        });
+}
+
+function openSessionModal(roleId, roleName) {
+    var list = document.getElementById('session-list');
+    if (!list) return;
+    list.innerHTML = '<div class="system-message">加载中...</div>';
+    showModal('session-modal');
+    hideModal('role-modal');
+
+    fetch('/api/sessions?role_id=' + encodeURIComponent(roleId))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            list.innerHTML = '';
+            var sessions = data.sessions || [];
+            if (sessions.length === 0) {
+                startNewSession(roleId, roleName);
+                return;
+            }
+            sessions.forEach(function(sid) {
+                var card = document.createElement('div');
+                card.className = 'session-card';
+                card.innerHTML = '<div class="avatar">' + (roleName ? roleName[0] : 'AI') + '</div><div class="name">' + escapeHtml(sid) + '</div>';
+                card.addEventListener('click', function() {
+                    selectSession(roleId, roleName, sid);
+                });
+                list.appendChild(card);
+            });
+            var newBtn = document.getElementById('new-session-btn');
+            if (newBtn) {
+                newBtn.onclick = function() { startNewSession(roleId, roleName); };
+            }
+        })
+        .catch(function(e) {
+            console.error('[sessions] load failed:', e);
+            list.innerHTML = '<div class="system-message">加载失败</div>';
+        });
+}
+
+function selectRole(id, name) {
+    roleId = id;
+    roleName = name || id;
+    setCookie('role_id', roleId);
+    updateHeaderRole(roleName);
+    openSessionModal(roleId, roleName);
+}
+
+function selectSession(rid, rname, sid) {
+    roleId = rid;
+    roleName = rname || rid;
+    sessionId = sid;
+    setCookie('role_id', roleId);
+    setCookie('session_id', sessionId);
+    updateHeaderRole(roleName);
+    hideModal('session-modal');
+    hideModal('role-modal');
+    disconnectAndReconnect();
+}
+
+function startNewSession(rid, rname) {
+    roleId = rid;
+    roleName = rname || rid;
+    sessionId = '';
+    setCookie('role_id', roleId);
+    clearCookie('session_id');
+    updateHeaderRole(roleName);
+    hideModal('session-modal');
+    hideModal('role-modal');
+    disconnectAndReconnect();
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 /* UI interactions */
 function togglePanel(panelName) {
     var panel = document.getElementById(panelName + '-panel');
@@ -405,6 +559,12 @@ function switchMobileTab(tab) {
 function setupUI() {
     var logsToggle = document.getElementById('logs-toggle');
     var statusToggle = document.getElementById('status-toggle');
+    var switchRoleBtn = document.getElementById('switch-role-btn');
+    if (switchRoleBtn) {
+        switchRoleBtn.addEventListener('click', function() {
+            openRoleModal();
+        });
+    }
     if (logsToggle) {
         logsToggle.addEventListener('click', function() {
             if (window.innerWidth <= 900) {
@@ -457,10 +617,19 @@ function setupUI() {
     updateSendButton();
 }
 
-(function() {
-    document.addEventListener('DOMContentLoaded', function() {
+function initApp() {
+    setupUI();
+    connectLogs();
+    if (!roleId) {
+        openRoleModal();
+    } else if (!sessionId) {
+        openSessionModal(roleId, roleName);
+    } else {
+        updateHeaderRole(roleName);
         connect();
-        connectLogs();
-        setupUI();
-    });
+    }
+}
+
+(function() {
+    document.addEventListener('DOMContentLoaded', initApp);
 })();

@@ -2,10 +2,12 @@ import time
 import uuid
 import logging
 import os
+import shutil
 from threading import Lock
 from typing import Optional
 
 from config import Config
+from core.async_utils import run_async
 from core.personality import Personality
 from core.provider import LLMProvider, DeepSeekProvider
 from core.agent import Agent
@@ -14,6 +16,7 @@ from memory.long_term import LongTermMemory
 from memory.retrieval import MemoryRetriever
 from memory.consolidation import MemoryConsolidator
 from memory.embeddings import EmbeddingEngine
+from models.personality import PersonalityConfig
 from tools.traits import ToolRegistry
 from tools.memory_tools import RecallTool, RememberTool
 from tools.file_tools import ReadFileTool
@@ -30,6 +33,7 @@ logger = logging.getLogger(__name__)
 class WebAgent:
     def __init__(self, config: Config, db: Database, repo: Repository,
                  session_id: str = "default",
+                 role_id: Optional[str] = None,
                  shared_provider: Optional[LLMProvider] = None,
                  shared_embed_engine: Optional[EmbeddingEngine] = None):
         self.config = config
@@ -37,7 +41,9 @@ class WebAgent:
         self.repo = repo
         self.session_id = session_id
         repo.session_id = session_id  # #40
-        self.personality = Personality.load(config.personality_file)
+        self.role_id = role_id or "default"
+        self.personality_path = self._ensure_personality_file(self.role_id)
+        self.personality = Personality.load(self.personality_path)
         self.ltm = LongTermMemory(repo)
         self.short_term = ConversationBuffer(maxlen=config.short_term_capacity)
         # Restore recent conversation from DB (fixes #98)
@@ -94,6 +100,7 @@ class WebAgent:
         )
         self.agent._tool_registry = registry
         self._last_save_time: float = 0.0  # #44: debounce personality save
+        self._ensure_relationship_defaults()
 
     def _save_personality_debounced(self) -> None:
         """Save personality at most once every 30s to reduce disk writes. (#44)"""
@@ -102,7 +109,7 @@ class WebAgent:
             return
         self._last_save_time = now
         try:
-            self.personality.save(self.config.personality_file)
+            self.personality.save(self.personality_path)
         except Exception as e:
             logger.warning(f"[session] save personality failed: {e}")
 
@@ -114,9 +121,31 @@ class WebAgent:
         there. Save personality one last time so no emotion delta is lost.
         """
         try:
-            self.personality.save(self.config.personality_file)
+            self.personality.save(self.personality_path)
         except Exception as e:
             logger.warning(f"[session] close save personality failed: {e}")
+
+    def _ensure_personality_file(self, role_id: str) -> str:
+        """Return the path to the role-specific personality file, copying the
+        configured template if the role file does not yet exist."""
+        os.makedirs("personalities", exist_ok=True)
+        path = os.path.join("personalities", f"{role_id}.json")
+        if not os.path.exists(path):
+            template = self.config.personality_file
+            if os.path.exists(template):
+                shutil.copy(template, path)
+                logger.info(f"[session] copied personality template {template} -> {path}")
+            else:
+                Personality(PersonalityConfig()).save(path)
+                logger.info(f"[session] created default personality at {path}")
+        return path
+
+    def _ensure_relationship_defaults(self) -> None:
+        """Seed relationship metric rows for this session if missing."""
+        try:
+            run_async(self.repo.ensure_relationship_defaults())
+        except Exception as e:
+            logger.warning(f"[session] ensure relationship defaults failed: {e}")
 
     def set_on_token(self, callback):
         self._on_token_callback = callback
@@ -190,7 +219,7 @@ class WebAgent:
     def save_personality(self) -> None:
         """Persist personality state to disk."""
         try:
-            self.personality.save(self.config.personality_file)
+            self.personality.save(self.personality_path)
         except Exception as e:
             logger.warning(f"[session] save personality failed: {e}")
 
@@ -228,23 +257,41 @@ class SessionManager:
             dim=self.config.embedding_dim,
         )
 
-    def get_or_create(self, session_id: Optional[str] = None) -> tuple[str, WebAgent]:
+    def get_or_create(self, session_id: Optional[str] = None,
+                      role_id: Optional[str] = None) -> tuple[str, WebAgent]:
         with self._lock:
             sid = session_id or uuid.uuid4().hex[:12]
-            if sid not in self._sessions:
-                logger.info(f"[session] create: {sid}")
-                self._sessions[sid] = WebAgent(
-                    self.config, self.db, self.repo, session_id=sid,
-                    shared_provider=self._shared_provider,
-                    shared_embed_engine=self._shared_embed_engine,
-                )
-                # #123: trigger cleanup every 10 new sessions to evict stale REST sessions
-                self._create_count += 1
-                if self._create_count % 10 == 0:
-                    self.cleanup_old()
-            else:
+            if sid in self._sessions:
                 logger.debug(f"[session] restore: {sid}")
-            return sid, self._sessions[sid]
+                return sid, self._sessions[sid]
+
+            # Restore role mapping for an existing DB session when caller
+            # did not supply a role_id.
+            if role_id is None:
+                try:
+                    mapped = run_async(self.repo.get_role_for_session(sid))
+                    if mapped:
+                        role_id = mapped
+                except Exception as e:
+                    logger.warning(f"[session] get_role_for_session failed: {e}")
+            role_id = role_id or "default"
+
+            logger.info(f"[session] create: {sid} role={role_id}")
+            agent = WebAgent(
+                self.config, self.db, self.repo, session_id=sid, role_id=role_id,
+                shared_provider=self._shared_provider,
+                shared_embed_engine=self._shared_embed_engine,
+            )
+            self._sessions[sid] = agent
+            try:
+                run_async(self.repo.set_session_role(sid, agent.role_id))
+            except Exception as e:
+                logger.warning(f"[session] set_session_role failed: {e}")
+            # #123: trigger cleanup every 10 new sessions to evict stale REST sessions
+            self._create_count += 1
+            if self._create_count % 10 == 0:
+                self.cleanup_old()
+            return sid, agent
 
     def remove(self, session_id: str) -> None:
         with self._lock:
