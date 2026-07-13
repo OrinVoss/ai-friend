@@ -245,9 +245,9 @@ body {
 
 .panel-expand {
     position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 28px;
+    top: 12px;
+    width: 22px;
+    height: 48px;
     display: none;
     align-items: center;
     justify-content: center;
@@ -265,20 +265,20 @@ body {
 }
 
 .panel-expand svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
 }
 
 .status-panel .panel-expand {
     right: 0;
     border-left: 1px solid var(--border-color);
-    border-radius: 0 12px 12px 0;
+    border-radius: 0 10px 10px 0;
 }
 
 .logs-panel .panel-expand {
     left: 0;
     border-right: 1px solid var(--border-color);
-    border-radius: 12px 0 0 12px;
+    border-radius: 10px 0 0 10px;
 }
 
 .panel-body {
