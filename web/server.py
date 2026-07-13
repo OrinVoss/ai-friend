@@ -141,13 +141,54 @@ async def chat_api(req: ChatRequest):
 async def status_api(session_id: str = "default"):
     """Return relationship metrics + history (#132)."""
     _, agent = session_manager.get_or_create(session_id)
-    rel = agent.agent.ltm.get_relationship()
-    history = agent.agent.ltm.get_relationship_history(days=7)
+    raw_rel = agent.agent.ltm.get_relationship()
+    raw_history = agent.agent.ltm.get_relationship_history(days=7)
+
+    # Normalize dimensions for UI: trust/familiarity/intimacy/fun
+    # The DB uses 'playfulness' for the fun dimension.
+    def _normalize_rel(dims: dict) -> dict:
+        return {
+            "trust": dims.get("trust", 0.3),
+            "familiarity": dims.get("familiarity", 0.3),
+            "intimacy": dims.get("intimacy", 0.3),
+            "fun": dims.get("playfulness", dims.get("fun", 0.3)),
+        }
+
+    def _normalize_history(rows: list[dict]) -> list[dict]:
+        # Group flat rows by timestamp and aggregate into one record per timestamp
+        groups: dict[str, dict] = {}
+        for row in rows:
+            ts = row.get("created_at") or row.get("timestamp")
+            dim = row.get("dimension", "")
+            val = row.get("value", 0.3)
+            if not ts:
+                continue
+            if ts not in groups:
+                groups[ts] = {"timestamp": ts}
+            if dim == "playfulness":
+                groups[ts]["fun"] = val
+            else:
+                groups[ts][dim] = val
+        result = []
+        for ts in sorted(groups.keys()):
+            g = groups[ts]
+            result.append({
+                "timestamp": ts,
+                "trust": g.get("trust", 0.3),
+                "familiarity": g.get("familiarity", 0.3),
+                "intimacy": g.get("intimacy", 0.3),
+                "fun": g.get("fun", 0.3),
+            })
+        return result
+
+    relationship = _normalize_rel(raw_rel)
+    relationship_history = _normalize_history(raw_history)
+
     return StatusResponse(
         turn=agent.turn_count,
         emotion=agent.emotion,
-        relationship=rel,
-        relationship_history=history,
+        relationship=relationship,
+        relationship_history=relationship_history,
     )
 
 
