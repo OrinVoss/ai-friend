@@ -101,12 +101,14 @@ class Repository:
             return [self._row_to_fact(r) for r in await c.fetchall()]
 
     async def update_fact_score(self, fact_id: int, score: float) -> None:
+        logger.debug(f"[db] update_fact_score: id={fact_id} score={score:.2f}")
         async with self.db.cursor() as c:
             await c.execute("UPDATE user_facts SET composite_score = ? WHERE id = ?",
                             (score, fact_id))
             await self.db.commit()
 
     async def increment_fact_recall(self, fact_id: int) -> None:
+        logger.debug(f"[db] increment_fact_recall: id={fact_id}")
         async with self.db.cursor() as c:
             await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ?",
                             (fact_id,))
@@ -163,6 +165,7 @@ class Repository:
 
     async def search_experiences(self, keywords: list[str] | None = None,
                                  limit: int = 10) -> list[Experience]:
+        logger.debug(f"[db] search_experiences: keywords={keywords} limit={limit}")
         async with self.db.cursor() as c:
             if keywords:
                 conditions = " OR ".join("(summary LIKE ? OR tags LIKE ?)" for _ in keywords)
@@ -185,6 +188,7 @@ class Repository:
             return [self._row_to_experience(r) for r in await c.fetchall()]
 
     async def get_recent_experiences(self, limit: int = 5) -> list[Experience]:
+        logger.debug(f"[db] get_recent_experiences: limit={limit}")
         async with self.db.cursor() as c:
             await c.execute("""
                 SELECT * FROM experiences
@@ -195,6 +199,7 @@ class Repository:
             return [self._row_to_experience(r) for r in await c.fetchall()]
 
     async def update_experience_score(self, exp_id: int, score: float) -> None:
+        logger.debug(f"[db] update_experience_score: id={exp_id} score={score:.2f}")
         async with self.db.cursor() as c:
             await c.execute("UPDATE experiences SET composite_score = ? WHERE id = ?",
                             (score, exp_id))
@@ -216,6 +221,7 @@ class Repository:
             return c.lastrowid
 
     async def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
+        logger.debug(f"[db] get_recent_reflections: limit={limit}")
         async with self.db.cursor() as c:
             await c.execute("""
                 SELECT * FROM reflections WHERE is_active = 1 AND session_id = ?
@@ -237,6 +243,7 @@ class Repository:
     # ── Relationship ──
 
     async def get_all_relationships(self) -> dict[str, float]:
+        logger.debug(f"[db] get_relationships: session={self.session_id}")
         async with self.db.cursor() as c:
             await c.execute("SELECT dimension, value FROM relationship_metrics WHERE session_id = ?", (self.session_id,))
             return {r["dimension"]: r["value"] for r in await c.fetchall()}
@@ -246,13 +253,17 @@ class Repository:
         async with self.db.cursor() as c:
             await c.execute("SELECT dimension FROM relationship_metrics WHERE session_id = ?", (self.session_id,))
             existing = {r["dimension"] for r in await c.fetchall()}
+            added = []
             for dim in ("trust", "familiarity", "intimacy", "playfulness"):
                 if dim not in existing:
                     await c.execute("""
                         INSERT INTO relationship_metrics (dimension, value, updated_at, session_id)
                         VALUES (?, ?, CURRENT_TIMESTAMP, ?)
                     """, (dim, 0.3, self.session_id))
+                    added.append(dim)
             await self.db.commit()
+            if added:
+                logger.info(f"[db] seeded relationship defaults: {added} session={self.session_id}")
 
     async def upsert_relationship(self, dimension: str, value: float) -> None:
         logger.info(f"[db] upsert_rel: {dimension}={value:.2f}")
@@ -273,6 +284,7 @@ class Repository:
 
     async def get_relationship_history(self, days: int = 30) -> list[dict]:
         """Get relationship metric time-series for the last N days. (#132)"""
+        logger.debug(f"[db] get_relationship_history: session={self.session_id} days={days}")
         async with self.db.cursor() as c:
             await c.execute("""
                 SELECT dimension, value, created_at
@@ -280,12 +292,15 @@ class Repository:
                 WHERE session_id = ? AND created_at >= datetime('now', ?)
                 ORDER BY created_at ASC
             """, (self.session_id, f'-{days} days'))
+            rows = await c.fetchall()
+            logger.debug(f"[db] relationship_history: {len(rows)} rows")
             return [{"dimension": r["dimension"], "value": r["value"],
-                     "created_at": r["created_at"]} for r in await c.fetchall()]
+                     "created_at": r["created_at"]} for r in rows]
 
     # ── Session/Role mapping ──
 
     async def set_session_role(self, session_id: str, role_id: str) -> None:
+        logger.info(f"[db] set_session_role: session={session_id} role={role_id}")
         async with self.db.cursor() as c:
             await c.execute("""
                 INSERT INTO session_roles (session_id, role_id) VALUES (?, ?)
@@ -294,13 +309,17 @@ class Repository:
             await self.db.commit()
 
     async def get_role_for_session(self, session_id: str) -> str | None:
+        logger.debug(f"[db] get_role_for_session: session={session_id}")
         async with self.db.cursor() as c:
             await c.execute("SELECT role_id FROM session_roles WHERE session_id = ?", (session_id,))
             row = await c.fetchone()
-            return row["role_id"] if row else None
+            role = row["role_id"] if row else None
+            logger.debug(f"[db] role_for_session: session={session_id} role={role}")
+            return role
 
     async def get_sessions_by_role(self, role_id: str) -> list[str]:
         """一个角色只对应一个 session，session_id 即 role_id。"""
+        logger.debug(f"[db] get_sessions_by_role: role={role_id}")
         return [role_id]
 
     # ── Conversation Turns ──

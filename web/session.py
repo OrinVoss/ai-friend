@@ -150,6 +150,7 @@ class WebAgent:
         """Seed relationship metric rows for this session if missing."""
         try:
             run_async(self.repo.ensure_relationship_defaults())
+            logger.debug(f"[session] relationship defaults ensured: {self.session_id}")
         except Exception as e:
             logger.warning(f"[session] ensure relationship defaults failed: {e}")
 

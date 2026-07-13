@@ -25,90 +25,27 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9721892044155811,
-    "arousal": 0.9083251977473603,
-    "baseline_valence": 0.4483593224799357,
-    "baseline_arousal": 0.8685871061554818,
+    "valence": 0.9740189682917617,
+    "arousal": 0.893870572700544,
+    "baseline_valence": 0.48386406073334476,
+    "baseline_arousal": 0.7867131834959408,
     "decay_rate": 0.05,
     "mood_valence": 1.0,
-    "mood_arousal": 0.9888000000000001,
+    "mood_arousal": 0.9895000000000002,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.714805566666623,
-    "trust": 0.9463150294620071,
-    "fear": 0.019679160723497374,
-    "surprise": 0.12088593797917331,
-    "sadness": 0.014972217162718978,
-    "anticipation": 0.479535114549731,
-    "anger": 0.013459143068156435,
-    "disgust": 0.10000000000002175,
+    "joy": 0.8674749069925268,
+    "trust": 0.9466162329206574,
+    "fear": 0.01967382133709049,
+    "surprise": 0.18594929747572714,
+    "sadness": 0.01234855821496636,
+    "anticipation": 0.5389969476391572,
+    "anger": 0.012109695809286648,
+    "disgust": 0.10000000000001166,
     "resentment": 0.0009822714738483844,
     "emotion_events": [
-      {
-        "timestamp": 1781132774.1525004,
-        "trigger": "你好",
-        "primary_emotion": "trusting",
-        "intensity": 0.8756163462138133,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1781133218.937509,
-        "trigger": "你好",
-        "primary_emotion": "trusting",
-        "intensity": 0.8726588179635698,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1781359893.6538367,
-        "trigger": "你好",
-        "primary_emotion": "trusting",
-        "intensity": 0.871281984812232,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1781359961.5278742,
-        "trigger": "我是谁",
-        "primary_emotion": "trusting",
-        "intensity": 0.8710320985045894,
-        "context": "我是谁"
-      },
-      {
-        "timestamp": 1781360036.2800238,
-        "trigger": "我是你爸爸",
-        "primary_emotion": "trusting",
-        "intensity": 0.8715949434199574,
-        "context": "我是你爸爸"
-      },
-      {
-        "timestamp": 1781360389.492913,
-        "trigger": "我是你爸爸",
-        "primary_emotion": "trusting",
-        "intensity": 0.9399177892543537,
-        "context": "我是你爸爸"
-      },
-      {
-        "timestamp": 1781360799.3336112,
-        "trigger": "我是你爸爸",
-        "primary_emotion": "trusting",
-        "intensity": 0.9410615381625297,
-        "context": "我是你爸爸"
-      },
-      {
-        "timestamp": 1781360825.4484894,
-        "trigger": "我是你爸爸",
-        "primary_emotion": "trusting",
-        "intensity": 0.9421347504869091,
-        "context": "我是你爸爸"
-      },
-      {
-        "timestamp": 1781360849.996665,
-        "trigger": "切",
-        "primary_emotion": "trusting",
-        "intensity": 0.9413771713367224,
-        "context": "切"
-      },
       {
         "timestamp": 1781360966.477332,
         "trigger": "切",
@@ -437,16 +374,79 @@
         "primary_emotion": "trusting",
         "intensity": 0.9463150294620071,
         "context": "在干嘛"
+      },
+      {
+        "timestamp": 1783941219.66544,
+        "trigger": "因为你是我制作的一个程序，所以我经常会测试你，请见谅",
+        "primary_emotion": "trusting",
+        "intensity": 0.9463441687306894,
+        "context": "因为你是我制作的一个程序，所以我经常会测试你，请见谅"
+      },
+      {
+        "timestamp": 1783941901.0468092,
+        "trigger": "因为你是我制作的一个程序，所以我经常会测试你，请见谅",
+        "primary_emotion": "trusting",
+        "intensity": 0.9464179562478349,
+        "context": "因为你是我制作的一个程序，所以我经常会测试你，请见谅"
+      },
+      {
+        "timestamp": 1783942142.3762238,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.946514480829491,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1783942164.456514,
+        "trigger": "现在什么时候啊？",
+        "primary_emotion": "trusting",
+        "intensity": 0.9465149974273014,
+        "context": "现在什么时候啊？"
+      },
+      {
+        "timestamp": 1783942758.7561631,
+        "trigger": "你在干嘛",
+        "primary_emotion": "trusting",
+        "intensity": 0.9464612459479663,
+        "context": "你在干嘛"
+      },
+      {
+        "timestamp": 1783942769.5687602,
+        "trigger": "猜猜我在干嘛",
+        "primary_emotion": "trusting",
+        "intensity": 0.946376929776286,
+        "context": "猜猜我在干嘛"
+      },
+      {
+        "timestamp": 1783942919.6474407,
+        "trigger": "是这样的，还有点东西需要调试",
+        "primary_emotion": "trusting",
+        "intensity": 0.9464905698391368,
+        "context": "是这样的，还有点东西需要调试"
+      },
+      {
+        "timestamp": 1783943067.6460319,
+        "trigger": "没有哦",
+        "primary_emotion": "trusting",
+        "intensity": 0.946606847567236,
+        "context": "没有哦"
+      },
+      {
+        "timestamp": 1783943139.744494,
+        "trigger": "哈哈哈",
+        "primary_emotion": "trusting",
+        "intensity": 0.9466162329206574,
+        "context": "哈哈哈"
       }
     ],
     "history": [
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
       "trusting",
       "trusting",
       "trusting"

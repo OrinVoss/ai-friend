@@ -151,6 +151,7 @@ async def chat_api(req: ChatRequest):
 @app.get("/api/status", response_model=StatusResponse)
 async def status_api(session_id: str = "default"):
     """Return relationship metrics + history (#132)."""
+    logger.info(f"[rest] status session={session_id}")
     _, agent = session_manager.get_or_create(session_id)
     raw_rel = agent.agent.ltm.get_relationship()
     raw_history = agent.agent.ltm.get_relationship_history(days=7)
@@ -208,6 +209,7 @@ async def status_api(session_id: str = "default"):
 async def roles_api():
     """List available roles from personalities/*.json."""
     ensure_session()
+    logger.info("[rest] roles")
     roles = []
     for path in sorted(glob.glob("personalities/*.json")):
         try:
@@ -225,6 +227,7 @@ async def roles_api():
 async def sessions_api(role_id: str):
     """Return session IDs previously created for a given role."""
     ensure_session()
+    logger.info(f"[rest] sessions role={role_id}")
     sessions = await session_manager.repo.get_sessions_by_role(role_id)
     return {"role_id": role_id, "sessions": sessions}
 
@@ -232,6 +235,7 @@ async def sessions_api(role_id: str):
 @app.get("/api/chat/history", response_model=HistoryResponse)
 async def chat_history_api(session_id: str = "default"):
     """Return recent conversation turns for UI display on reconnect."""
+    logger.info(f"[rest] history session={session_id}")
     _, agent = session_manager.get_or_create(session_id)
     turns = []
     for t in agent.agent.short_term.get_all():
