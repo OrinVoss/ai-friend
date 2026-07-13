@@ -175,6 +175,22 @@ class TestNormalizeArgs(unittest.TestCase):
         # keyword stays because query already exists (group skipped)
         self.assertIn("keyword", result)
 
+    def test_title_not_mapped_to_song(self):
+        """title is a common notify param and must not be stolen by music aliases."""
+        args = {"title": "通知标题", "message": "正文"}
+        result = _normalize_args(args)
+        self.assertEqual(result["title"], "通知标题")
+        self.assertNotIn("song", result)
+
+    def test_song_name_and_track_aliases(self):
+        args = {"song_name": "晴天", "track": "七里香"}
+        result = _normalize_args(args)
+        # song_name wins because it appears first in the alias group
+        self.assertEqual(result["song"], "晴天")
+        self.assertNotIn("song_name", result)
+        # track is kept because song already exists
+        self.assertIn("track", result)
+
 
 class TestStructuredJSON(unittest.TestCase):
     def test_calls_array(self):

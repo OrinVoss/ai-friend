@@ -211,7 +211,10 @@ def _normalize_args(args: dict) -> dict:
         (("person", "who", "user", "target"), "name"),
         # DI-007: more aliases
         (("filepath", "filename", "file", "path"), "path"),
-        (("song_name", "title", "track"), "song"),
+        # "title" is a common parameter name (e.g. notify tool), don't globally
+        # steal it for music. MusicPlayTool handles title/song_name/track aliases
+        # in its own execute().
+        (("song_name", "track"), "song"),
         (("directory", "dir", "folder"), "path"),
     ]
     result = dict(args)

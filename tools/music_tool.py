@@ -115,7 +115,14 @@ class MusicPlayTool(Tool):
         }
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
-        song = args.get("song", "").strip()
+        # dispatcher no longer globally maps "title" to "song", so handle
+        # title/song_name/track aliases locally.
+        song = (
+            args.get("song", "").strip()
+            or args.get("title", "").strip()
+            or args.get("song_name", "").strip()
+            or args.get("track", "").strip()
+        )
         if not song:
             return ToolResult.fail("请提供歌曲名称")
 
