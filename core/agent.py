@@ -58,7 +58,9 @@ class Agent:
         # Sleep/wake cycle managed by SleepManager.
         # SL-001: sleep state file is namespaced per session_id so concurrent
         # sessions no longer share a single global .sleep_state.
-        sleep_dir = os.path.dirname(os.path.abspath(config.personality_file))
+        # Sleep state is persisted in the project root (same directory as the DB)
+        # rather than next to the personality file, which now lives in personalities/.
+        sleep_dir = os.path.dirname(os.path.abspath(config.db_path))
         session_tag = getattr(config, "session_id", None) or "default"
         sleep_file = os.path.join(sleep_dir, f".sleep_state.{session_tag}")
         self._sleep = SleepManager(

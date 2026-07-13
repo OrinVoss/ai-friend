@@ -116,9 +116,12 @@ class EmbeddingEngine:
     def health_check(self) -> bool:
         """Check if embedding server is reachable. Compatible with llama-server
         and OpenAI-compatible APIs (text-embeddings-inference, etc.). (#139)"""
+        from urllib.parse import urlparse
+
         try:
             # Try /health endpoint first (llama-server)
-            health_url = self._endpoint.rsplit("/", 1)[0] + "/health"
+            parsed = urlparse(self._endpoint)
+            health_url = f"{parsed.scheme}://{parsed.netloc}/health"
             resp = self._session.get(health_url, timeout=3)
             if 200 <= resp.status_code < 300:  # #198: accept any 2xx
                 return True

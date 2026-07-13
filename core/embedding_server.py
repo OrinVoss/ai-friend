@@ -38,9 +38,12 @@ def _is_server_ready(endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> bool:
 
     The /v1/embeddings endpoint only accepts POST, so we probe /health first.
     """
+    from urllib.parse import urlparse
+
     # Try the dedicated health endpoint (llama-server)
     try:
-        health_url = endpoint.rsplit("/", 1)[0] + "/health"
+        parsed = urlparse(endpoint)
+        health_url = f"{parsed.scheme}://{parsed.netloc}/health"
         resp = urllib.request.urlopen(health_url, timeout=2)
         if 200 <= resp.status < 300:
             return True
