@@ -315,7 +315,8 @@ ai-friend/
 │   ├── architecture.md        架构总览 + 使用指南
 │   ├── technical.md           技术细节（全模块）
 │   ├── message-flow.md        消息流转流程
-│   ├── milestones-and-issues.md 里程碑 + 190 issue
+│   ├── startup-flow.md        启动流程（从 web_main 到聊天就绪）
+├── milestones-and-issues.md 里程碑 + 190 issue
 │   ├── api.md                  WebSocket/REST API 文档
 │   ├── config-reference.md    配置参考
 │   ├── personality-guide.md   人格定制指南
@@ -439,6 +440,7 @@ _proactive_loop (15s)
 ## 相关链接
 
 - [架构文档](doc/architecture.md) — 快速开始与架构总览
+- [启动流程](doc/startup-flow.md) — web_main → 聊天就绪，逐步骤详解
 - [API 文档](doc/api.md) — WebSocket + REST API
 - [技术文档](doc/technical.md) — 完整技术细节
 - [消息流转](doc/message-flow.md) — CLI/Web/自主行为三路径详解

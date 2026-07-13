@@ -1,0 +1,372 @@
+# 启动流程
+
+> 从 `python web_main.py` 到 AI 开始聊天的每一步代码发生了什么。
+> CLI 模式的启动流程与此基本一致，差异见文末对照。
+
+---
+
+## 整体框图
+
+```
+python web_main.py
+       │
+       ├── 1. load_config() ── config.json + 环境变量 → Config dataclass
+       ├── 2. setup_logging() ── logs/YYYY-MM-DD.log
+       ├── 3. auto_start_embedding() ── llama.cpp 嵌入服务
+       │
+       └── 4. uvicorn.run("web.server:app")
+                │
+                ├── 4a. FastAPI 模块加载（静态）
+                │   ├── 中间件链（CORS → RateLimit）
+                │   ├── 安全头中间件
+                │   ├── 路由表注册（/api/*、/ws、/static/*）
+                │   └── SessionManager、RateLimiter 实例化
+                │
+                ├── 4b. lifespan() 异步启动
+                │   ├── 日志重初始化
+                │   ├── session_manager.open() 打开数据库
+                │   └── 后台 session 清理协程（5min 间隔）
+                │
+                └── 4c. Uvicorn 监听 0.0.0.0:8000 ── 等待请求
+```
+
+---
+
+## 逐步骤详解
+
+### Step 1: 配置加载 — `config.py`
+
+```python
+# web_main.py:16
+config = load_config()
+```
+
+`Config` dataclass 从三个来源合并：
+1. **默认值**（定义在 `config.py` 的 dataclass 字段默认值）
+2. **`config.json`**（JSON 文件，覆盖默认值）
+3. **环境变量**（`DEEPSEEK_API_KEY` 等，优先级最高）
+
+关键字段：
+- `api_key` / `api_endpoint` / `api_model` — LLM 调用
+- `embedding_endpoint` / `embedding_dim` — 语义搜索
+- `personality_file` — **模板**角色文件，仅新建角色时用
+- `allowed_origins` — HTTP CORS + WebSocket Origin 白名单
+- `allowed_read_paths` — 工具（glob/read_file）可访问的目录
+
+### Step 2: 日志初始化 — `core/logging_setup.py`
+
+```python
+# web_main.py:17
+setup_logging(config.log_level)
+```
+
+- 日志文件：`logs/YYYY-MM-DD.log`
+- 日志级别：默认 `INFO`，`DEBUG` 可查看工具调用细节
+- 同时输出到 stderr（uvicorn 终端）
+
+### Step 3: 嵌入服务启动 — `core/embedding_server.py`
+
+```python
+# web_main.py:19
+auto_start_embedding(logger)
+```
+
+| 条件 | 行为 |
+|------|------|
+| `http://localhost:8080/v1/embeddings` 已有响应 | 跳过（跳转） |
+| `memory/Qwen3.5-0.8B-Q6_K.gguf` 模型文件存在 | `subprocess.Popen` 启动 `llama-server.exe` |
+| 模型文件不存在 | 仅记录 info，**不阻塞启动** |
+
+嵌入服务约 1-2 秒启动完成（日志 `[embed] server ready`）。
+不可用时自动降级为纯关键词搜索，不影响对话。
+
+### Step 4a: FastAPI 模块加载（静态）
+
+uvicorn 导入 `web.server:app` 时触发模块级代码：
+
+```python
+# web/server.py — 模块级
+config = load_config()                         # 读配置
+session_manager = SessionManager(config)       # 会话管理器实例
+rate_limiter = RateLimiter()                   # 限流器实例
+_ws_connections = []                           # WS 连接跟踪
+_ws_allowed_hosts = {"localhost", "127.0.0.1"} # 从 config 追加 Origin
+```
+
+然后构造 `FastAPI` 实例，注册：
+
+**中间件链（请求穿过顺序）：**
+
+```
+请求进入
+    │
+    ▼
+[0] _add_security_headers        ← 添 CSP/X-Frame-Options 头（响应路径）
+    │
+    ▼
+[1] RateLimitMiddleware          ← 滑动窗口限流
+    │
+    ▼
+[2] CORSMiddleware                ← 检查/设置 CORS 头
+    │
+    ▼
+路由分发（/ → FileResponse, /api/* → JSON, /ws → WebSocket）
+```
+
+**路由表：**
+
+| 路径 | 方法 | 函数 | 说明 |
+|------|------|------|------|
+| `/` | GET | `index()` | 返回 `web/static/index.html` |
+| `/api/chat` | POST | `chat_api()` | REST 聊天（非流式） |
+| `/api/status` | GET | `status_api()` | 关系指标 + 情绪历史 |
+| `/api/roles` | GET | `roles_api()` | 列出可选角色 |
+| `/api/chat/history` | GET | `history_api()` | 对话历史 |
+| `/api/logs` | GET | `logs_api()` | SSE 实时日志流 |
+| `/ws` | WebSocket | `websocket_endpoint()` | 主聊天接口 |
+| `/static/*` | — | StaticFiles | 静态资源（app.js, style.css） |
+
+### Step 4b: lifespan() 异步启动
+
+```python
+# web/server.py:56-81
+@asynccontextmanager
+async def lifespan(app):
+```
+
+执行的顺序：
+
+1. **日志重初始化** — uvicorn 可能重置了 root handler，重新 setup
+2. **`await session_manager.open()`**
+   - 打开 SQLite 数据库（`data/ai_friend.db`，WAL 模式）
+   - 创建/验证表结构（版本化 schema）
+   - 创建索引
+   - 构建共享的 `DeepSeekProvider`（HTTP 连接池复用）
+   - 构建共享的 `EmbeddingEngine`（本地嵌入服务客户端）
+3. **启动后台清理协程** — 每 5 分钟调用 `session_manager.cleanup_old()`，
+   关闭超时 24 小时的 session
+
+`yield` 后服务开始接受请求。
+
+### Step 4c: Uvicorn 监听
+
+```
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+- `web_host` 默认 `0.0.0.0`（局域网可访问）
+- `web_port` 默认 `8000`
+
+---
+
+## 第一次 WebSocket 握手 → 聊天就绪
+
+### 5. 浏览器加载页面
+
+```
+HTTP GET /
+  → server.py:index()
+  → FileResponse("web/static/index.html")
+```
+
+页面加载后自动执行 `app.js:connect()`：
+
+### 6. WebSocket 连接
+
+```javascript
+// app.js:78
+ws = new WebSocket(proto + '//' + location.host + '/ws');
+```
+
+### 7. 服务端 WebSocket 端点
+
+```python
+# server.py:412
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+```
+
+**握手阶段（服务端）：**
+
+```
+WS Upgrade 请求进入
+    │
+    ▼
+7a. Origin 校验
+    ├── hostname ∈ _ws_allowed_hosts? → 继续
+    └── 否则 → close(4003, "origin rejected")
+    │
+    ▼
+7b. 连接数限制
+    ├── 同一 IP ≤ 5 条？→ 继续
+    ├── 全局 ≤ 100 条？→ 继续
+    └── 否则 → close(4004, "too many connections")
+    │
+    ▼
+7c. await websocket.accept()
+    │
+    ▼
+7d. 加入 _ws_connections 追踪列表
+```
+
+**通信阶段（双方）：**
+
+```
+CLIENT → 发送 init JSON        SERVER
+                              │
+                              ▼
+                          7e. 收到 init 消息
+                              │
+                              ├── session_manager.get_or_create()
+                              │       │
+                              │       ├── 缓存命中 → 恢复 session
+                              │       └── 未命中 → 创建新的 WebAgent
+                              │              ├── load personality JSON
+                              │              ├── 创建 LTM / short_term
+                              │              ├── 从 DB 恢复最近 30 轮
+                              │              └── 创建 InnerDriveAgent + ToolAgent
+                              │
+                              ├── 启动 _proactive_loop 后台协程
+                              │   （每 15 秒检查空闲/睡眠/主动）
+                              │
+                              └── 发送 init_ok（含 session_id, emotion, name）
+    ◀── 收到 init_ok
+    │
+    ├── 设置 session_id cookie
+    ├── 显示情绪状态
+    ├── 加载历史消息
+    └── 加载关系状态
+    │
+    ▼
+用户输入消息 →
+    ─── {type: "message", content: "你好"} ───→  7g. 收到消息
+                                                   │
+                                                   ├── 速率限制检查
+                                                   ├── MessageHandler.process_message()
+                                                   │    ├── Agent 1: InnerDrive
+                                                   │    ├── Agent 2: ToolAgent（或跳过）
+                                                   │    └── Agent 3: Roleplay
+                                                   │
+                                                   ├── _send_segments() 分段推送
+                                                   └── 发送 done（含 emotion）
+    ◀── segment: "你好呀！" ───
+    ◀── done ───
+```
+
+### WebAgent 创建细节（Step 7e 内部）
+
+```python
+# web/session.py:277
+session_manager.get_or_create(session_id, role_id)
+```
+
+执行链：
+
+```
+get_or_create(sid, role_id)
+  │
+  ├── 锁定（线程安全）
+  ├── 确定 role_id：角色 = session_id（一一对应）
+  │
+  ├── 缓存命中？
+  │   └── 返回 (sid, self._sessions[sid])
+  │
+  └── 创建新 WebAgent：
+      │
+      ├── (a) 加载人格 JSON → personalities/{role_id}.json
+      │   ├── name, traits, speaking_style, backstory
+      │   └── emotional_state（从 JSON 恢复或系统维护）
+      │
+      ├── (b) 记忆系统初始化
+      │   ├── LongTermMemory(repo)       — SQLite
+      │   └── ConversationBuffer(maxlen)  — 从 DB 恢复最近 30 轮
+      │
+      ├── (c) LLM Provider（共享实例）
+      │   └── DeepSeekProvider(endpoint, api_key) — HTTP 连接池复用
+      │
+      ├── (d) EmbeddingEngine（共享实例）
+      │   └── 通过 localhost:8080 做语义搜索
+      │
+      ├── (e) ToolRegistry 注册 9 个工具
+      │   ├── Agent 1,3: recall, remember（内部工具）
+      │   └── Agent 2: web_fetch, web_search, read_file, glob, grep,
+      │                 music_play, notify（外部工具）
+      │
+      ├── (f) Retriever（三层检索器）
+      │   ├── Hot Memory → Query-Guided → On-Demand
+      │   └── 混合评分（语义 0.6 + 关键词 0.4）
+      │
+      ├── (g) InnerDriveAgent（Agent 1）
+      │   ├── 使用 INNER_DRIVE_SCHEMA（JSON Schema 输出）
+      │   └── 决策：needs_tools? → tool_requests / 跳过
+      │
+      ├── (h) ToolAgent（Agent 2）
+      │   ├── temperature=0.3, 无人格/无情绪
+      │   └── ToolAttemptTracker: 3 retries/round, 3 rounds max
+      │
+      └── (i) 缓存到 self._sessions[sid]
+```
+
+---
+
+## 后台协程 — `_proactive_loop`
+
+WebSocket init 后，服务端创建一个后台协程（`server.py:461`）：
+
+```python
+task = asyncio.create_task(_proactive_loop(websocket, session_id))
+```
+
+它的生命周期绑定 session（标签页关闭 → WS 断开 → 协程取消）：
+
+```python
+# server.py:355
+async def _proactive_loop(websocket, session_id):
+    while True:
+        1. 检查睡眠/唤醒 → 发消息 + 梦境
+        2. 睡着？→ sleep 30s
+        3. idle 时间 < 情绪阈值？→ sleep 15s
+        4. ProactivityManager 评分 → 命中？
+        5. InnerDrive Agent 1 决策：
+           ├─ chat（≤ 2/hr）→ handle_proactive()
+           ├─ explore（≤ 1/hr）→ handle_explore()
+           └─ silent → 不操作
+        6. sleep 15s → 回到 1
+```
+
+---
+
+## CLI 模式启动对比
+
+| 步骤 | CLI（main.py） | Web（web_main.py） |
+|------|---------------|-------------------|
+| 配置 | `load_config()` | 同左 |
+| 日志 | `setup_logging()` | 同左 |
+| 嵌入 | `auto_start_embedding()` | 同左 |
+| 框架 | 无 | `uvicorn.run("web.server:app")` |
+| 启动后 | `ConsoleInterface.run()` | FastAPI 监听 |
+| 输入 | stdin → `cli_controller.process()` | WebSocket |
+| 输出 | 打字机效果 → stdout | 分段气泡 → WebSocket |
+| 主动 | Agent.run() 状态机轮询 | _proactive_loop 协程 |
+| Session | 单用户 | SessionManager |
+
+---
+
+## 相关文件
+
+| 文件 | 作用 |
+|------|------|
+| `web_main.py` | Web 入口，组装并启动 uvicorn |
+| `main.py` | CLI 入口，组装并启动 ConsoleInterface |
+| `config.py` | Config dataclass + 加载合并逻辑 |
+| `web/server.py` | FastAPI 应用定义、路由、lifespan |
+| `web/session.py` | SessionManager + WebAgent |
+| `core/embedding_server.py` | llama.cpp 嵌入服务生命周期 |
+| `core/logging_setup.py` | 日志配置 |
+
+## 相关文档
+
+- [消息流转](message-flow.md) — 三层 Agent 流水线详解
+- [架构总览](architecture.md) — 项目架构与功能总览
+- [API 文档](api.md) — WebSocket + REST API 接口规范
+- [部署手册](deployment.md) — 生产环境部署
