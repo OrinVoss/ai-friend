@@ -1,6 +1,6 @@
 """Tests for core/message_handler.py"""
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from core.message_handler import MessageHandler
 from core.inner_drive import ProactiveIntent
@@ -59,6 +59,11 @@ class TestMessageHandler(unittest.TestCase):
         result = self.handler.handle_message("你好")
         self.assertIn("zzz", result.lower())
         self.agent._react_loop.assert_not_called()
+        # Sleep reply should be persisted too
+        self.agent.short_term.add_turn.assert_any_call("assistant", result, metadata={"sleep": True})
+        self.agent.ltm.repo.insert_turn_sync.assert_any_call(
+            unittest.mock.ANY, "assistant", result, unittest.mock.ANY
+        )
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
     def test_handle_proactive(self, _mock):

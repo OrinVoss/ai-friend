@@ -81,7 +81,16 @@ class MessageHandler:
                                    str(a.personality.emotion.to_dict()))
             a.turn_count += 1
             a.last_activity_time = time.time()
-            return random.choice(["zzz...ZZZ...💤", "Zzzz...[翻身]", "zzzz...（小声梦话）", "Zzz...💤"])
+            sleep_reply = random.choice([
+                "zzz...ZZZ...💤", "Zzzz...[翻身]",
+                "zzzz...（小声梦话）", "Zzz...💤",
+            ])
+            # Persist sleep reply so it survives page refresh
+            a.short_term.add_turn("assistant", sleep_reply, metadata={"sleep": True})
+            a.ltm.repo.insert_turn_sync(a.turn_count, "assistant", sleep_reply,
+                                   str(a.personality.emotion.to_dict()))
+            a.turn_count += 1
+            return sleep_reply
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
         a.current_input = user_input
