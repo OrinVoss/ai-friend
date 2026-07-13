@@ -195,6 +195,14 @@ class WebAgent:
         self.agent.last_activity_time = value
 
     @property
+    def last_activity_time(self):
+        return self.agent.last_activity_time
+
+    @last_activity_time.setter
+    def last_activity_time(self, value):
+        self.agent.last_activity_time = value
+
+    @property
     def is_sleeping(self):
         return self.agent._sleeping
 
