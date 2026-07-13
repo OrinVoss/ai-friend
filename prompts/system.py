@@ -10,7 +10,7 @@ def format_traits(traits) -> str:
 
 CONTEXT_COMPRESS_PROMPT = """请将以下对话压缩为一段简洁的对话历史摘要。
 保留重要信息：用户的关键事实、讨论过的话题、情感变化。
-摘要在100-150字之间，用第三人称。
+摘要在2000-2500字之间，用第三人称。
 
 对话：
 {conversation}
