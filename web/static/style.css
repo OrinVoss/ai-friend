@@ -162,12 +162,17 @@ body {
     border: none;
     border-radius: 10px;
     background: transparent;
-    font-size: 18px;
+    color: var(--text-secondary);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: background 0.15s;
+}
+
+.icon-btn svg {
+    width: 20px;
+    height: 20px;
 }
 
 .icon-btn:hover {
@@ -605,14 +610,20 @@ body {
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     cursor: pointer;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 2px;
     transition: color 0.15s, background 0.15s;
+}
+
+.tab-btn svg {
+    width: 20px;
+    height: 20px;
 }
 
 .tab-btn.active {
