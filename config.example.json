@@ -4,5 +4,8 @@
   "api_model": "deepseek-v4-flash",
   "thinking": "disabled",
   "max_tokens": 512,
-  "temperature": 0.8
+  "temperature": 0.8,
+  "allowed_origins": [
+    "http://你的穿透域名.com"
+  ]
 }

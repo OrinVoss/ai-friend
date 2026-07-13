@@ -88,6 +88,15 @@ _default_origins = [
 ]
 _allowed_origins = list(dict.fromkeys(_default_origins + getattr(config, 'allowed_origins', [])))
 
+# WS-003: WebSocket Origin 白名单 —— localhost/127.0.0.1 始终放行；其余来源通过
+# config.allowed_origins 扩展（按 hostname 匹配，忽略 scheme/port，便于内网穿透域名）。
+from urllib.parse import urlparse as _urlparse
+_ws_allowed_hosts = {"localhost", "127.0.0.1"}
+for _o in getattr(config, 'allowed_origins', []):
+    _h = _urlparse(_o).hostname or _o
+    if _h:
+        _ws_allowed_hosts.add(_h)
+
 app = FastAPI(
     lifespan=lifespan,
     middleware=[
@@ -414,7 +423,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # #158: validate Origin header to prevent cross-origin WebSocket attacks
     origin = websocket.headers.get("origin", "")
     from urllib.parse import urlparse
-    allowed = {"localhost", "127.0.0.1"}
+    allowed = _ws_allowed_hosts  # localhost/127.0.0.1 + config.allowed_origins 的主机名
     if origin and origin != "null":
         parsed = urlparse(origin)
         if parsed.hostname not in allowed:
