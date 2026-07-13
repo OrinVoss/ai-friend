@@ -9,6 +9,9 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_ENDPOINT = "http://localhost:8080/v1/embeddings"
+DEFAULT_HEALTH_ENDPOINT = "http://localhost:8080/health"
+MAX_WAIT_SECONDS = 90          # ES-001: give slower machines more time to load the model
+WAIT_POLL_INTERVAL = 1
 
 
 def kill_existing_llama() -> None:
@@ -24,21 +27,42 @@ def kill_existing_llama() -> None:
                 capture_output=True, timeout=5,
             )
             logger.info("[embed] killed existing llama-server process")
+            # Give Windows a moment to release the port
+            time.sleep(1)
     except Exception:
         pass
+
+
+def _is_server_ready(endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> bool:
+    """Return True if the embedding endpoint responds."""
+    try:
+        resp = urllib.request.urlopen(endpoint, timeout=2)
+        resp.read()
+        return True
+    except Exception:
+        return False
+
+
+def _is_llama_running() -> bool:
+    """Return True if llama-server.exe is still in the process list."""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq llama-server.exe", "/NH"],
+            capture_output=True, text=True, timeout=2,
+        )
+        return "llama-server.exe" in result.stdout
+    except Exception:
+        return False
 
 
 def auto_start_embedding(logger_ref: logging.Logger | None = None,
                          endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> None:
     """Start embedding server if not running. Non-blocking after launch."""
     log = logger_ref or logger
-    try:
-        resp = urllib.request.urlopen(endpoint, timeout=2)
-        resp.read()
+
+    if _is_server_ready(endpoint):
         log.info("[embed] server already running")
         return
-    except Exception:
-        pass
 
     # Kill stale llama process before starting fresh
     kill_existing_llama()
@@ -49,36 +73,69 @@ def auto_start_embedding(logger_ref: logging.Logger | None = None,
         log.info("[embed] model not found, skipping auto-start")
         return
 
+    # Ensure logs directory exists and redirect server output for diagnostics
+    log_dir = os.path.join(project, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    server_log_path = os.path.join(log_dir, "embedding_server.log")
+
     log.info("[embed] starting embedding server...")
+    proc = None
     try:
-        # Use start_embedding_server.bat to avoid Chinese path encoding issues
+        server_log = open(server_log_path, "a", encoding="utf-8")
         bat_path = os.path.join(project, "start_embedding_server.bat")
         if os.path.exists(bat_path):
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [bat_path],
                 cwd=project,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=server_log,
+                stderr=subprocess.STDOUT,
             )
         else:
             # Fallback: relative paths from project directory
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [os.path.join("memory", "llama-bin", "llama-server.exe"),
                  "-m", os.path.join("memory", "Qwen3.5-0.8B-Q6_K.gguf"),
                  "--embeddings", "--port", "8080",
                  "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
                  "--threads", "4", "--host", "127.0.0.1"],
                 cwd=project,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=server_log,
+                stderr=subprocess.STDOUT,
             )
-        for i in range(30):  # 640MB model may take 15-30s to load
-            time.sleep(1)
-            try:
-                resp = urllib.request.urlopen(endpoint, timeout=1)
-                resp.read()
-                log.info(f"[embed] server ready ({i+1}s)")
+
+        last_logged = 0
+        for i in range(MAX_WAIT_SECONDS):
+            time.sleep(WAIT_POLL_INTERVAL)
+            if _is_server_ready(endpoint):
+                log.info(f"[embed] server ready ({i + 1}s)")
                 return
-            except Exception:
-                continue
-        log.warning("[embed] server did not respond within 30s, falling back to keyword search")
+            # Log progress every 10 seconds so users know it is still loading
+            if (i + 1) % 10 == 0 and (i + 1) != last_logged:
+                last_logged = i + 1
+                log.info(f"[embed] still loading... ({i + 1}s)")
+            # If the process died early, give up immediately and surface the log
+            if proc is not None and proc.poll() is not None:
+                log.warning(
+                    f"[embed] llama-server exited early (code {proc.returncode}), "
+                    f"see {server_log_path}"
+                )
+                return
+
+        # Final check: server might have started right after the last poll
+        if _is_server_ready(endpoint):
+            log.info(f"[embed] server ready ({MAX_WAIT_SECONDS}s)")
+            return
+
+        # If process is still alive but not ready, keep it running and warn
+        if _is_llama_running():
+            log.warning(
+                f"[embed] server still loading after {MAX_WAIT_SECONDS}s; "
+                "continuing without embedding fallback"
+            )
+        else:
+            log.warning(
+                f"[embed] server did not respond within {MAX_WAIT_SECONDS}s, "
+                f"falling back to keyword search (see {server_log_path})"
+            )
     except Exception as e:
         log.warning(f"[embed] failed to start: {e}")
