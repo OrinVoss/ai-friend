@@ -194,8 +194,9 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    transition: transform 0.25s ease, width 0.2s ease;
+    transition: width 0.25s ease, opacity 0.25s ease, transform 0.25s ease;
     position: relative;
+    overflow: hidden;
 }
 
 .logs-panel {
@@ -248,7 +249,7 @@ body {
     top: 76px;
     width: 22px;
     height: 48px;
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
     background: var(--bg-panel);
@@ -256,7 +257,9 @@ body {
     color: var(--text-secondary);
     cursor: pointer;
     z-index: 5;
-    transition: background 0.15s, color 0.15s;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, background 0.15s, color 0.15s;
 }
 
 .panel-expand-bar:hover {
@@ -806,15 +809,25 @@ body {
 
 @media (min-width: 901px) {
     .side-panel.collapsed {
-        display: none;
+        width: 0;
+        opacity: 0;
+        transform: translateX(-100%);
+        border: none;
+        pointer-events: none;
+    }
+
+    .logs-panel.collapsed {
+        transform: translateX(100%);
     }
 
     .side-panel.status-panel.collapsed + .status-expand {
-        display: flex;
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .side-panel.logs-panel.collapsed ~ .logs-expand {
-        display: flex;
+        opacity: 1;
+        pointer-events: auto;
     }
 
     .panel-collapse {
