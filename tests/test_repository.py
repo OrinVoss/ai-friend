@@ -8,18 +8,18 @@ from models.memory import UserFact
 
 
 class TestRepositoryFacts(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.db = Database(":memory:")
-        asyncio.run(cls.db.open())
-
     def setUp(self):
+        self.db = Database(":memory:")
+        asyncio.run(self.db.open())
         self.repo = Repository(self.db)
         # Clean: delete all facts between tests
         async def _clean():
             async with self.db.cursor() as c:
                 await c.execute("DELETE FROM user_facts")
         asyncio.run(_clean())
+
+    def tearDown(self):
+        asyncio.run(self.db.close())
 
     def test_upsert_fact_new(self):
         """Insert a new fact."""
@@ -125,12 +125,9 @@ class TestRepositoryFacts(unittest.TestCase):
 
 
 class TestRepositoryRelationship(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.db = Database(":memory:")
-        asyncio.run(cls.db.open())
-
     def setUp(self):
+        self.db = Database(":memory:")
+        asyncio.run(self.db.open())
         self.repo = Repository(self.db)
         self.repo.session_id = "sess_x"
         async def _clean():
@@ -138,6 +135,9 @@ class TestRepositoryRelationship(unittest.TestCase):
                 await c.execute("DELETE FROM relationship_metrics")
                 await c.execute("DELETE FROM relationship_snapshots")
         asyncio.run(_clean())
+
+    def tearDown(self):
+        asyncio.run(self.db.close())
 
     def test_ensure_relationship_defaults_seeds_four_dimensions(self):
         asyncio.run(self.repo.ensure_relationship_defaults())
@@ -170,17 +170,17 @@ class TestRepositoryRelationship(unittest.TestCase):
 
 
 class TestRepositorySessionRole(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.db = Database(":memory:")
-        asyncio.run(cls.db.open())
-
     def setUp(self):
+        self.db = Database(":memory:")
+        asyncio.run(self.db.open())
         self.repo = Repository(self.db)
         async def _clean():
             async with self.db.cursor() as c:
                 await c.execute("DELETE FROM session_roles")
         asyncio.run(_clean())
+
+    def tearDown(self):
+        asyncio.run(self.db.close())
 
     def test_set_and_get_role_for_session(self):
         asyncio.run(self.repo.set_session_role("sess_1", "小星"))
