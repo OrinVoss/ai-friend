@@ -5,9 +5,12 @@ from unittest.mock import MagicMock
 from prompts import instructions
 from prompts.tools_description import format_intent_options, format_tool_rules
 from prompts.system import (
+    _build_emotion_block,
     _build_inner_drive_instructions_block,
     _build_instructions_block,
     _build_output_rules_block,
+    build_inner_drive_prompt,
+    build_system_prompt,
     build_tool_agent_prompt,
 )
 from tools.traits import ToolRegistry, ToolSpec
@@ -88,6 +91,13 @@ class TestRegistryDerivedToolRules(unittest.TestCase):
 
 
 class TestEmotionPromptSummary(unittest.TestCase):
+    def _make_context(self):
+        from models.conversation import MemoryContext
+        return MemoryContext(
+            facts=[], experiences=[], reflections=[],
+            relationship={"trust": 0.5, "familiarity": 0.5},
+        )
+
     def test_to_prompt_summary_structure(self):
         from models.personality import EmotionalState
         emotion = EmotionalState()
@@ -97,6 +107,52 @@ class TestEmotionPromptSummary(unittest.TestCase):
         self.assertIn("valence_desc", summary)
         self.assertIn("arousal_desc", summary)
         self.assertIn("behavior", summary)
+        # P2-5: numeric dimensions must be present for inner drive prompt
+        self.assertIn("valence", summary)
+        self.assertIn("arousal", summary)
+
+    def test_build_system_prompt_with_emotion_summary(self):
+        from models.personality import PersonalityConfig, EmotionalState
+        personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                       backstory="", interests=[])
+        emotion = EmotionalState()
+        summary = emotion.to_prompt_summary()
+        ctx = self._make_context()
+
+        prompt_with_emotion = build_system_prompt(
+            personality=personality, emotion=emotion,
+            memory_context=ctx, conversation_history="",
+        )
+        prompt_with_summary = build_system_prompt(
+            personality=personality, emotion=emotion, emotion_summary=summary,
+            memory_context=ctx, conversation_history="",
+        )
+        self.assertEqual(prompt_with_emotion, prompt_with_summary)
+        self.assertIn("=== 你现在啥状态 ===", prompt_with_summary)
+        self.assertIn(summary["mood"], prompt_with_summary)
+
+    def test_build_inner_drive_prompt_with_emotion_summary(self):
+        from models.personality import PersonalityConfig, EmotionalState
+        personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                       backstory="", interests=[])
+        emotion = EmotionalState()
+        summary = emotion.to_prompt_summary()
+        ctx = self._make_context()
+
+        prompt_with_emotion = build_inner_drive_prompt(
+            personality=personality, emotion=emotion,
+            memory_context=ctx, conversation_history="",
+        )
+        prompt_with_summary = build_inner_drive_prompt(
+            personality=personality, emotion=emotion, emotion_summary=summary,
+            memory_context=ctx, conversation_history="",
+        )
+        self.assertEqual(prompt_with_emotion, prompt_with_summary)
+        self.assertIn(emotion.dominant_emotion, prompt_with_summary)
+
+    def test_build_emotion_block_requires_emotion_or_summary(self):
+        with self.assertRaises(ValueError):
+            _build_emotion_block()
 
 
 if __name__ == "__main__":

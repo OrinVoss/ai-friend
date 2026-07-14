@@ -356,6 +356,8 @@ class EmotionalState:
             "dominant_emotion": dom,
             "mood": emotion_desc.get(dom, "平静"),
             "primary_hint": f"，心底有一丝{strong_primary[0]}" if strong_primary else "",
+            "valence": self.valence,
+            "arousal": self.arousal,
             "valence_desc": valence_desc,
             "arousal_desc": arousal_desc,
             "behavior": behavior.get(dom, ""),

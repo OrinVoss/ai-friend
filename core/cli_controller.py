@@ -205,8 +205,10 @@ class CliController:
                     logger.exception("[cli] agent2 error, continuing with partial results")
 
             drive_summary = drive_result.summary if drive_result else ""
+            emotion_summary = a.personality.emotion.to_prompt_summary()
             sys_prompt = build_system_prompt(
                 personality=a.personality.config, emotion=a.personality.emotion,
+                emotion_summary=emotion_summary,
                 memory_context=a.current_memory_context,
                 conversation_history=a.short_term.format_for_prompt(max_tokens=1800),
                 is_proactive=is_proactive, compressed_summary=a._context.compressed_summary,

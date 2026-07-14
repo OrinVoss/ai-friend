@@ -157,9 +157,11 @@ class InnerDriveAgent:
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        emotion_summary = self._personality.emotion.to_prompt_summary()
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
@@ -257,6 +259,7 @@ class InnerDriveAgent:
         now = datetime.now()
         mem_ctx = self._retriever.retrieve_for_query("")
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         sys_prompt = build_inner_drive_proactive_prompt(
             personality=self._personality.config,
@@ -265,6 +268,7 @@ class InnerDriveAgent:
             conversation_history=conv_hist,
             idle_duration=idle_duration,
             current_time=now,
+            emotion_summary=emotion_summary,
         )
 
         messages = [
@@ -305,10 +309,12 @@ class InnerDriveAgent:
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
@@ -373,6 +379,7 @@ class InnerDriveAgent:
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         # Build failure context
         fail_lines = ["=== 之前的工具调用全部失败 ==="]
@@ -385,6 +392,7 @@ class InnerDriveAgent:
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
@@ -451,9 +459,11 @@ class InnerDriveAgent:
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        emotion_summary = self._personality.emotion.to_prompt_summary()
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,

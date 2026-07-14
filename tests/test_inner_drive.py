@@ -136,6 +136,16 @@ class TestAssess(unittest.TestCase):
         self.personality.emotion.dominant_emotion = "neutral"
         self.personality.emotion.valence = 0.4
         self.personality.emotion.arousal = 0.5
+        self.personality.emotion.to_prompt_summary.return_value = {
+            "dominant_emotion": "neutral",
+            "mood": "平静",
+            "primary_hint": "",
+            "valence": 0.4,
+            "arousal": 0.5,
+            "valence_desc": "积极",
+            "arousal_desc": "平衡",
+            "behavior": "你心情平静。说话正常，不兴奋也不低落。",
+        }
         self.retriever = MagicMock()
         self.retriever.retrieve_for_query.return_value = _make_memory_mock()
         self.short_term = MagicMock()
@@ -322,6 +332,16 @@ class TestAssessProactive(unittest.TestCase):
         self.personality.emotion.dominant_emotion = "engaged"
         self.personality.emotion.valence = 0.6
         self.personality.emotion.arousal = 0.5
+        self.personality.emotion.to_prompt_summary.return_value = {
+            "dominant_emotion": "engaged",
+            "mood": "投入",
+            "primary_hint": "",
+            "valence": 0.6,
+            "arousal": 0.5,
+            "valence_desc": "积极",
+            "arousal_desc": "平衡",
+            "behavior": "你心情平静。说话正常，不兴奋也不低落。",
+        }
         self.retriever = MagicMock()
         self.retriever.retrieve_for_query.return_value = _make_memory_mock()
         self.short_term = MagicMock()

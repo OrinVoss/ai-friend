@@ -799,7 +799,10 @@ Identity → Emotion → Relationship → Memory → Tool → Conversation → I
 
 1. **P1-3 Instruction 集中管理**：新建 `prompts/instructions.py`，将 Agent 1/2/3 的指令文本统一迁移为常量；`prompts/system.py` 的 builder 函数改为引用常量，不再硬编码大段指令。
 2. **P2-4 工具名去硬编码**：新建 `prompts/tools_description.py`，提供 `format_tool_rules()` 和 `format_intent_options()`，根据 `ToolRegistry` 中实际注册的工具动态生成触发规则；`_build_inner_drive_instructions_block`、`build_tool_agent_prompt`、`_build_output_rules_block` 均改为从 registry 推导。
-3. **P2-5 情绪状态摘要化（小步）**：在 `models/personality.py` 的 `EmotionalState` 中新增 `to_prompt_summary()`，将情绪格式化的部分逻辑下沉到 model 层；`prompts/system.py` 的 `_build_emotion_block` 改为接收摘要字典。
+3. **P2-5 情绪/记忆状态摘要化（完成）**：
+   - 之前 #160 已实现 `memory_context_summary`，Agent 1 把格式化的关系/记忆摘要直接传给 Agent 3，避免 Agent 3 再查一次长期记忆。
+   - 本次彻底完成 `emotion_summary`：Runtime 调用方（`core/message_handler.py`、`core/cli_controller.py`、`core/inner_drive.py`）在调用 `build_system_prompt` / `build_inner_drive_prompt` / `build_inner_drive_proactive_prompt` 前，先调用 `emotion.to_prompt_summary()`，只把轻量摘要字典传给 prompt builder；prompt builder 内部不再自己转摘要。
+   - `EmotionalState.to_prompt_summary()` 补充 `valence` / `arousal` 数值维度，使内驱 prompt 也能完全基于摘要渲染。
 
 仍未修复：
 
@@ -807,9 +810,9 @@ Identity → Emotion → Relationship → Memory → Tool → Conversation → I
 - P3-7 没有 Prompt 版本管理 / AB Test。
 - P3-8 没有 Token Budget。
 
-验证：单元测试 9 passed（`tests/test_prompt_instructions.py`），全量测试 386 passed、2 skipped。
+验证：相关单元测试 75 passed（`tests/test_prompt_instructions.py`、`tests/test_inner_drive.py`、`tests/test_message_handler.py`、`tests/test_agent_proactive.py`、`tests/test_conversation_examples.py`）。
 
-相关提交见 `changes/2026-07-14-fix-294-prompt-architecture-remaining.md`。
+相关提交见 `changes/2026-07-14-complete-294-p2-5-runtime-summary.md`。
 
 ---
 

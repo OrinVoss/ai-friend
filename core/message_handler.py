@@ -341,8 +341,10 @@ class MessageHandler:
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
+        emotion_summary = a.personality.emotion.to_prompt_summary()
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,
@@ -382,6 +384,7 @@ class MessageHandler:
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
+        emotion_summary = a.personality.emotion.to_prompt_summary()
 
         self._ensure_tool_agent()
         explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容。用 web_search 和 web_fetch。"
@@ -393,6 +396,7 @@ class MessageHandler:
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,
@@ -463,9 +467,11 @@ class MessageHandler:
             0,
             getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
         )
+        emotion_summary = a.personality.emotion.to_prompt_summary()
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
+            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,

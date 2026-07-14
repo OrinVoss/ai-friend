@@ -88,10 +88,17 @@ def _build_inner_identity_block(personality: PersonalityConfig) -> str:
     )
 
 
-def _build_inner_emotion_block(emotion: EmotionalState) -> str:
+def _build_inner_emotion_block(
+    emotion_summary: dict | None = None,
+    emotion: EmotionalState | None = None,
+) -> str:
+    if emotion_summary is None:
+        if emotion is None:
+            raise ValueError("emotion or emotion_summary required")
+        emotion_summary = emotion.to_prompt_summary()
     return (
-        f"你现在的情绪：{emotion.dominant_emotion}"
-        f"（效价 {emotion.valence:+.2f}，唤醒度 {emotion.arousal:.2f}）"
+        f"你现在的情绪：{emotion_summary['dominant_emotion']}"
+        f"（效价 {emotion_summary['valence']:+.2f}，唤醒度 {emotion_summary['arousal']:.2f}）"
     )
 
 
@@ -166,6 +173,7 @@ def build_inner_drive_prompt(
     emotion: EmotionalState,
     memory_context: MemoryContext,
     conversation_history: str,
+    emotion_summary: dict | None = None,
     tools=None,
     tool_call_history: list | None = None,
     session_id: str | None = None,
@@ -194,7 +202,7 @@ def build_inner_drive_prompt(
         )
     )
 
-    blocks.append(_build_inner_emotion_block(emotion))
+    blocks.append(_build_inner_emotion_block(emotion_summary=emotion_summary, emotion=emotion))
 
     blocks.append(
         _cache(
@@ -248,6 +256,7 @@ def build_inner_drive_proactive_prompt(
     conversation_history: str,
     idle_duration: float,
     current_time,
+    emotion_summary: dict | None = None,
 ) -> str:
     """Agent 1: Proactive engagement decision prompt.
 
@@ -255,6 +264,11 @@ def build_inner_drive_proactive_prompt(
     chat, explore, or stay silent. Receives all the context the hardcoded
     ProactivityManager scoring uses so the LLM can make nuanced decisions.
     """
+    if emotion_summary is None:
+        if emotion is None:
+            raise ValueError("emotion or emotion_summary required")
+        emotion_summary = emotion.to_prompt_summary()
+
     now_str = current_time.strftime("%Y-%m-%d %H:%M %A")
     blocks = []
 
@@ -270,8 +284,8 @@ def build_inner_drive_proactive_prompt(
     blocks.append(
         f"=== 你的状态 ===\n"
         f"你是{personality.name}，一个 AI 朋友。\n"
-        f"当前情绪：{emotion.dominant_emotion}"
-        f"（效价 {emotion.valence:+.2f}，唤醒度 {emotion.arousal:.2f}）"
+        f"当前情绪：{emotion_summary['dominant_emotion']}"
+        f"（效价 {emotion_summary['valence']:+.2f}，唤醒度 {emotion_summary['arousal']:.2f}）"
     )
 
     rel = memory_context.relationship
@@ -389,10 +403,17 @@ def _build_examples_block(
     )
 
 
-def _build_emotion_block(emotion: EmotionalState) -> str:
+def _build_emotion_block(
+    emotion_summary: dict | None = None,
+    emotion: EmotionalState | None = None,
+) -> str:
     # Formatting logic has moved to EmotionalState.to_prompt_summary() so the
     # prompt builder receives a lightweight summary instead of raw dimensions.
-    s = emotion.to_prompt_summary()
+    if emotion_summary is None:
+        if emotion is None:
+            raise ValueError("emotion or emotion_summary required")
+        emotion_summary = emotion.to_prompt_summary()
+    s = emotion_summary
     return (
         f"""=== 你现在啥状态 ===
 {s['mood']}{s['primary_hint']}，{s['valence_desc']}、{s['arousal_desc']}的那种。
@@ -606,6 +627,7 @@ def build_system_prompt(
     personality_file: str | None = None,
     prompt_cache_ttl: float = 60.0,
     memory_context_summary: str = "",
+    emotion_summary: dict | None = None,
 ) -> str:
     """Agent 3 / proactive / explore system prompt.
 
@@ -643,7 +665,7 @@ def build_system_prompt(
         blocks.append(examples_block)
 
     # Dynamic: Current Emotional State + resentment + recent events
-    blocks.append(_build_emotion_block(emotion))
+    blocks.append(_build_emotion_block(emotion_summary=emotion_summary, emotion=emotion))
     resentment_block = _build_resentment_block(emotion)
     if resentment_block:
         blocks.append(resentment_block)
