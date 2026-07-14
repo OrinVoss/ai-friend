@@ -8,12 +8,13 @@
 
 - `doc/known-issues.md`：新增第 4 节「GitHub 待处理 Issue 清单」。
   - 从 [OrinVoss/ai-friend](https://github.com/OrinVoss/ai-friend/issues) 拉取当前 Open Issue（共 24 条）。
-  - 按表格形式列出编号、标题、标签、链接。
+  - 每条 Issue 保留完整正文（body），按小节形式展开，包含编号、标题、标签、创建/更新时间、链接、正文。
   - 保留最新审查类 Issue（#295 / #294 / #293）在前，其余按原列表顺序排列。
 
 ## 效果
 
 - 技术债务文档同时覆盖本地建议与 GitHub 远程 Issue。
+- 无需跳转 GitHub 即可查看每条 Issue 的完整内容，方便离线排期。
 - 后续排期时可以一次性看到所有待处理项，避免重复创建 Issue。
 
 ## 验证
@@ -24,3 +25,5 @@
 ## 提交
 
 `3ea0a93` docs: 在 known-issues 中补充 GitHub 待处理 Issue 清单
+`f835580` docs: 更新 GitHub issues changes 提交哈希
+（待补充完整正文后的新提交）
