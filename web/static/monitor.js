@@ -1,5 +1,6 @@
 let autoRefresh = false;
 let refreshTimer = null;
+let currentData = [];
 
 function fmtDuration(ms) {
   if (ms < 1000) return ms + 'ms';
@@ -120,6 +121,7 @@ function fetchData() {
   fetch('/api/monitor?limit=0')
     .then(r => r.json())
     .then(data => {
+      currentData = data || [];
       const list = document.getElementById('list');
       if (!data || data.length === 0) {
         list.innerHTML = '<div class="no-records">暂无记录</div>';
@@ -132,6 +134,7 @@ function fetchData() {
       document.getElementById('status').textContent = '就绪';
     })
     .catch(e => {
+      currentData = [];
       document.getElementById('list').innerHTML = '<div class="no-records">加载失败: ' + esc(e.message) + '</div>';
       document.getElementById('status').textContent = '错误: ' + e.message;
     });
@@ -166,10 +169,103 @@ function toggleAuto() {
   }
 }
 
+function downloadBlob(content, filename, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function formatTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function exportJson() {
+  if (!currentData || currentData.length === 0) {
+    alert('当前没有可导出的记录');
+    return;
+  }
+  const payload = {
+    exported_at: new Date().toISOString(),
+    count: currentData.length,
+    records: currentData,
+  };
+  downloadBlob(JSON.stringify(payload, null, 2), `llm_monitor_${formatTimestamp()}.json`, 'application/json');
+  document.getElementById('status').textContent = 'JSON 导出完成';
+}
+
+function escapeMd(text) {
+  if (text === null || text === undefined) return '';
+  return String(text).replace(/([\\`*_{}[\]()#+\-.!|])/g, '\\$1');
+}
+
+function exportMarkdown() {
+  if (!currentData || currentData.length === 0) {
+    alert('当前没有可导出的记录');
+    return;
+  }
+  const lines = [];
+  lines.push('# LLM 调用监控导出');
+  lines.push('');
+  lines.push(`- 导出时间：${new Date().toLocaleString('zh-CN')}`);
+  lines.push(`- 记录条数：${currentData.length}`);
+  lines.push('');
+
+  currentData.forEach((rec, idx) => {
+    lines.push(`## 记录 ${idx + 1} / ${currentData.length}`);
+    lines.push('');
+    lines.push(`- **时间**：${rec.timestamp || '-'}`);
+    lines.push(`- **来源**：${rec.source || '?'}`);
+    lines.push(`- **模型**：${rec.model || '-'}`);
+    lines.push(`- **耗时**：${fmtDuration(rec.duration_ms || 0)}`);
+    lines.push(`- **温度**：${rec.temperature ?? '-'}`);
+    lines.push(`- **max_tokens**：${rec.max_tokens ?? '-'}`);
+    if (rec.response_format) {
+      lines.push(`- **response_format**：\`\`\`json\n${escapeMd(JSON.stringify(rec.response_format, null, 2))}\n\`\`\``);
+    }
+    lines.push('');
+    lines.push('### 请求消息');
+    lines.push('');
+    if (rec.messages && rec.messages.length > 0) {
+      rec.messages.forEach(m => {
+        lines.push(`**role**：${m.role || '?'}`);
+        lines.push('');
+        lines.push('```');
+        lines.push(m.content || '(空)');
+        lines.push('```');
+        lines.push('');
+      });
+    } else {
+      lines.push('（无消息记录）');
+      lines.push('');
+    }
+    lines.push('### 响应');
+    lines.push('');
+    lines.push('```');
+    lines.push(rec.response || '(空响应)');
+    lines.push('```');
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+  });
+
+  downloadBlob(lines.join('\n'), `llm_monitor_${formatTimestamp()}.md`, 'text/markdown');
+  document.getElementById('status').textContent = 'Markdown 导出完成';
+}
+
 function initMonitor() {
   document.getElementById('refresh-btn')?.addEventListener('click', fetchData);
   document.getElementById('auto-btn')?.addEventListener('click', toggleAuto);
   document.getElementById('clear-btn')?.addEventListener('click', clearData);
+  document.getElementById('export-json-btn')?.addEventListener('click', exportJson);
+  document.getElementById('export-md-btn')?.addEventListener('click', exportMarkdown);
   fetchData();
 }
 
