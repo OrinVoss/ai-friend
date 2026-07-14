@@ -12,5 +12,6 @@
   "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
   "agent1_short_input_threshold": 20,
-  "conversation_examples_max_turns": 3
+  "conversation_examples_max_turns": 3,
+  "use_observation_fact": false
 }

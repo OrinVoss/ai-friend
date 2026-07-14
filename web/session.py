@@ -79,7 +79,8 @@ class WebAgent:
 
         self.retriever = MemoryRetriever(self.ltm, embedding_engine=embed_engine)
         self.consolidator = MemoryConsolidator(self.ltm, llm_gen,
-                                                embedding_engine=embed_engine)
+                                                embedding_engine=embed_engine,
+                                                config=config)
 
         registry = ToolRegistry()
         registry.register(RecallTool(self.retriever, self.ltm))

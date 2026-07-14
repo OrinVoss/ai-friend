@@ -81,7 +81,8 @@ async def main():
         retriever = MemoryRetriever(ltm, llm_rerank_fn=llm_rerank,
                                     embedding_engine=embed_engine)
         consolidator = MemoryConsolidator(ltm, llm_generate,
-                                          embedding_engine=embed_engine)
+                                          embedding_engine=embed_engine,
+                                          config=config)
 
         # Initialize UI — CL-001: pass typing_speed from config so the display
         # engine actually uses the user-configured value instead of the default 0.02.

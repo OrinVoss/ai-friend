@@ -27,15 +27,24 @@ logger = logging.getLogger(__name__)
 
 class MemoryConsolidator:
     def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable,
-                 embedding_engine=None, timeout: float = 60.0):
+                 embedding_engine=None, timeout: float = 60.0,
+                 config=None):
         self.ltm = ltm
         self.llm = llm_generate_fn
         self._timeout = timeout  # #184: independent timeout for LLM calls
         self._embed = embedding_engine
+        self.config = config or {}
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
         self._fact_checker = FactChecker(embedding_engine)
+        # ML-001: Layer 1 Memory lifecycle (Observation -> Fact)
+        self._lifecycle = None
+        if getattr(self.config, "use_observation_fact", False):
+            from memory.lifecycle import MemoryLifecycleManager
+            self._lifecycle = MemoryLifecycleManager(
+                ltm, config=self.config, embedding_engine=embedding_engine
+            )
 
     def _call_llm(self, prompt: str, temperature: float = 0.2) -> str:
         """Call LLM with timeout protection. (#184)"""
@@ -87,9 +96,28 @@ class MemoryConsolidator:
         # #136: step-by-step with error isolation — each step independent
         errors = []
 
+        # ML-001: create a raw observation for this consolidation batch.
+        # The same observation backs all facts extracted from this batch.
+        lifecycle_obs_ids: list[int] = []
+        if self._lifecycle:
+            try:
+                start_id = min((t.turn_id for t in self._pending_buffer), default=None)
+                end_id = max((t.turn_id for t in self._pending_buffer), default=None)
+                obs = run_async(self._lifecycle.observe(
+                    content=turn_text,
+                    source_turn=end_id,
+                    episode_turn_start=start_id,
+                    episode_turn_end=end_id,
+                    created_by="consolidation",
+                ))
+                if obs and obs.id:
+                    lifecycle_obs_ids.append(obs.id)
+            except Exception as e:
+                logger.warning(f"[consolidate] observation creation failed: {e}")
+
         # Step 1: Extract user facts
         try:
-            self._extract_facts(turn_text)
+            self._extract_facts(turn_text, observation_ids=lifecycle_obs_ids)
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
             errors.append("facts")
@@ -127,6 +155,13 @@ class MemoryConsolidator:
             self._prune(max_facts, max_experiences, max_reflections)
         except Exception as e:
             logger.warning(f"Pruning failed: {e}")
+
+        # Step 5.5: Layer 1 Memory lifecycle GC (if enabled)
+        if self._lifecycle and self._consolidation_count % 5 == 0:
+            try:
+                run_async(self._lifecycle.garbage_collect())
+            except Exception as e:
+                logger.warning(f"[consolidate] lifecycle GC failed: {e}")
 
         # Step 6: Embed new items
         try:
@@ -166,7 +201,8 @@ class MemoryConsolidator:
             logger.warning(f"Sentiment analysis failed: {e}")
             return 0.0, False, 0.5
 
-    def _extract_facts(self, turn_text: str) -> None:
+    def _extract_facts(self, turn_text: str,
+                       observation_ids: Optional[list[int]] = None) -> None:
         try:
             prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
             result = self._call_llm(prompt, temperature=0.2)
@@ -205,6 +241,23 @@ class MemoryConsolidator:
                             )
                             logger.debug(f"Stored fact: {key} = {value} (imp={importance})")
                             new_facts.append((category, key, value, confidence))
+
+                            # ML-001: dual-write to the new Observation -> Fact lifecycle.
+                            if observation_ids and self._lifecycle:
+                                try:
+                                    run_async(self._lifecycle.promote_fact(
+                                        observation_ids=observation_ids,
+                                        category=category,
+                                        key=key,
+                                        value=value,
+                                        confidence=confidence,
+                                        stability=0.5,
+                                        freshness=1.0,
+                                        importance=importance,
+                                        created_by="consolidation",
+                                    ))
+                                except Exception as e:
+                                    logger.warning(f"[consolidate] promote fact failed: {e}")
 
             # FactChecker: check new facts against existing ones for contradictions
             if self._fact_checker and new_facts:

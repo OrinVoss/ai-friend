@@ -175,6 +175,44 @@ class Database:
                     role_id TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                -- Layer 1 Memory lifecycle: raw observations (#ML-001)
+                CREATE TABLE IF NOT EXISTS observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    episode_turn_start INTEGER,
+                    episode_turn_end INTEGER,
+                    source_turn INTEGER,
+                    created_by TEXT NOT NULL DEFAULT 'consolidation',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT NOT NULL DEFAULT 'default',
+                    embedding BLOB,
+                    embedding_version INTEGER DEFAULT 0,
+                    is_archived INTEGER DEFAULT 0
+                );
+
+                -- Layer 1 Memory lifecycle: verified facts (#ML-001)
+                CREATE TABLE IF NOT EXISTS facts_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    fact_key TEXT NOT NULL,
+                    fact_value TEXT NOT NULL,
+                    confidence REAL DEFAULT 0.5,
+                    stability REAL DEFAULT 0.5,
+                    freshness REAL DEFAULT 1.0,
+                    importance REAL DEFAULT 0.5,
+                    status TEXT DEFAULT 'active',
+                    source_observation_ids TEXT DEFAULT '[]',
+                    verification_count INTEGER DEFAULT 0,
+                    last_verified_at TIMESTAMP,
+                    created_by TEXT NOT NULL DEFAULT 'consolidation',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT NOT NULL DEFAULT 'default',
+                    embedding BLOB,
+                    embedding_version INTEGER DEFAULT 0,
+                    UNIQUE(session_id, category, fact_key)
+                );
             """)
 
             # #215: read current schema version to skip already-applied migrations
@@ -309,11 +347,14 @@ class Database:
 
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
-            # current schema version (1 = baseline with session_id columns) so
-            # subsequent initialize() runs can detect/version-gate new migrations.
-            await c.execute(
-                "INSERT OR IGNORE INTO schema_version (version) VALUES (1)"
-            )
+            # current schema version so subsequent initialize() runs can detect/
+            # version-gate new migrations.
+            # ML-001: version 2 adds observations / facts_v2 tables.
+            if current_version < 2:
+                await c.execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (2)"
+                )
+                logger.info(f"[db] schema migrated from {current_version} to 2")
 
             # #157: create indexes for frequently-queried columns
             await c.executescript("""
@@ -324,6 +365,8 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_relationship_session ON relationship_metrics(session_id);
                 CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_session ON relationship_snapshots(session_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_session_roles_role ON session_roles(role_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id, is_archived, created_at);
+                CREATE INDEX IF NOT EXISTS idx_facts_v2_session ON facts_v2(session_id, status, confidence);
             """)
             logger.info("[db] indexes created/verified")
         await self.commit()

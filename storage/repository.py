@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from models.memory import UserFact, Experience, Reflection
+from models.memory import UserFact, Experience, Reflection, Observation, FactV2
 from storage.database import Database
 from core.async_utils import run_async
 
@@ -240,6 +240,171 @@ class Repository:
             )
             logger.debug(f"[db] bulk_embed: updated {len(updates)} rows in {table}")
 
+    # ── Observations (Layer 1 Memory lifecycle) ──
+
+    async def insert_observation(self, content: str,
+                                 source_turn: Optional[int] = None,
+                                 episode_turn_start: Optional[int] = None,
+                                 episode_turn_end: Optional[int] = None,
+                                 created_by: str = "consolidation",
+                                 embedding: Optional[bytes] = None) -> int:
+        logger.info(f"[db] insert_observation: turn={source_turn} len={len(content)} by={created_by}")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                INSERT INTO observations (content, source_turn, episode_turn_start, episode_turn_end,
+                                          created_by, session_id, embedding, embedding_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (content, source_turn, episode_turn_start, episode_turn_end,
+                  created_by, self.session_id, embedding, 1 if embedding else 0))
+            await self.db.commit()
+            return c.lastrowid
+
+    async def search_observations(self, query: str = "", limit: int = 10) -> list[Observation]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM observations
+                WHERE is_archived = 0 AND session_id = ?
+                  AND (content LIKE ? OR ? = '')
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (self.session_id, f"%{query}%", query, limit))
+            return [self._row_to_observation(r) for r in await c.fetchall()]
+
+    async def get_recent_observations(self, limit: int = 10, archived: bool = False) -> list[Observation]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM observations
+                WHERE is_archived = ? AND session_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (int(archived), self.session_id, limit))
+            return [self._row_to_observation(r) for r in await c.fetchall()]
+
+    async def archive_observation(self, obs_id: int) -> None:
+        logger.info(f"[db] archive_observation: id={obs_id}")
+        async with self.db.cursor() as c:
+            await c.execute(
+                "UPDATE observations SET is_archived = 1 WHERE id = ?",
+                (obs_id,)
+            )
+            await self.db.commit()
+
+    # ── Facts v2 (Layer 1 Memory lifecycle) ──
+
+    async def upsert_fact_v2(self, category: str, key: str, value: str,
+                             confidence: float = 0.5, stability: float = 0.5,
+                             freshness: float = 1.0, importance: float = 0.5,
+                             source_observation_ids: Optional[list[int]] = None,
+                             created_by: str = "consolidation",
+                             embedding: Optional[bytes] = None) -> int:
+        logger.info(f"[db] upsert_fact_v2: {category}/{key} confidence={confidence:.2f}")
+        source_ids = json.dumps(source_observation_ids or [])
+        async with self.db.cursor() as c:
+            if embedding is not None:
+                await c.execute("""
+                    INSERT INTO facts_v2 (category, fact_key, fact_value, confidence, stability,
+                                          freshness, importance, source_observation_ids,
+                                          verification_count, last_verified_at, created_by,
+                                          session_id, embedding, embedding_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, 1)
+                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
+                        fact_value = CASE WHEN excluded.confidence >= facts_v2.confidence
+                                          THEN excluded.fact_value ELSE facts_v2.fact_value END,
+                        confidence = MAX(facts_v2.confidence, excluded.confidence),
+                        stability = MAX(facts_v2.stability, excluded.stability),
+                        freshness = excluded.freshness,
+                        importance = MAX(facts_v2.importance, excluded.importance),
+                        verification_count = facts_v2.verification_count + 1,
+                        last_verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP,
+                        embedding = excluded.embedding,
+                        embedding_version = 1
+                """, (category, key, value, confidence, stability, freshness, importance,
+                      source_ids, created_by, self.session_id, embedding))
+            else:
+                await c.execute("""
+                    INSERT INTO facts_v2 (category, fact_key, fact_value, confidence, stability,
+                                          freshness, importance, source_observation_ids,
+                                          verification_count, last_verified_at, created_by,
+                                          session_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?)
+                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
+                        fact_value = CASE WHEN excluded.confidence >= facts_v2.confidence
+                                          THEN excluded.fact_value ELSE facts_v2.fact_value END,
+                        confidence = MAX(facts_v2.confidence, excluded.confidence),
+                        stability = MAX(facts_v2.stability, excluded.stability),
+                        freshness = excluded.freshness,
+                        importance = MAX(facts_v2.importance, excluded.importance),
+                        verification_count = facts_v2.verification_count + 1,
+                        last_verified_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (category, key, value, confidence, stability, freshness, importance,
+                      source_ids, created_by, self.session_id))
+            await self.db.commit()
+            return c.lastrowid
+
+    async def get_active_facts_v2(self, limit: int = 50) -> list[FactV2]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM facts_v2
+                WHERE status = 'active' AND session_id = ?
+                ORDER BY confidence * importance DESC
+                LIMIT ?
+            """, (self.session_id, limit))
+            return [self._row_to_fact_v2(r) for r in await c.fetchall()]
+
+    async def get_fact_v2_by_id(self, fact_id: int) -> Optional[FactV2]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM facts_v2 WHERE id = ? AND session_id = ?
+            """, (fact_id, self.session_id))
+            row = await c.fetchone()
+            return self._row_to_fact_v2(row) if row else None
+
+    async def update_fact_v2_status(self, fact_id: int, status: str) -> None:
+        logger.info(f"[db] update_fact_v2_status: id={fact_id} status={status}")
+        async with self.db.cursor() as c:
+            await c.execute(
+                "UPDATE facts_v2 SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, fact_id)
+            )
+            await self.db.commit()
+
+    async def verify_fact_v2(self, fact_id: int) -> None:
+        logger.info(f"[db] verify_fact_v2: id={fact_id}")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE facts_v2
+                SET verification_count = verification_count + 1,
+                    last_verified_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (fact_id,))
+            await self.db.commit()
+
+    async def decay_fact_v2(self, fact_id: int, decay_factor: float) -> None:
+        logger.info(f"[db] decay_fact_v2: id={fact_id} factor={decay_factor:.2f}")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE facts_v2
+                SET freshness = MAX(0.0, freshness * ?),
+                    confidence = MAX(0.0, confidence * ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (decay_factor, decay_factor, fact_id))
+            await self.db.commit()
+
+    async def search_facts_v2(self, query: str = "", limit: int = 30) -> list[FactV2]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM facts_v2
+                WHERE status = 'active' AND session_id = ?
+                  AND (fact_key LIKE ? OR fact_value LIKE ? OR category LIKE ? OR ? = '')
+                ORDER BY confidence * importance DESC
+                LIMIT ?
+            """, (self.session_id, f"%{query}%", f"%{query}%", f"%{query}%", query, limit))
+            return [self._row_to_fact_v2(r) for r in await c.fetchall()]
+
     # ── Relationship ──
 
     async def get_all_relationships(self) -> dict[str, float]:
@@ -454,4 +619,30 @@ class Repository:
             related_experience_ids=json.loads(r["related_experience_ids"])
             if r["related_experience_ids"] else [],
             significance=r["significance"], created_at=r["created_at"],
+        )
+
+    def _row_to_observation(self, r) -> Observation:
+        return Observation(
+            id=r["id"], content=r["content"],
+            episode_turn_start=r["episode_turn_start"],
+            episode_turn_end=r["episode_turn_end"],
+            source_turn=r["source_turn"],
+            created_by=r["created_by"], created_at=r["created_at"],
+            session_id=r["session_id"], embedding=r["embedding"],
+            embedding_version=r["embedding_version"], is_archived=bool(r["is_archived"]),
+        )
+
+    def _row_to_fact_v2(self, r) -> FactV2:
+        return FactV2(
+            id=r["id"], category=r["category"], fact_key=r["fact_key"],
+            fact_value=r["fact_value"], confidence=r["confidence"],
+            stability=r["stability"], freshness=r["freshness"],
+            importance=r["importance"], status=r["status"],
+            source_observation_ids=json.loads(r["source_observation_ids"])
+            if r["source_observation_ids"] else [],
+            verification_count=r["verification_count"],
+            last_verified_at=r["last_verified_at"],
+            created_by=r["created_by"], created_at=r["created_at"],
+            updated_at=r["updated_at"], session_id=r["session_id"],
+            embedding=r["embedding"], embedding_version=r["embedding_version"],
         )

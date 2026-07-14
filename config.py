@@ -77,6 +77,8 @@ class Config:
     prompt_cache_ttl_seconds: int = 60
     agent1_short_input_threshold: int = 20
     conversation_examples_max_turns: int = 3
+    # ML-001: Layer 1 Memory lifecycle switch
+    use_observation_fact: bool = False
     # CE-001: configurable conversation style examples (#28)
     conversation_examples: list[dict] = field(default_factory=lambda: [
         {

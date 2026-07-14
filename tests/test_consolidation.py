@@ -1,6 +1,6 @@
 """Tests for memory/consolidation.py — FactChecker integration (#6)."""
 import unittest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from models.memory import UserFact
 
@@ -162,6 +162,50 @@ class TestConsolidationRelationship(unittest.TestCase):
 
         self.ltm.update_relationship.assert_any_call("trust", 0.48)
         self.ltm.update_relationship.assert_any_call("playfulness", 0.48)
+
+
+class TestMemoryLifecycleIntegration(unittest.TestCase):
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+
+    def test_lifecycle_disabled_by_default(self):
+        """By default use_observation_fact is False and lifecycle manager is None."""
+        from memory.consolidation import MemoryConsolidator
+        consolidator = MemoryConsolidator(self.ltm, self.llm)
+        self.assertIsNone(consolidator._lifecycle)
+
+    def test_lifecycle_enabled_when_config_switches_on(self):
+        """When config.use_observation_fact=True, lifecycle manager is created."""
+        from memory.consolidation import MemoryConsolidator
+        config = MagicMock()
+        config.use_observation_fact = True
+        consolidator = MemoryConsolidator(self.ltm, self.llm, config=config)
+        self.assertIsNotNone(consolidator._lifecycle)
+
+    def test_extract_facts_dual_writes_to_lifecycle(self):
+        """When observation_ids provided, extracted facts are also promoted to FactV2."""
+        from memory.consolidation import MemoryConsolidator
+        from unittest.mock import patch
+        config = MagicMock()
+        config.use_observation_fact = True
+        consolidator = MemoryConsolidator(self.ltm, self.llm, config=config)
+        consolidator._lifecycle = MagicMock()
+        consolidator._lifecycle.promote_fact = AsyncMock(return_value=MagicMock())
+
+        self.llm.return_value = "FACT|preference|饮品|咖啡|0.8|0.7|user_fact"
+        self.ltm.get_similar_facts.return_value = []
+
+        with patch("memory.consolidation.run_async", lambda coro: coro.send(None)):
+            consolidator._extract_facts("用户说喜欢咖啡", observation_ids=[1])
+
+        consolidator._lifecycle.promote_fact.assert_awaited_once()
+        args = consolidator._lifecycle.promote_fact.call_args.kwargs
+        self.assertEqual(args["category"], "preference")
+        self.assertEqual(args["key"], "饮品")
+        self.assertEqual(args["value"], "咖啡")
+        self.assertEqual(args["observation_ids"], [1])
 
 
 if __name__ == "__main__":
