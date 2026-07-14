@@ -9,11 +9,82 @@ import logging
 import random
 import re
 import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
 
 from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
 from core.prompt_cache import PromptCache
 
 logger = logging.getLogger(__name__)
+
+
+class MessageHandlerState(Enum):
+    """Explicit states for the three-Agent pipeline.
+
+    The state machine is intentionally lightweight: it records the current
+    phase for observability and tests without replacing Python control flow.
+    """
+    IDLE = auto()
+    ASSESSING = auto()
+    EXECUTING_TOOLS = auto()
+    HANDLING_INTENT = auto()
+    GENERATING_RESPONSE = auto()
+    ERROR_FALLBACK = auto()
+    DONE = auto()
+
+
+@dataclass
+class ToolExecutionResult:
+    """Unified result of an Agent 2 tool execution phase.
+
+    Encapsulates formatted records, call statistics, and optional error
+    information so callers do not need to rebuild strings manually.
+    """
+    records_text: str = ""
+    total_calls: int = 0
+    success_count: int = 0
+    has_error: bool = False
+    error_message: str = ""
+    elapsed_ms: float = 0.0
+
+    @classmethod
+    def from_records(
+        cls,
+        all_tool_results,
+        tool_agent,
+        max_length: int = 3000,
+        error_message: str = "",
+    ) -> "ToolExecutionResult":
+        """Build a ToolExecutionResult from a list of ToolAgentResult objects."""
+        parts = []
+        total_calls = 0
+        success_count = 0
+        for r in all_tool_results:
+            part = tool_agent.format_for_phase2(r)
+            if part:
+                parts.append(part)
+            total_calls += r.total_calls
+            success_count += r.success_count
+
+        records_text = "\n".join(parts)
+        has_error = bool(error_message)
+        if has_error:
+            records_text = f"{error_message}\n{records_text}"
+        if len(records_text) > max_length:
+            records_text = records_text[:max_length] + "\n...(后续结果已截断)"
+
+        return cls(
+            records_text=records_text,
+            total_calls=total_calls,
+            success_count=success_count,
+            has_error=has_error,
+            error_message=error_message,
+        )
+
+    def with_elapsed(self, elapsed_ms: float) -> "ToolExecutionResult":
+        """Return a copy with elapsed_ms set."""
+        self.elapsed_ms = elapsed_ms
+        return self
 
 
 class MessageHandler:
@@ -30,10 +101,20 @@ class MessageHandler:
         self._tool_agent = None  # lazy init
         self._inner_drive = None  # lazy init
         self._prompt_cache = PromptCache()
+        self._state = MessageHandlerState.IDLE
 
     @property
     def a(self):
         return self._agent
+
+    @property
+    def current_state(self) -> MessageHandlerState:
+        return self._state
+
+    def _transition(self, state: MessageHandlerState) -> None:
+        if self._state != state:
+            logger.debug(f"[msg] state: {self._state.name} -> {state.name}")
+            self._state = state
 
     def _ensure_inner_drive(self):
         if self._inner_drive is None:
@@ -66,13 +147,25 @@ class MessageHandler:
             from core.tool_agent import ToolAgent
             self._tool_agent = ToolAgent(
                 provider=self.a.provider,
-                tool_registry=self.a._tool_registry,
+                tool_registry=self._make_external_registry(),
             )
 
     def _make_internal_registry(self):
+        """Build an isolated registry for Agent 1 with fresh recall/remember instances."""
         from tools.traits import ToolRegistry
+        from tools.memory_tools import RecallTool, RememberTool
+        a = self.a
         r = ToolRegistry()
-        for name in ("recall", "remember"):
+        if a.retriever is not None and a.ltm is not None:
+            r.register(RecallTool(retriever=a.retriever, ltm=a.ltm))
+            r.register(RememberTool(ltm=a.ltm))
+        return r
+
+    def _make_external_registry(self):
+        """Build a registry containing only external tools for Agent 2."""
+        from tools.traits import ToolRegistry, EXTERNAL_TOOL_NAMES
+        r = ToolRegistry()
+        for name in EXTERNAL_TOOL_NAMES:
             tool = self.a._tool_registry.get(name)
             if tool:
                 r.register(tool)
@@ -110,25 +203,55 @@ class MessageHandler:
         a.add_turn("user", user_input)
 
         # ── Agent 1: Inner Drive ──
+        self._transition(MessageHandlerState.ASSESSING)
         self._ensure_inner_drive()
         drive_result = self._inner_drive.assess(user_input)
 
         if not drive_result.needs_external_tools:
             # No external tools needed → straight to Agent 3
             logger.info(f"[msg] agent1: no external tools needed")
+            self._transition(MessageHandlerState.GENERATING_RESPONSE)
             agent3_output = self._run_agent3(user_input, drive_result, tool_result=None,
                                             on_token=on_token)
-            return self._handle_agent3_intent(user_input, agent3_output, on_token=on_token)
+            result = self._handle_agent3_intent(user_input, agent3_output, on_token=on_token)
+            self._transition(MessageHandlerState.DONE)
+            return result
 
         # ── Agent 2: Multi-round tool execution ──
+        self._transition(MessageHandlerState.EXECUTING_TOOLS)
+        exec_result = self._run_agent2(user_input, drive_result)
+        if exec_result.records_text:
+            logger.info(
+                f"[msg] agent2: {exec_result.total_calls} calls, "
+                f"{exec_result.success_count} ok"
+            )
+            # Sync Agent 2 results to tool_call_history so prompt can show them
+            # (records are already capped at 200 chars by record_tool_call)
+            # We reconstruct from the last tool_result if available; otherwise skip.
+            if exec_result.total_calls > 0 and self._tool_agent is not None:
+                # Best-effort sync: re-execute formatting is not needed for history
+                pass
+
+        # ── Agent 3: Emotional expression ──
+        self._transition(MessageHandlerState.GENERATING_RESPONSE)
+        result = self._run_agent3(
+            user_input, drive_result, None,
+            tool_records=exec_result.records_text, on_token=on_token,
+            final_response=True,
+        )
+        self._transition(MessageHandlerState.DONE)
+        return result
+
+    def _run_agent2(self, user_input: str, drive_result) -> ToolExecutionResult:
+        """Execute Agent 2's multi-round tool loop and return a unified result."""
         self._ensure_tool_agent()
         from core.tool_agent import ToolAttemptTracker
 
         all_tool_results = []
-        tool_records = ""
         round_num = 0
         tracker = ToolAttemptTracker()
         agent2_error = ""
+        t0 = time.time()
 
         try:
             while round_num < self.MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
@@ -165,9 +288,12 @@ class MessageHandler:
 
                 if tool_result and tool_result.has_results:
                     all_tool_results.append(tool_result)
+                    # Sync results to agent's rolling tool call history
+                    for rec in tool_result.records:
+                        self.a.record_tool_call(rec.name, rec.success, rec.output)
 
                 combined_records = ""
-                for i, r in enumerate(all_tool_results):
+                for r in all_tool_results:
                     combined_records += self._tool_agent.format_for_phase2(r) + "\n"
                 if len(combined_records) > self.TOOL_RECORDS_MAX_LENGTH:
                     combined_records = combined_records[:self.TOOL_RECORDS_MAX_LENGTH] + "\n...(后续结果已截断)"
@@ -191,30 +317,13 @@ class MessageHandler:
             logger.exception("[msg] agent2: unexpected error, falling back to agent3")
             agent2_error = f"[工具执行阶段出现异常：{type(exc).__name__}，已降级为直接回复]"
 
-        # Build final combined tool records for Agent 3
-        parts = []
-        for r in all_tool_results:
-            part = self._tool_agent.format_for_phase2(r)
-            if part:
-                parts.append(part)
-        tool_records = "\n".join(parts)
-        if agent2_error:
-            tool_records = agent2_error + "\n" + tool_records
-        if len(tool_records) > self.TOOL_RECORDS_MAX_LENGTH:
-            tool_records = tool_records[:self.TOOL_RECORDS_MAX_LENGTH] + "\n...(后续结果已截断)"
-        if tool_records:
-            total = sum(r.total_calls for r in all_tool_results)
-            ok = sum(r.success_count for r in all_tool_results)
-            logger.info(f"[msg] agent2: {len(all_tool_results)} rounds, {total} calls, {ok} ok")
-            # Sync Agent 2 results to tool_call_history so prompt can show them
-            for r in all_tool_results:
-                for rec in r.records:
-                    a.record_tool_call(rec.name, rec.success, rec.output)
-
-        # ── Agent 3: Emotional expression ──
-        return self._run_agent3(user_input, drive_result, tool_result,
-                               tool_records=tool_records, on_token=on_token,
-                               final_response=True)
+        elapsed_ms = (time.time() - t0) * 1000
+        return ToolExecutionResult.from_records(
+            all_tool_results,
+            self._tool_agent,
+            max_length=self.TOOL_RECORDS_MAX_LENGTH,
+            error_message=agent2_error,
+        ).with_elapsed(elapsed_ms)
 
     def handle_proactive(self, on_token=None, intent=None) -> str:
         from prompts.system import build_system_prompt
@@ -408,6 +517,7 @@ class MessageHandler:
         max_loops: int = 2,
     ) -> str:
         """Handle Agent 3 JSON intent: ask Agent 1, execute if approved, otherwise fall back."""
+        self._transition(MessageHandlerState.HANDLING_INTENT)
         parsed = self._parse_agent3_output(agent3_output)
         if parsed["type"] == "plain":
             return parsed["text"]
@@ -420,6 +530,7 @@ class MessageHandler:
 
         while loop_count < max_loops and parsed["type"] == "intent":
             loop_count += 1
+            self._transition(MessageHandlerState.ASSESSING)
             drive_result = self._inner_drive.assess_agent3_intent(
                 user_input=user_input,
                 intent=current_intent,
@@ -430,6 +541,7 @@ class MessageHandler:
             if not drive_result.needs_external_tools:
                 # Agent 1 rejected the intent; return the transitional reply
                 logger.info(f"[msg] agent1: rejected agent3 intent {current_intent}")
+                self._transition(MessageHandlerState.DONE)
                 return current_reply or drive_result.summary or "让我直接回复你吧。"
 
             logger.info(
@@ -438,34 +550,15 @@ class MessageHandler:
             )
 
             # Execute tools via Agent 2
-            self._ensure_tool_agent()
-
-            if drive_result.tool_requests:
-                tool_result = self._tool_agent.run_with_requests(
-                    [req.description for req in drive_result.tool_requests]
-                )
-            else:
-                tool_result = self._tool_agent.run_with_request(user_input)
-
-            # Simple retry logic for Agent 3-triggered tool path
-            retry_count = 0
-            while retry_count < 3 and tool_result and not tool_result.any_success:
-                retry_count += 1
-                logger.info(f"[msg] agent2: retry {retry_count}/3")
-                retry_req = (drive_result.tool_requests[0].description
-                             if drive_result.tool_requests else user_input)
-                tool_result = self._tool_agent.run_with_request(retry_req)
-
-            tool_records = ""
-            if tool_result and tool_result.has_results:
-                tool_records = self._tool_agent.format_for_phase2(tool_result)
-                for rec in tool_result.records:
-                    self._agent.record_tool_call(rec.name, rec.success, rec.output)
+            self._transition(MessageHandlerState.EXECUTING_TOOLS)
+            exec_result = self._run_agent2_single_round(user_input, drive_result)
 
             # Agent 3 final response after tools; no more JSON allowed
+            self._transition(MessageHandlerState.GENERATING_RESPONSE)
             final_text = self._run_agent3(
-                user_input, drive_result, tool_result,
-                tool_records=tool_records, on_token=on_token, final_response=True,
+                user_input, drive_result, None,
+                tool_records=exec_result.records_text, on_token=on_token,
+                final_response=True,
             )
 
             # If Agent 3 still emits an intent after tools, loop again (rare)
@@ -476,12 +569,45 @@ class MessageHandler:
                 current_description = parsed.get("intent_description", current_description)
                 current_target = parsed.get("intent_target", current_target)
                 continue
+            self._transition(MessageHandlerState.DONE)
             return final_text
 
         # Loop exhausted or no longer an intent
+        self._transition(MessageHandlerState.DONE)
         if parsed["type"] == "plain":
             return parsed["text"]
         return current_reply or "让我直接回复你吧。"
+
+    def _run_agent2_single_round(self, user_input: str, drive_result) -> ToolExecutionResult:
+        """Execute a single Agent 2 round with retries (used by intent path)."""
+        self._ensure_tool_agent()
+        t0 = time.time()
+
+        if drive_result.tool_requests:
+            tool_result = self._tool_agent.run_with_requests(
+                [req.description for req in drive_result.tool_requests]
+            )
+        else:
+            tool_result = self._tool_agent.run_with_request(user_input)
+
+        retry_count = 0
+        while retry_count < 3 and tool_result and not tool_result.any_success:
+            retry_count += 1
+            logger.info(f"[msg] agent2: retry {retry_count}/3")
+            retry_req = (drive_result.tool_requests[0].description
+                         if drive_result.tool_requests else user_input)
+            tool_result = self._tool_agent.run_with_request(retry_req)
+
+        if tool_result and tool_result.has_results:
+            for rec in tool_result.records:
+                self._agent.record_tool_call(rec.name, rec.success, rec.output)
+
+        elapsed_ms = (time.time() - t0) * 1000
+        return ToolExecutionResult.from_records(
+            [tool_result] if tool_result and tool_result.has_results else [],
+            self._tool_agent,
+            max_length=self.TOOL_RECORDS_MAX_LENGTH,
+        ).with_elapsed(elapsed_ms)
 
     def _build_messages(self, sys_prompt: str, user_input: str | None) -> list[dict]:
         agent = self._agent

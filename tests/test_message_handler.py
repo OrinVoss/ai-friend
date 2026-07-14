@@ -215,6 +215,8 @@ class TestMessageHandler(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.has_results = True
         mock_result.any_success = True
+        mock_result.total_calls = 1
+        mock_result.success_count = 1
         mock_result.records = [MagicMock(name="music_play", success=True, output="ok")]
         self.handler._tool_agent.run_with_requests = MagicMock(return_value=mock_result)
         self.handler._tool_agent.format_for_phase2 = MagicMock(return_value="[音乐播放成功]")
@@ -226,6 +228,57 @@ class TestMessageHandler(unittest.TestCase):
             '"intent_description": "放首歌给用户听", "intent_target": ""}'
         )
         self.assertEqual(result, "给你放了首轻音乐~")
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_state_machine_transitions_no_tools(self, _mock):
+        """Normal chat should transition IDLE -> ASSESSING -> GENERATING_RESPONSE -> DONE."""
+        from core.message_handler import MessageHandlerState
+        self.assertEqual(self.handler.current_state, MessageHandlerState.IDLE)
+        self.handler.handle_message("你好")
+        self.assertEqual(self.handler.current_state, MessageHandlerState.DONE)
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_run_agent2_returns_tool_execution_result(self, _mock):
+        """_run_agent2 should return a ToolExecutionResult with correct stats."""
+        from core.inner_drive import InnerDriveResult, ToolRequest
+        from core.message_handler import ToolExecutionResult
+        self.handler._ensure_tool_agent()
+        mock_result = MagicMock()
+        mock_result.has_results = True
+        mock_result.any_success = True
+        mock_result.total_calls = 2
+        mock_result.success_count = 1
+        mock_result.records = [
+            MagicMock(name="glob", success=True, output="found files"),
+            MagicMock(name="read_file", success=False, output="missing"),
+        ]
+        self.handler._tool_agent.run_with_requests = MagicMock(return_value=mock_result)
+        self.handler._tool_agent.format_for_phase2 = MagicMock(return_value="[工具结果]")
+
+        drive_result = InnerDriveResult(
+            needs_external_tools=True,
+            reasoning="需要查文件",
+            tool_requests=[ToolRequest(description="查文件")],
+        )
+        exec_result = self.handler._run_agent2("查文件", drive_result)
+        self.assertIsInstance(exec_result, ToolExecutionResult)
+        self.assertEqual(exec_result.total_calls, 2)
+        self.assertEqual(exec_result.success_count, 1)
+        self.assertIn("[工具结果]", exec_result.records_text)
+
+    def test_internal_registry_isolation(self):
+        """Agent 1 internal registry must only contain fresh recall/remember instances."""
+        from tools.memory_tools import RecallTool, RememberTool
+        registry = self.handler._make_internal_registry()
+        specs = {s.name for s in registry.list_specs()}
+        self.assertEqual(specs, {"recall", "remember"})
+        recall = registry.get("recall")
+        remember = registry.get("remember")
+        self.assertIsInstance(recall, RecallTool)
+        self.assertIsInstance(remember, RememberTool)
+        # Must be fresh instances, not borrowed from the main registry
+        self.assertIsNot(recall, self.agent._tool_registry.get("recall"))
+        self.assertIsNot(remember, self.agent._tool_registry.get("remember"))
 
 
 if __name__ == "__main__":

@@ -1118,7 +1118,8 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 
 ### 状态
 
-- **部分修复（2026-07-14）**：封装性、错误恢复、魔法数字、输入清洗已改进；工具注册表深层隔离、请求级超时、状态机重构待后续处理。
+- **已修复（2026-07-14）**：封装性、错误恢复、魔法数字、输入清洗、状态机抽象、`ToolExecutionResult`、工具注册表隔离均已完成。
+- **未修复**：请求级/阶段级超时控制仍待后续处理。
 - 不影响当前功能，但会降低可维护性和生产环境稳定性
 
 ### 整体架构
@@ -1257,12 +1258,20 @@ Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请
 
 未在本次修复的遗留项：
 
-- 工具注册表隔离不完整（工具实例引用外部状态）。
 - Agent 2 重试循环缺少请求级/阶段级超时。
-- 未引入状态机抽象。
-- 未拆分 `ToolExecutionResult` dataclass。
 
-相关提交见 `changes/2026-07-14-fix-message-handler-review.md`。
+相关提交见 `changes/2026-07-14-fix-message-handler-review.md` 与 `changes/2026-07-14-fix-message-handler-remaining-review.md`。
+
+### 修复记录（2026-07-14 后续）
+
+本次修复范围：
+
+1. **状态机抽象**：新增 `MessageHandlerState` 枚举与 `_transition()` 方法，`handle_message()` 与 `_handle_agent3_intent()` 显式经过 `IDLE → ASSESSING → (EXECUTING_TOOLS) → GENERATING_RESPONSE → DONE` 等阶段，便于日志、调试和测试。
+2. **`ToolExecutionResult` dataclass**：新增 `ToolExecutionResult`，封装格式化后的工具记录、调用次数、成功次数、错误信息、耗时；提取 `_run_agent2()` 负责整个 Agent 2 多轮循环，`_run_agent2_single_round()` 负责意图触发的单轮执行。
+3. **工具注册表隔离**：`_make_internal_registry()` 不再从主注册表复制 `recall`/`remember` 实例，而是使用 `a.retriever` 和 `a.ltm` 创建全新的 `RecallTool` / `RememberTool` 实例；新增 `_make_external_registry()` 显式构建仅含外部工具的注册表传给 `ToolAgent`。
+4. **测试补充**：新增 `test_state_machine_transitions_no_tools`、`test_run_agent2_returns_tool_execution_result`、`test_internal_registry_isolation`。
+
+验证：单元测试 21 passed（`tests/test_message_handler.py`），全量测试 377 passed、2 skipped（`tests --ignore=tests/real_api`）。
 
 ---
 
