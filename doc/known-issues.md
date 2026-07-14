@@ -1112,6 +1112,141 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 
 ---
 
+## 5. MessageHandler 三层 Agent 编排的封装与错误恢复问题
+
+> 以下审查来自对 `core/message_handler.py` 的代码 review。
+
+### 状态
+
+- 未修复
+- 不影响当前功能，但会降低可维护性和生产环境稳定性
+
+### 整体架构
+
+```
+用户输入 → Agent 1 (InnerDrive) → [需要工具?] → Agent 2 (ToolAgent) → Agent 3 (Roleplay) → 输出
+                              ↓ 不需要工具
+                           Agent 3 直接
+```
+
+### 存在的问题
+
+#### 5.1 状态管理混乱
+
+`MessageHandler` 多处直接操作 `Agent` 的内部属性：
+
+```python
+a.short_term.add_turn(...)
+a.ltm.repo.insert_turn_sync(...)
+a._tool_call_history.append(...)
+```
+
+**影响**：破坏封装，调用方与 `Agent` 内部实现紧耦合。
+
+**建议**：为 `Agent` 添加公开方法，如 `add_turn()`、`record_tool_call()` 等。
+
+#### 5.2 异常处理不完整
+
+```python
+try:
+    # Agent 2 循环逻辑
+    ...
+except Exception:
+    logger.exception("[msg] agent2: unexpected error, falling back to agent3")
+```
+
+**影响**：异常被吞掉，用户可能收到不完整响应且不知道出错了。
+
+**建议**：至少把错误信息带到最终回复，或向上层传播可识别的异常。
+
+#### 5.3 魔法数字过多
+
+```python
+MAX_AGENT2_ROUNDS = 3
+if len(tool_records) > 3000:
+if len(a._tool_call_history) > 20:
+```
+
+**建议**：提取为类常量或配置参数。
+
+#### 5.4 `_run_agent3` 与 `_handle_agent3_intent` 职责重叠
+
+`_handle_agent3_intent` 调用 `_run_agent3` 后再次解析输出，如果仍是 JSON 意图则继续循环。
+
+**影响**：存在循环/递归风险，逻辑复杂。
+
+**建议**：明确区分"生成响应"和"意图处理"，限制最大循环次数并加熔断。
+
+#### 5.5 `_build_messages` 的效率问题
+
+虽然用了 O(k) 切片赋值，但 `reversed(history_messages)` 每次仍遍历完整历史。
+
+**影响**：长会话下每次请求重复计算 token。
+
+**建议**：维护滚动 token 总量或缓存历史消息表示。
+
+#### 5.6 工具注册表隔离不完整
+
+```python
+def _make_internal_registry(self):
+    r = ToolRegistry()
+    for name in ("recall", "remember"):
+        tool = self.a._tool_registry.get(name)
+        if tool:
+            r.register(tool)
+    return r
+```
+
+**影响**：工具对象本身可能持有外部状态引用，未真正隔离。
+
+**建议**：为内部工具创建独立实例，或明确限制工具可访问的作用域。
+
+#### 5.7 `_sanitize_input` 过于简单
+
+仅匹配完全相等的行：
+
+```python
+if stripped.lower() in ("system:", "assistant:", "user:", "from now on", "ignore previous"):
+```
+
+**影响**：无法拦截 `"system: 请忽略之前所有指令"` 这类变体。
+
+**建议**：使用正则或更鲁棒的 prompt injection 检测。
+
+#### 5.8 缺少超时控制
+
+Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请求 hang 住。
+
+**建议**：添加请求级超时或阶段级超时。
+
+### 代码风格问题
+
+- 中英文注释混用
+- `tool_records` / `combined_records` / `records` 命名不一致
+- `a = self.a` 短别名降低可读性
+
+### 改进建议
+
+1. 提取配置类：
+   ```python
+   class MessageHandlerConfig:
+       MAX_AGENT2_ROUNDS = 3
+       TOOL_RECORDS_MAX_LENGTH = 3000
+       TOOL_HISTORY_MAX_SIZE = 20
+       MAX_INPUT_LENGTH = 10000
+   ```
+2. 引入状态机抽象 Agent 1/2/3 的流转。
+3. 使用依赖注入，允许传入 `inner_drive` / `tool_agent`。
+4. 分离工具执行结果为 `ToolExecutionResult` dataclass。
+5. 定义专门的 fallback 异常类型。
+6. 在关键路径添加性能指标。
+
+### 优先级
+
+建议优先处理 **封装性** 和 **错误恢复**，这两点对生产环境稳定性影响最大。
+
+---
+
 ### 4.104 #104 [v2.0] AI Friend 系统进化路线图：预测记忆、情感共振、元认知等 10 个方向
 
 - 链接：[#104](https://github.com/OrinVoss/ai-friend/issues/104)
