@@ -87,7 +87,7 @@ class ContextManager:
         try:
             result = self._provider.generate(
                 [{"role": "user", "content": CONTEXT_COMPRESS_PROMPT.format(conversation=text)}],
-                stream=False,
+                stream=False, source="context_compress",
             )
             if result.strip():
                 self._compressed_summary = result.strip()

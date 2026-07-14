@@ -52,6 +52,8 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8000
     log_level: str = "INFO"
+    # MN-003: LLM monitor switch -- disable in production to avoid leaking prompts
+    monitor_enabled: bool = True
     allowed_read_paths: list[str] = field(default_factory=lambda: [
         ".",
         # CF-006: no hardcoded Windows paths — users set these in config.json

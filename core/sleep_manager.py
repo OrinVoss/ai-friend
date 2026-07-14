@@ -158,7 +158,7 @@ class SleepManager:
                 None,
                 lambda: self._provider.generate(
                     [{"role": "user", "content": prompt}],
-                    stream=False, max_tokens=100,
+                    stream=False, max_tokens=100, source="dream",
                 ),
             )
             self._personality.emotion.record_emotion_event(

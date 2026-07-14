@@ -133,6 +133,7 @@ class Agent:
                     messages, stream=False if _idx > 0 else True,
                     on_token=on_token if _idx == 0 else None,
                     max_tokens=max_tok if _idx == 0 else max(384, max_tok * 2 // 3),
+                    source="react",
                 )
                 cleaned, calls = parse_tool_calls(resp)
                 if not calls:

@@ -1,4 +1,9 @@
-"""LLM API 调用监控缓冲。记录每次 generate() 的请求/响应。"""
+"""LLM API 调用监控缓冲。记录每次 generate() 的完整请求/响应。
+
+开发调试用，记录每次发往 DeepSeek 的完整消息和返回。
+默认最多保留 200 条（环形缓冲），避免长期运行内存无限增长。
+可通过 max_size 参数调整；设为 0 则不限制。
+"""
 import json
 import logging
 import threading
@@ -8,54 +13,90 @@ from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MONITOR_SIZE = 200
+
 
 @dataclass
 class MonitorRecord:
-    """一次 LLM API 调用的完整记录。"""
+    """一次 LLM API 调用的完整记录，无任何截断。"""
     timestamp: str = ""
     model: str = ""
     duration_ms: float = 0.0
     max_tokens: int = 0
     temperature: float = 0.0
     response_format: dict | None = None
-    # 消息（仅保留摘要，避免 OOM）
-    system_msg_preview: str = ""  # system 消息前 200 字
-    user_msg_preview: str = ""   # 最后一条 user 消息前 200 字
-    full_messages_count: int = 0
-    full_messages_chars: int = 0
-    # 响应
-    response_preview: str = ""   # 前 500 字
-    full_response: str = ""      # 完整响应（limit 5000）
-    # 来源标记
-    source: str = ""             # "assess" / "review" / "re_decide" / "proactive" / "tool_agent" / "react" / "dream" / etc.
+    messages: list = field(default_factory=list)      # 完整 messages（含 system/user/assistant）
+    response: str = ""                                 # 完整响应文本
+    source: str = ""                                   # "assess" / "review" / "re_decide" / "tool_agent" / "react" / "dream"
 
 
 class MonitorBuffer:
     """线程安全的环形缓冲，保留最近 N 条 API 调用记录。"""
 
-    def __init__(self, maxlen: int = 200):
-        self._buffer: deque[MonitorRecord] = deque(maxlen=maxlen)
+    def __init__(self, max_size: int = DEFAULT_MONITOR_SIZE):
+        self._max_size = max_size
+        self._buffer: deque[MonitorRecord] = deque(maxlen=max_size if max_size > 0 else None)
         self._lock = threading.Lock()
+
+    @property
+    def max_size(self) -> int:
+        return self._max_size
+
+    @max_size.setter
+    def max_size(self, value: int):
+        with self._lock:
+            self._max_size = value
+            # Rebuild deque with new maxlen
+            new_max = value if value > 0 else None
+            old_items = list(self._buffer)
+            self._buffer = deque(old_items[-value:] if value > 0 else old_items, maxlen=new_max)
 
     def record(self, rec: MonitorRecord):
         with self._lock:
-            self._buffer.appendleft(rec)
+            self._buffer.append(rec)
 
-    def get_all(self, limit: int = 50) -> list[dict]:
+    def get_all(self, limit: int = 0) -> list[dict]:
+        """返回记录。limit=0 返回全部，>0 返回最近 N 条（均已按时间倒序）。"""
         with self._lock:
-            return [asdict(r) for r in list(self._buffer)[:limit]]
+            items = list(self._buffer)
+        if limit > 0 and len(items) > limit:
+            items = items[-limit:]
+        items.reverse()
+        return [asdict(r) for r in items]
 
     def clear(self):
         with self._lock:
             self._buffer.clear()
 
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return len(self._buffer)
+
+    def is_enabled(self, cfg=None) -> bool:
+        """根据配置判断是否启用监控记录。"""
+        if cfg is None:
+            return True
+        return getattr(cfg, "monitor_enabled", True)
+
 
 # 全局单例
 _monitor = MonitorBuffer()
+_monitor_enabled = True
 
 
 def get_monitor() -> MonitorBuffer:
     return _monitor
+
+
+def set_monitor_enabled(enabled: bool):
+    """全局开关：是否继续记录新的 LLM 调用。"""
+    global _monitor_enabled
+    _monitor_enabled = enabled
+
+
+def is_monitor_enabled() -> bool:
+    return _monitor_enabled
 
 
 def record_call(
@@ -68,7 +109,9 @@ def record_call(
     response_format: dict | None = None,
     source: str = "",
 ) -> None:
-    """便捷函数：记录一次 API 调用。"""
+    """记录一次完整的 LLM API 调用（若监控被禁用则忽略）。"""
+    if not _monitor_enabled:
+        return
     rec = MonitorRecord(
         timestamp=time.strftime("%H:%M:%S"),
         model=model,
@@ -76,22 +119,8 @@ def record_call(
         max_tokens=max_tokens,
         temperature=temperature,
         response_format=response_format,
-        full_messages_count=len(messages),
-        full_messages_chars=sum(len(m.get("content", "")) for m in messages),
-        full_response=response[:5000],
+        messages=messages,
+        response=response,
         source=source,
     )
-    # 提取 system 消息预览
-    for m in messages:
-        if m.get("role") == "system" and m.get("content"):
-            rec.system_msg_preview = m["content"][:200]
-            break
-    # 提取最后一条 user 消息预览
-    for m in reversed(messages):
-        if m.get("role") == "user" and m.get("content"):
-            rec.user_msg_preview = m["content"][:200]
-            break
-    # response 预览
-    rec.response_preview = response[:500]
     _monitor.record(rec)
-    logger.debug(f"[monitor] recorded: {source} {model} {duration_ms:.0f}ms")

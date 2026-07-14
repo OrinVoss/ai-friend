@@ -245,7 +245,7 @@ class CliController:
             if a.ui:
                 a.ui.display.print_system(f"思考中... (第{a._react_iteration}轮)")
             try:
-                full_response = a.provider.generate(messages, stream=False, max_tokens=384)
+                full_response = a.provider.generate(messages, stream=False, max_tokens=384, source="cli_react")
             except ConnectionError as e:
                 if a.ui:
                     a.ui.display.print_error(f"网络连接失败：{e}")
@@ -266,7 +266,7 @@ class CliController:
                     if a.ui:
                         print(tok, end="", flush=True)
             try:
-                full_response = a.provider.generate(messages, stream=True, on_token=on_token, max_tokens=max_tok)
+                full_response = a.provider.generate(messages, stream=True, on_token=on_token, max_tokens=max_tok, source="cli_react")
             except ConnectionError as e:
                 if a.ui:
                     a.ui.display.print_error(f"网络连接失败：{e}")

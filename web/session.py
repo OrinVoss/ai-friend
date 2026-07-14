@@ -63,10 +63,11 @@ class WebAgent:
                 max_tokens=config.max_tokens,
                 thinking=config.thinking, reasoning_effort=config.reasoning_effort,
                 timeout=config.api_timeout,
+                monitor_enabled=getattr(config, "monitor_enabled", True),
             )
 
         def llm_gen(prompt, temperature=0.2):
-            return self.provider.generate([{"role": "user", "content": prompt}], stream=False)
+            return self.provider.generate([{"role": "user", "content": prompt}], stream=False, source="session")
 
         if shared_embed_engine is not None:
             embed_engine = shared_embed_engine
@@ -268,6 +269,7 @@ class SessionManager:
             max_tokens=self.config.max_tokens,
             thinking=self.config.thinking, reasoning_effort=self.config.reasoning_effort,
             timeout=self.config.api_timeout,
+            monitor_enabled=getattr(self.config, "monitor_enabled", True),
         )
         self._shared_embed_engine = EmbeddingEngine(
             endpoint=self.config.embedding_endpoint,

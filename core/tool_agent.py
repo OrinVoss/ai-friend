@@ -99,6 +99,7 @@ class ToolAgent:
                 stream=False,
                 max_tokens=512,
                 response_format=self._registry.to_json_schema(),
+                source="tool_agent",
             )
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
@@ -177,7 +178,7 @@ class ToolAgent:
                 )})
 
             resp = self._provider.generate(messages, stream=False, max_tokens=512,
-                                          response_format=json_schema)
+                                          response_format=json_schema, source="tool_agent")
             cleaned, calls = parse_tool_calls(resp)
             if not calls:
                 # TA-007: explicitly track parse failures

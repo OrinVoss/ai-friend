@@ -28,7 +28,7 @@ class TestLLMProviderABC(unittest.TestCase):
     def test_custom_provider_implements_generate(self):
         class MockProvider(LLMProvider):
             def generate(self, messages, stream=True, on_token=None,
-                         max_tokens=None, response_format=None):
+                         max_tokens=None, response_format=None, source=""):
                 return "mocked"
 
         p = MockProvider()

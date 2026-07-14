@@ -144,7 +144,7 @@ class InnerDriveAgent:
         for _idx in range(self._max_iterations):
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_assess,
-                response_format=INNER_DRIVE_SCHEMA,
+                response_format=INNER_DRIVE_SCHEMA, source="inner_drive",
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -212,7 +212,7 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] proactive assess idle={idle_duration:.0f}s")
-        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_proactive)
+        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_proactive, source="proactive")
         intent = self._parse_proactive_intent(resp)
         logger.info(
             f"[inner_drive] proactive decision: action={intent.action} "
@@ -266,7 +266,7 @@ class InnerDriveAgent:
         logger.info(f"[inner_drive] review round={round_num}/{max_rounds}")
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_review,
-            response_format=INNER_DRIVE_SCHEMA,
+            response_format=INNER_DRIVE_SCHEMA, source="review",
         )
         result = self._parse_json_decision(resp)
         if result is None:
@@ -286,7 +286,7 @@ class InnerDriveAgent:
             messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_review,
-                response_format=INNER_DRIVE_SCHEMA,
+                response_format=INNER_DRIVE_SCHEMA, source="review",
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -331,7 +331,7 @@ class InnerDriveAgent:
         logger.info(f"[inner_drive] re-decide after {len(failure_log)} failures")
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_review,
-            response_format=INNER_DRIVE_SCHEMA,
+            response_format=INNER_DRIVE_SCHEMA, source="re_decide",
         )
         result = self._parse_json_decision(resp)
         if result is None:
@@ -351,7 +351,7 @@ class InnerDriveAgent:
             messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_review,
-                response_format=INNER_DRIVE_SCHEMA,
+                response_format=INNER_DRIVE_SCHEMA, source="re_decide",
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -419,7 +419,7 @@ class InnerDriveAgent:
         logger.info(f"[inner_drive] assess agent3 intent: {intent} | {intent_description[:60]}")
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_assess,
-            response_format=INNER_DRIVE_SCHEMA,
+            response_format=INNER_DRIVE_SCHEMA, source="assess_intent",
         )
         result = self._parse_json_decision(resp)
         if result is None:

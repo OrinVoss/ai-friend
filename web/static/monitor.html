@@ -22,12 +22,16 @@
   .card-header .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #21262d; color: #58a6ff; }
   .card-header .model { font-size: 10px; color: #8b949e; }
   .card-header .duration { font-size: 11px; margin-left: auto; }
-  .card-header .tokens { font-size: 10px; color: #8b949e; min-width: 70px; text-align: right; }
+  .card-header .meta-info { font-size: 10px; color: #8b949e; text-align: right; }
   .card-body { display: none; padding: 8px 10px; border-top: 1px solid #21262d; background: #0d1117; }
   .card-body.open { display: block; }
-  .card-body h3 { font-size: 11px; color: #8b949e; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .card-body h3:first-child { margin-top: 0; }
-  .card-body pre { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; color: #e6edf3; }
+  .card-body .msg { margin-bottom: 8px; border: 1px solid #21262d; border-radius: 4px; overflow: hidden; }
+  .card-body .msg-header { padding: 3px 8px; font-size: 11px; font-weight: 600; }
+  .card-body .msg-header.system { background: #1a2332; color: #58a6ff; }
+  .card-body .msg-header.user { background: #1f2a1f; color: #3fb950; }
+  .card-body .msg-header.assistant { background: #2a1f2a; color: #d2a8ff; }
+  .card-body .msg-content { background: #161b22; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: #e6edf3; }
+  .card-body .resp { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: #e6edf3; }
   .card-body .meta { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 11px; margin-bottom: 6px; }
   .card-body .meta dt { color: #8b949e; }
   .card-body .meta dd { color: #e6edf3; }
@@ -36,18 +40,24 @@
   .slow { color: #f85149; }
   .no-records { text-align: center; padding: 40px; color: #484f58; font-size: 14px; }
   .status-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #161b22; border-top: 1px solid #30363d; padding: 4px 16px; font-size: 11px; color: #8b949e; display: flex; gap: 16px; }
+  .tab-bar { display: flex; gap: 0; margin-bottom: 12px; }
+  .tab-bar button { background: #21262d; border: 1px solid #30363d; border-right: none; color: #8b949e; padding: 6px 16px; cursor: pointer; font-size: 12px; }
+  .tab-bar button:first-child { border-radius: 4px 0 0 4px; }
+  .tab-bar button:last-child { border-radius: 0 4px 4px 0; border-right: 1px solid #30363d; }
+  .tab-bar button.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+  .placeholder { color: #484f58; font-style: italic; }
 </style>
 </head>
 <body>
 
 <h1>
   🤖 LLM API 调用监控
-  <small>记录每次发往 DeepSeek 的请求与响应</small>
+  <small>完整记录每次发往 LLM 的请求与响应</small>
 </h1>
 
 <div class="controls">
   <button onclick="fetchData()">🔄 刷新</button>
-  <button onclick="autoRefresh=!autoRefresh; this.textContent=autoRefresh?'⏹ 停止自动':'▶ 自动刷新'">▶ 自动刷新</button>
+  <button id="auto-btn" onclick="toggleAuto()">▶ 自动刷新</button>
   <button onclick="clearData()">🗑 清空</button>
   <span class="count" id="count">0 条记录</span>
 </div>
@@ -55,7 +65,7 @@
 <div id="list"><div class="no-records">等待数据...</div></div>
 <div class="status-bar">
   <span id="status">就绪</span>
-  <span id="auto-status">自动刷新：关</span>
+  <span id="auto-status"></span>
 </div>
 
 <script>
@@ -73,32 +83,58 @@ function clsDuration(ms) {
   return 'slow';
 }
 
-function trunc(s, n) {
-  if (!s) return '';
-  return s.length > n ? s.slice(0, n) + '...' : s;
-}
-
 function esc(s) {
   if (!s) return '';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function roleIcon(role) {
+  if (role === 'system') return '⚙️';
+  if (role === 'user') return '👤';
+  if (role === 'assistant') return '🤖';
+  return '❓';
+}
+
+function formatContent(content) {
+  if (!content) return '<span class="placeholder">(空)</span>';
+  // Try pretty-print JSON
+  if (typeof content === 'string') {
+    try {
+      const parsed = JSON.parse(content);
+      return esc(JSON.stringify(parsed, null, 2));
+    } catch(e) {
+      return esc(content);
+    }
+  }
+  return esc(JSON.stringify(content, null, 2));
+}
+
 function renderCard(rec) {
   const durCls = clsDuration(rec.duration_ms);
-  const sysPreview = esc(trunc(rec.system_msg_preview || '', 150));
-  const usrPreview = esc(trunc(rec.user_msg_preview || '', 150));
-  const respPreview = esc(trunc(rec.response_preview || '', 500));
-  const fullResp = esc(rec.full_response || '');
 
-  // Try to pretty-print the response as JSON
-  let respDisplay = respPreview;
-  if (fullResp) {
-    try {
-      const parsed = JSON.parse(rec.full_response);
-      respDisplay = esc(JSON.stringify(parsed, null, 2));
-    } catch(e) {
-      respDisplay = fullResp ? esc(trunc(rec.full_response, 3000)) : respPreview;
-    }
+  // Build messages display
+  let msgsHtml = '';
+  if (rec.messages && rec.messages.length > 0) {
+    rec.messages.forEach(m => {
+      const role = m.role || '?';
+      const content = m.content || '';
+      msgsHtml += `
+        <div class="msg">
+          <div class="msg-header ${role}">${roleIcon(role)} ${role}</div>
+          <div class="msg-content">${formatContent(content)}</div>
+        </div>
+      `;
+    });
+  } else {
+    msgsHtml = '<div class="placeholder">(无消息记录)</div>';
+  }
+
+  // Build response display
+  let respHtml = '';
+  if (rec.response) {
+    respHtml = formatContent(rec.response);
+  } else {
+    respHtml = '<span class="placeholder">(空响应)</span>';
   }
 
   return `
@@ -109,7 +145,7 @@ function renderCard(rec) {
         <span class="source">${esc(rec.source || '?')}</span>
         <span class="model">${esc(rec.model)}</span>
         <span class="duration ${durCls}">${fmtDuration(rec.duration_ms)}</span>
-        <span class="tokens">${rec.full_messages_count} 条消息 / ${rec.full_response?.length || 0} 字符</span>
+        <span class="meta-info">${rec.messages?.length || 0} 条消息</span>
       </div>
       <div class="card-body">
         <div class="meta">
@@ -117,12 +153,10 @@ function renderCard(rec) {
           <dt>max_tokens</dt><dd>${rec.max_tokens}</dd>
           <dt>response_format</dt><dd>${rec.response_format ? esc(JSON.stringify(rec.response_format)) : '(无)'}</dd>
         </div>
-        <h3>📥 System 提示词（前 200 字）</h3>
-        <pre>${sysPreview || '(无)'}</pre>
-        <h3>📥 用户消息（前 200 字）</h3>
-        <pre>${usrPreview || '(无)'}</pre>
-        <h3>📤 AI 响应</h3>
-        <pre>${respDisplay || '(空)'}</pre>
+        <h3 style="font-size:12px;color:#8b949e;margin:6px 0 4px;">📥 请求消息 (${rec.messages?.length || 0} 条)</h3>
+        ${msgsHtml}
+        <h3 style="font-size:12px;color:#8b949e;margin:8px 0 4px;">📤 响应 (${rec.response?.length || 0} 字符)</h3>
+        <div class="resp">${respHtml}</div>
       </div>
     </div>
   `;
@@ -130,7 +164,7 @@ function renderCard(rec) {
 
 function fetchData() {
   document.getElementById('status').textContent = '加载中...';
-  fetch('/api/monitor?limit=100')
+  fetch('/api/monitor?limit=0')
     .then(r => r.json())
     .then(data => {
       const list = document.getElementById('list');
@@ -155,11 +189,16 @@ function clearData() {
 
 function toggleAuto() {
   autoRefresh = !autoRefresh;
+  const btn = document.getElementById('auto-btn');
   if (autoRefresh) {
     refreshTimer = setInterval(fetchData, 3000);
+    document.getElementById('auto-status').textContent = '自动刷新：每 3s';
+    if (btn) btn.textContent = '⏹ 停止自动';
   } else {
     clearInterval(refreshTimer);
     refreshTimer = null;
+    document.getElementById('auto-status').textContent = '';
+    if (btn) btn.textContent = '▶ 自动刷新';
   }
 }
 

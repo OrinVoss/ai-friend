@@ -28,7 +28,8 @@ class LLMProvider(ABC):
                  stream: bool = True,
                  on_token: Optional[callable] = None,
                  max_tokens: Optional[int] = None,
-                 response_format: Optional[dict] = None) -> str:
+                 response_format: Optional[dict] = None,
+                 source: str = "") -> str:
         """Generate a text completion from the LLM.
 
         Args:
@@ -37,6 +38,7 @@ class LLMProvider(ABC):
             on_token: Optional callback invoked for each streamed token.
             max_tokens: Optional override for the default output token limit.
             response_format: Optional JSON schema / response_format dict.
+            source: Optional caller label for the monitor (e.g. "react", "tool_agent").
 
         Returns:
             The full generated text.
@@ -49,7 +51,8 @@ class DeepSeekProvider(LLMProvider):
                  temperature: float = 0.8, max_tokens: int = 512,
                  thinking: Optional[str] = None,
                  reasoning_effort: Optional[str] = None,
-                 timeout: int = 180):
+                 timeout: int = 180,
+                 monitor_enabled: bool = True):
         self.endpoint = endpoint.rstrip("/")
         self.api_key = api_key
         self.model = model
@@ -58,6 +61,10 @@ class DeepSeekProvider(LLMProvider):
         self.thinking = thinking
         self.reasoning_effort = reasoning_effort
         self.timeout = timeout
+        self.monitor_enabled = monitor_enabled
+        # MN-002: apply monitor switch at provider level
+        from core.monitor import set_monitor_enabled
+        set_monitor_enabled(monitor_enabled)
         self.session = requests.Session()
         self.session.trust_env = False
         # PR-002: connection pool with limited size
@@ -73,7 +80,8 @@ class DeepSeekProvider(LLMProvider):
                  stream: bool = True,
                  on_token: Optional[callable] = None,
                  max_tokens: Optional[int] = None,
-                 response_format: Optional[dict] = None) -> str:
+                 response_format: Optional[dict] = None,
+                 source: str = "") -> str:
         chat_url = f"{self.endpoint}/v1/chat/completions"
 
         payload = {
@@ -108,7 +116,7 @@ class DeepSeekProvider(LLMProvider):
                     max_tokens=max_tokens or self.max_tokens,
                     temperature=self.temperature,
                     response_format=response_format,
-                    source="",
+                    source=source,
                 )
                 return resp_text
             except requests.exceptions.ConnectionError as e:

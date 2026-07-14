@@ -57,17 +57,18 @@ async def main():
             thinking=config.thinking,
             reasoning_effort=config.reasoning_effort,
             timeout=config.api_timeout,
+            monitor_enabled=getattr(config, "monitor_enabled", True),
         )
 
         # Wrap LLM for single-turn structured calls
         def llm_generate(prompt: str, temperature: float = 0.2) -> str:
             messages = [{"role": "user", "content": prompt}]
-            return provider.generate(messages, stream=False)
+            return provider.generate(messages, stream=False, source="consolidation")
 
         # Wrap LLM for reranking (single-turn, returns short text)
         def llm_rerank(prompt: str) -> str:
             messages = [{"role": "user", "content": prompt}]
-            return provider.generate(messages, stream=False)
+            return provider.generate(messages, stream=False, source="rerank")
 
         # Initialize local embedding engine (optional, graceful degradation)
         from memory.embeddings import EmbeddingEngine
