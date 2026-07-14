@@ -105,6 +105,16 @@ class TestWebAgentProactive(unittest.TestCase):
         self.agent.save_personality()
         self.agent.personality.save.assert_called_once_with(self.agent.personality_path)
 
+    def test_add_turn_forwards_to_agent(self):
+        self.agent.add_turn("assistant", "zzz", metadata={"sleep": True})
+        self.agent.agent.add_turn.assert_called_once_with(
+            "assistant", "zzz", metadata={"sleep": True}
+        )
+
+    def test_increment_turn_count_forwards_to_agent(self):
+        self.agent.increment_turn_count()
+        self.agent.agent.increment_turn_count.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

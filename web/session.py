@@ -217,6 +217,13 @@ class WebAgent:
     def is_sleeping(self):
         return self.agent._sleeping
 
+    def add_turn(self, role: str, content: str, metadata: dict | None = None) -> None:
+        """Persist a conversation turn through the Agent facade."""
+        self.agent.add_turn(role, content, metadata=metadata)
+
+    def increment_turn_count(self) -> None:
+        self.agent.increment_turn_count()
+
     async def get_sleep_state(self):
         return await self.agent._get_sleep_state()
 
