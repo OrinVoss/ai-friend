@@ -27,4 +27,4 @@
 
 ## 提交
 
-待提交
+`73879ca` docs: 在 known-issues 中补充架构与 Prompt 改进建议
