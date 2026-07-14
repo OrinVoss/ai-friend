@@ -624,6 +624,39 @@ Insight 应该随着新 Evidence 自动更新。
 
 ---
 
+## 4. GitHub 待处理 Issue 清单
+
+> 以下是从 [OrinVoss/ai-friend](https://github.com/OrinVoss/ai-friend/issues) 拉取的当前 Open Issue。保留原编号与标题，便于后续按优先级处理。
+
+| 编号 | 标题 | 标签 | 链接 |
+|---|---|---|---|
+| #295 | [v0.5] ContextManager 审查：上下文窗口管理评估与改进建议 | — | [链接](https://github.com/OrinVoss/ai-friend/issues/295) |
+| #294 | [v0.5] Prompt 架构审查：Agent 认知架构评估与改进建议 | — | [链接](https://github.com/OrinVoss/ai-friend/issues/294) |
+| #293 | [v0.5] 架构审查：三层 Agent 系统成熟度评估与改进建议 | — | [链接](https://github.com/OrinVoss/ai-friend/issues/293) |
+| #263 | [v0.5] P2/P3: core/async_utils 质量改进 — 线程池单例/超时传播/Runner | enhancement, v0.5 | [链接](https://github.com/OrinVoss/ai-friend/issues/263) |
+| #244 | [v0.5] P1: frontend Cookie missing HttpOnly/Secure/SameSite + reconnect storm + name hardcoded | bug, v0.5 | [链接](https://github.com/OrinVoss/ai-friend/issues/244) |
+| #233 | [v0.5] P1: WebSocket Origin check startswith localhost bypassable via localhost.evil.com | bug, v0.5 | [链接](https://github.com/OrinVoss/ai-friend/issues/233) |
+| #210 | [v0.5] P1: WebSocket multi-tab session race — disconnect destroys session + init repeatable | bug, v0.5 | [链接](https://github.com/OrinVoss/ai-friend/issues/210) |
+| #166 | [v0.4] Bug：KimiProvider 同步 requests 阻塞事件循环 + 工具结果未摘要直接传 prompt | bug, architecture, performance | [链接](https://github.com/OrinVoss/ai-friend/issues/166) |
+| #164 | [v0.4] Bug：记忆固化每 3 轮触发 4 次独立 LLM 调用 + Proactive 持续消耗 API 配额 | bug, performance | [链接](https://github.com/OrinVoss/ai-friend/issues/164) |
+| #162 | [v0.2] Bug：异步/同步混用系统性架构缺陷 + 核心架构需全面异步化 | bug, v0.2 | [链接](https://github.com/OrinVoss/ai-friend/issues/162) |
+| #160 | [v0.4] Bug：系统提示词每次请求全量重建 3-5 次 + 三层 Agent prompt 重复 + Agent 1 固定 LLM 调用 + 静态对话示例重复 | bug, architecture, performance | [链接](https://github.com/OrinVoss/ai-friend/issues/160) |
+| #104 | [v2.0] AI Friend 系统进化路线图：预测记忆、情感共振、元认知等 10 个方向 | enhancement | [链接](https://github.com/OrinVoss/ai-friend/issues/104) |
+| #103 | [v0.5] 代码质量：修复循环导入、异常处理、性能等 5 个问题 | bug | [链接](https://github.com/OrinVoss/ai-friend/issues/103) |
+| #101 | [v0.3] 增强：AI 后台任务完成时主动推送消息，无需用户追问 | enhancement | [链接](https://github.com/OrinVoss/ai-friend/issues/101) |
+| #88 | [v2.0] 远景：AI Friend + QAgent 合并为新智能体平台（新仓库） | enhancement, architecture | [链接](https://github.com/OrinVoss/ai-friend/issues/88) |
+| #87 | [v1.0] 架构：LLM 抽象层 — 支持多模型提供商切换 | enhancement, architecture | [链接](https://github.com/OrinVoss/ai-friend/issues/87) |
+| #86 | [v1.0] 发布：Shutdown 与稳定性 | bug, infrastructure | [链接](https://github.com/OrinVoss/ai-friend/issues/86) |
+| #85 | [v1.0] 发布：前端体验打磨 | enhancement | [链接](https://github.com/OrinVoss/ai-friend/issues/85) |
+| #84 | [v1.0] 发布：文档完整 | documentation | [链接](https://github.com/OrinVoss/ai-friend/issues/84) |
+| #82 | [v1.0] 发布：关键 Bug 清零 | bug | [链接](https://github.com/OrinVoss/ai-friend/issues/82) |
+| #81 | [v1.0] 发布：Web 端生产可用 | enhancement, infrastructure | [链接](https://github.com/OrinVoss/ai-friend/issues/81) |
+| #80 | [v1.0] 发布：记忆系统语义化 | enhancement | [链接](https://github.com/OrinVoss/ai-friend/issues/80) |
+| #79 | [v1.0] 发布：情感系统四层全部完成 | enhancement, architecture | [链接](https://github.com/OrinVoss/ai-friend/issues/79) |
+| #60 | [v0.5] 重构：情绪模型从单向度升级为多维对话动态 | enhancement, architecture | [链接](https://github.com/OrinVoss/ai-friend/issues/60) |
+
+---
+
 ## 记录规范
 
 新增已知问题时请按以下格式：
