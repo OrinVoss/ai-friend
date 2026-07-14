@@ -214,3 +214,137 @@ class ReadFileTool(Tool):
             r = self._read_one(p, limit, offset)
             results.append(r.output if r.success else f"[失败] {p}: {r.output}")
         return ToolResult.ok("\n\n---\n\n".join(results))
+
+
+# Directories skipped by file_tree (and recommended for glob/grep too)
+SKIP_TREE_DIRS = {
+    "__pycache__", ".git", "node_modules", ".venv", "venv",
+    ".mypy_cache", ".pytest_cache", ".idea", ".vscode", "data",
+}
+
+
+class FileTreeTool(Tool):
+    """Return a concise directory tree so Agent can explore before reading files."""
+
+    MAX_DEPTH = 4
+    MAX_FILES_PER_DIR = 10
+    MAX_NODES = 200
+
+    def name(self) -> str:
+        return "file_tree"
+
+    def description(self) -> str:
+        return (
+            "列出目录结构（树状）。适合在 read_file/glob 之前先了解目录层级。\n"
+            "会自动跳过 .git、__pycache__、.venv 等目录。"
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "目录路径，默认项目根目录",
+                    "default": ".",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": f"最大递归深度（1-{self.MAX_DEPTH}，默认 2）",
+                    "default": 2,
+                },
+            },
+        }
+
+    def _should_skip_dir(self, name: str) -> bool:
+        return name.startswith(".") or name in SKIP_TREE_DIRS
+
+    def _build_tree(self, root: str, max_depth: int) -> tuple[list[str], int]:
+        nodes = 0
+        lines = []
+        prefix_stack = [""]
+
+        def walk(current: str, depth: int, prefix: str, is_last: bool):
+            nonlocal nodes
+            if depth > max_depth:
+                return
+            if nodes >= self.MAX_NODES:
+                return
+
+            name = os.path.basename(current) or current
+            connector = "└── " if is_last else "├── "
+            lines.append(f"{prefix}{connector}{name}/")
+            nodes += 1
+
+            try:
+                entries = sorted(
+                    e for e in os.listdir(current)
+                    if not e.startswith(".") and e not in SKIP_TREE_DIRS
+                )
+            except (PermissionError, OSError):
+                return
+
+            dirs = [e for e in entries if os.path.isdir(os.path.join(current, e))]
+            files = [e for e in entries if os.path.isfile(os.path.join(current, e))]
+
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            all_items = dirs + files[:self.MAX_FILES_PER_DIR]
+            if len(files) > self.MAX_FILES_PER_DIR:
+                all_items.append(f"...({len(files) - self.MAX_FILES_PER_DIR} more files)")
+
+            for i, item in enumerate(all_items):
+                item_path = os.path.join(current, item)
+                last = i == len(all_items) - 1
+                if nodes >= self.MAX_NODES:
+                    lines.append(f"{child_prefix}└── ...")
+                    return
+                if os.path.isdir(item_path):
+                    walk(item_path, depth + 1, child_prefix, last)
+                else:
+                    lines.append(f"{child_prefix}{'└── ' if last else '├── '}{item}")
+                    nodes += 1
+
+        # Root is printed as its basename or full path if root itself
+        root_name = os.path.basename(root) or root
+        lines.append(f"{root_name}/")
+        nodes += 1
+        try:
+            entries = sorted(
+                e for e in os.listdir(root)
+                if not e.startswith(".") and e not in SKIP_TREE_DIRS
+            )
+        except (PermissionError, OSError) as e:
+            return [f"无法读取目录: {e}"], 1
+
+        dirs = [e for e in entries if os.path.isdir(os.path.join(root, e))]
+        files = [e for e in entries if os.path.isfile(os.path.join(root, e))]
+        all_items = dirs + files[:self.MAX_FILES_PER_DIR]
+        if len(files) > self.MAX_FILES_PER_DIR:
+            all_items.append(f"...({len(files) - self.MAX_FILES_PER_DIR} more files)")
+
+        for i, item in enumerate(all_items):
+            item_path = os.path.join(root, item)
+            last = i == len(all_items) - 1
+            if os.path.isdir(item_path):
+                walk(item_path, 1, "", last)
+            else:
+                lines.append(f"{'└── ' if last else '├── '}{item}")
+                nodes += 1
+
+        return lines, nodes
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        path_raw = args.get("path", ".").strip()
+        depth = max(1, min(int(args.get("depth", 2)), self.MAX_DEPTH))
+
+        resolved = _path_in_allowed(path_raw)
+        if resolved is None:
+            return ToolResult.fail(f"路径不在可访问范围内: {path_raw}")
+
+        if not os.path.isdir(resolved):
+            return ToolResult.fail(f"不是目录: {path_raw}")
+
+        logger.info(f"[tool] file_tree path={path_raw} depth={depth}")
+        lines, nodes = self._build_tree(resolved, depth)
+        header = f"目录树 ({path_raw}, depth={depth}, nodes={nodes}):"
+        return ToolResult.ok("\n".join([header, ""] + lines))

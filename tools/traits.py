@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # #258: canonical list of external tool names, shared across modules
 EXTERNAL_TOOL_NAMES = [
-    "web_fetch", "web_search", "read_file", "glob", "grep",
+    "web_fetch", "web_search", "read_file", "file_tree", "glob", "grep",
     "music_play", "notify",
 ]
 

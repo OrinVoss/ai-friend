@@ -68,8 +68,8 @@ class TestToolAgent(unittest.TestCase):
         specs = self.agent._registry.list_specs()
         names = [s.name for s in specs]
         for n in names:
-            self.assertIn(n, ["web_fetch", "web_search", "read_file", "glob",
-                              "grep", "music_play", "notify"])
+            self.assertIn(n, ["web_fetch", "web_search", "read_file", "file_tree",
+                              "glob", "grep", "music_play", "notify"])
         self.assertNotIn("recall", names)
         self.assertNotIn("remember", names)
 

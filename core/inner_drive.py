@@ -52,7 +52,7 @@ INNER_DRIVE_SCHEMA = {
         "properties": {
             "needs_external_tools": {
                 "type": "boolean",
-                "description": "是否需要调用外部工具（web_fetch/web_search/read_file/glob/grep/music_play/notify）",
+                "description": "是否需要调用外部工具（web_fetch/web_search/read_file/file_tree/glob/grep/music_play/notify）",
             },
             "reasoning": {
                 "type": "string",
@@ -78,7 +78,7 @@ INNER_DRIVE_SCHEMA = {
                         },
                         "suggested_tool": {
                             "type": "string",
-                            "description": "建议使用的工具名（web_fetch/web_search/read_file/glob/grep/music_play/notify），可选",
+                            "description": "建议使用的工具名（web_fetch/web_search/read_file/file_tree/glob/grep/music_play/notify），可选",
                         },
                         "params_hint": {
                             "type": "object",

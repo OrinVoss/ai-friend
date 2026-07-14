@@ -61,7 +61,7 @@ def mock_tool_registry():
     from tools.traits import ToolSpec, ToolResult
 
     specs = []
-    for name in ["web_fetch", "web_search", "read_file", "glob", "grep",
+    for name in ["web_fetch", "web_search", "read_file", "file_tree", "glob", "grep",
                   "music_play", "notify", "recall", "remember"]:
         specs.append(ToolSpec(
             name=name,

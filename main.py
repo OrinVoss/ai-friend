@@ -19,7 +19,7 @@ from storage.database import Database
 from storage.repository import Repository
 from tools.traits import ToolRegistry
 from tools.memory_tools import RecallTool, RememberTool
-from tools.file_tools import ReadFileTool
+from tools.file_tools import ReadFileTool, FileTreeTool
 from tools.notify_tool import NotifyTool
 from tools.web_tools import WebSearchTool, WebFetchTool
 from tools.music_tool import MusicPlayTool
@@ -91,6 +91,7 @@ async def main():
         tool_registry.register(RecallTool(retriever, ltm))
         tool_registry.register(RememberTool(ltm))
         tool_registry.register(ReadFileTool())
+        tool_registry.register(FileTreeTool())
         tool_registry.register(NotifyTool())
         tool_registry.register(WebSearchTool())
         tool_registry.register(WebFetchTool())
