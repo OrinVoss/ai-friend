@@ -90,6 +90,7 @@ class MessageHandler:
             a.ltm.repo.insert_turn_sync(a.turn_count, "assistant", sleep_reply,
                                    str(a.personality.emotion.to_dict()))
             a.turn_count += 1
+            logger.info(f"[msg] sleep reply persisted: turn={a.turn_count - 1}")
             return sleep_reply
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
@@ -346,6 +347,7 @@ class MessageHandler:
             try:
                 data = json.loads(stripped)
                 if "intent" in data and data.get("intent"):
+                    logger.info(f"[msg] agent3 intent detected: {data.get('intent')}")
                     return {
                         "type": "intent",
                         "reply_to_user": data.get("reply_to_user", ""),
@@ -354,7 +356,7 @@ class MessageHandler:
                         "intent_target": data.get("intent_target", ""),
                     }
             except json.JSONDecodeError:
-                pass
+                logger.debug("[msg] agent3 output looked like JSON but failed to parse")
         return {"type": "plain", "text": text}
 
     def _handle_agent3_intent(
