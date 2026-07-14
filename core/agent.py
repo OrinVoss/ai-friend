@@ -92,12 +92,12 @@ class Agent:
     def _max_tokens_for_emotion(self) -> int:
         base = self.config.max_tokens
         mapping = {
-            "excited": 768, "joyful": 768, "surprised": 700,
+            "excited": 512, "joyful": 512, "surprised": 448,
             "engaged": base, "content": base, "trusting": base, "anticipating": base,
             "neutral": base,
-            "anxious": 300, "afraid": 300,
-            "melancholy": 256, "sad": 256,
-            "frustrated": 256, "angry": 256, "disgusted": 256,
+            "anxious": 128, "afraid": 128,
+            "melancholy": 128, "sad": 128,
+            "frustrated": 128, "angry": 128, "disgusted": 128,
         }
         return mapping.get(self.personality.emotion.dominant_emotion, base)
 
