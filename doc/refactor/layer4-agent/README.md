@@ -6,24 +6,49 @@
 
 ## 当前状态
 
-未开始。
+**部分已完成**：
 
-## 关键问题
+- [x] 状态机抽象：`MessageHandlerState` enum + `_transition()`
+- [x] `ToolExecutionResult` dataclass
+- [x] 魔法数字提取为类常量：`MAX_AGENT2_ROUNDS`、`TOOL_RECORDS_MAX_LENGTH`、`TOOL_HISTORY_MAX_SIZE`、`MAX_INPUT_LENGTH`、`CONV_HIST_MAX_TOKENS`
+- [x] Agent 1 工具注册表隔离：`_make_internal_registry()` 仅保留 recall/remember
+- [x] Agent 2 外部工具注册表：`_make_external_registry()`
+- [x] `_run_agent2()` / `_run_agent2_single_round()` 职责分离
 
-- `MessageHandler` 直接操作 `a._xxx` 内部属性
-- 异常捕获后没有通知用户或重新抛出
-- `MAX_AGENT2_ROUNDS`、截断长度等硬编码
-- `_run_agent3` 和 `_handle_agent3_intent` 职责重叠，有递归循环风险
-- 工具注册表隔离不完整
+## 关键提交
 
-## 预期方向
+- `7126df9` — refactor(message_handler): state machine, ToolExecutionResult, tool registry isolation
 
-1. 为 `Agent` 添加公开方法：`add_turn()`、`record_tool_call()` 等
-2. 提取 `MessageHandlerConfig`
-3. 引入状态机抽象 Agent 1/2/3 流转
-4. 分离工具执行结果为 `ToolExecutionResult` dataclass
-5. 添加全局超时机制
+## 关键类
+
+```python
+class MessageHandlerState(Enum):
+    IDLE = auto()
+    ASSESSING = auto()
+    EXECUTING_TOOLS = auto()
+    HANDLING_INTENT = auto()
+    GENERATING_RESPONSE = auto()
+    ERROR_FALLBACK = auto()
+    DONE = auto()
+
+@dataclass
+class ToolExecutionResult:
+    records_text: str
+    total_calls: int
+    success_count: int
+    has_error: bool
+    error_message: str
+    elapsed_ms: float
+```
+
+## 剩余工作
+
+- [ ] `MessageHandler` 仍直接访问 `a._tool_call_history` 等内部属性，需要为 `Agent` 添加公开方法
+- [ ] 异常处理：错误时应向用户体现，而不是静默吞掉
+- [ ] 全局请求超时控制
+- [ ] 依赖注入：`MessageHandler` 直接构造 `InnerDriveAgent` / `ToolAgent`，测试不便
+- [ ] `_sanitize_input` 过于简单，无法防御变体注入
 
 ## 依赖
 
-- Layer 3 确定不同 Agent 的 Context 边界后，状态机才能设计准确
+- Layer 3 确定不同 Agent 的 Context 边界后，状态机与注册表隔离才能更彻底
