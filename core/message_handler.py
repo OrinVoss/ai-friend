@@ -10,6 +10,7 @@ import random
 import time
 
 from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
+from core.prompt_cache import PromptCache
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class MessageHandler:
         self._agent = agent
         self._tool_agent = None  # lazy init
         self._inner_drive = None  # lazy init
+        self._prompt_cache = PromptCache()
 
     @property
     def a(self):
@@ -32,6 +34,7 @@ class MessageHandler:
             a = self.a
             # #203: create isolated registry for Agent 1 (recall/remember only)
             isolated = self._make_internal_registry()
+            cfg = a.config
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,
                 personality=a.personality,
@@ -40,6 +43,10 @@ class MessageHandler:
                 short_term=a.short_term,
                 tool_registry=isolated,
                 tool_call_history=a._tool_call_history,
+                session_id=getattr(a, "session_id", None),
+                prompt_cache=self._prompt_cache,
+                prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
+                short_input_threshold=getattr(cfg, "agent1_short_input_threshold", 20),
             )
 
     def ensure_inner_drive(self):
@@ -213,6 +220,7 @@ class MessageHandler:
     def handle_proactive(self, on_token=None, intent=None) -> str:
         from prompts.system import build_system_prompt
         a = self.a
+        cfg = a.config
 
         if intent is not None and intent.topic_hint:
             topic = intent.topic_hint
@@ -233,7 +241,15 @@ class MessageHandler:
             is_proactive=True,
             consecutive_negative=a._consecutive_negative,
             inner_drive_summary=inner_drive_summary,
-            conversation_examples=a.config.conversation_examples,
+            conversation_examples=cfg.conversation_examples,
+            session_id=getattr(a, "session_id", None),
+            prompt_cache=self._prompt_cache,
+            personality_file=getattr(a, "personality_path", cfg.personality_file),
+            prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
+            demo_turns_remaining=max(
+                0,
+                getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
+            ),
         )
         messages = self._build_messages(sys_prompt, user_input=f"[主动开启对话] 主题方向：{topic}")
         logger.info(
@@ -245,6 +261,7 @@ class MessageHandler:
     def handle_explore(self, intent=None) -> str | None:
         from prompts.system import build_system_prompt
         a = self.a
+        cfg = a.config
 
         if intent is not None and intent.topic_hint:
             topic = intent.topic_hint
@@ -280,7 +297,15 @@ class MessageHandler:
             consecutive_negative=a._consecutive_negative,
             explore_mode=True,
             inner_drive_summary=inner_drive_summary,
-            conversation_examples=a.config.conversation_examples,
+            conversation_examples=cfg.conversation_examples,
+            session_id=getattr(a, "session_id", None),
+            prompt_cache=self._prompt_cache,
+            personality_file=getattr(a, "personality_path", cfg.personality_file),
+            prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
+            demo_turns_remaining=max(
+                0,
+                getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
+            ),
         )
         messages = self._build_messages(sys_prompt, user_input=None)
         if tool_records:
@@ -310,8 +335,18 @@ class MessageHandler:
         """Run Agent 3: emotional expression with inner drive + tool results."""
         from prompts.system import build_system_prompt
         a = self.a
+        cfg = a.config
 
-        mem_ctx = a.retriever.retrieve_for_query(user_input)
+        # Reuse Agent 1's formatted memory/relationship summary when available.
+        memory_summary = ""
+        if drive_result and getattr(drive_result, "context_summary", ""):
+            memory_summary = drive_result.context_summary
+            # Still keep the memory context object around for downstream code.
+            mem_ctx = a.current_memory_context
+            if mem_ctx is None:
+                mem_ctx = a.retriever.retrieve_for_query(user_input)
+        else:
+            mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx
         a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
                                str(a.personality.emotion.to_dict()))
@@ -321,6 +356,12 @@ class MessageHandler:
         if not tool_records:
             tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
 
+        personality_file = getattr(a, "personality_path", cfg.personality_file)
+        demo_turns_remaining = max(
+            0,
+            getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
+        )
+
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
@@ -329,8 +370,14 @@ class MessageHandler:
             consecutive_negative=a._consecutive_negative,
             tool_call_history=a._tool_call_history,
             inner_drive_summary=drive_result.summary if drive_result else "",
-            conversation_examples=a.config.conversation_examples,
+            conversation_examples=cfg.conversation_examples,
             final_response=final_response,
+            session_id=getattr(a, "session_id", None),
+            prompt_cache=self._prompt_cache,
+            personality_file=personality_file,
+            prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
+            memory_context_summary=memory_summary,
+            demo_turns_remaining=demo_turns_remaining,
         )
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         # Inject tool results as USER message (LLM respects user messages >> system messages)

@@ -1060,7 +1060,8 @@ def _run_sync(coro):
 
 - 链接：[#160](https://github.com/OrinVoss/ai-friend/issues/160)
 - 标签：bug, architecture, performance
-- 创建：2026-06-01 | 更新：2026-06-01
+- 创建：2026-06-01 | 更新：2026-07-14
+- **状态：已修复**（见 `changes/2026-07-14-fix-160-prompt-cache.md`）
 
 #### 正文
 
@@ -1095,6 +1096,19 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 6. 将示例从 8 个减少到 2-3 个最具代表性的
 
 > 来源: Round 05
+
+#### 修复记录（2026-07-14）
+
+已按方案一实施：
+
+1. 新增 `core/prompt_cache.py` 分层提示词缓存，静态块无 TTL、慢变块 TTL 60 秒（可配置）、动态块不缓存。
+2. 拆分 `prompts/system.py` 的 `build_system_prompt()` / `build_inner_drive_prompt()` 为静态/慢变/动态块，通过缓存复用。
+3. `InnerDriveResult` 新增 `context_summary` 字段，Agent 1 把已格式化的关系/记忆摘要传给 Agent 3，避免重复检索。
+4. Agent 1 增加短输入快速返回：长度 < `agent1_short_input_threshold`、不含工具关键词、最近 2 轮无工具调用时跳过 LLM。
+5. 静态对话示例仅在 `turn_count <= conversation_examples_max_turns` 时注入。
+6. 新增配置项：`prompt_cache_ttl_seconds`、`agent1_short_input_threshold`、`conversation_examples_max_turns`。
+
+验证：全量单元测试 376 passed（`tests --ignore=tests/real_api`）。
 
 ---
 

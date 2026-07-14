@@ -30,6 +30,7 @@ class InnerDriveResult:
     tool_requests: list[ToolRequest] = field(default_factory=list)
     summary: str = ""                          # Compact summary for Agent 3
     recall_query: str = ""                     # Internal recall query (if needed)
+    context_summary: str = ""                  # Formatted memory/relationship for Agent 3
 
 
 @dataclass
@@ -98,13 +99,27 @@ INNER_DRIVE_SCHEMA = {
 class InnerDriveAgent:
     """Agent 1: Self-aware reasoning before any external tool execution."""
 
+    # Short-input keywords that strongly suggest an external action is needed.
+    TOOL_KEYWORDS = [
+        "http", "https", "www.", ".com", ".cn", ".net", ".org",
+        "搜索", "查", "找", "搜", "查一下", "查查", "google", "百度",
+        "放歌", "听歌", "音乐", "歌曲", "播放",
+        "通知", "提醒", "闹钟",
+        "文件", "路径", "读取", "读", "打开", "看", "目录", "文件夹",
+        "新闻", "天气", "时间", "日期",
+    ]
+
     def __init__(self, provider, personality, ltm, retriever, short_term,
                  tool_registry, max_iterations: int = 5,
                  max_tokens_assess: int = 1024,
                  max_tokens_proactive: int = 256,
                  max_tokens_review: int = 1024,
                  conv_hist_tokens: int = 1800,
-                 tool_call_history: list | None = None):
+                 tool_call_history: list | None = None,
+                 session_id: str | None = None,
+                 prompt_cache=None,
+                 prompt_cache_ttl: float = 60.0,
+                 short_input_threshold: int = 20):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
@@ -116,12 +131,29 @@ class InnerDriveAgent:
         self._max_tokens_proactive = max_tokens_proactive
         self._max_tokens_review = max_tokens_review
         self._conv_hist_tokens = conv_hist_tokens
-        self._tool_call_history = tool_call_history
+        self._tool_call_history = tool_call_history or []
+        self._session_id = session_id
+        self._prompt_cache = prompt_cache
+        self._prompt_cache_ttl = prompt_cache_ttl
+        self._short_input_threshold = short_input_threshold
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
         from prompts.system import build_inner_drive_prompt
         from core.dispatcher import execute_tool_calls
+
+        logger.info(f"[inner_drive] start len={len(user_input)}")
+
+        # Lightweight pre-filter: skip the LLM for trivial chat inputs.
+        if self._should_skip_llm(user_input):
+            mem_ctx = self._retriever.retrieve_for_query(user_input)
+            logger.info("[inner_drive] short input, skip LLM")
+            return InnerDriveResult(
+                needs_external_tools=False,
+                reasoning="短输入，无工具关键词，跳过 LLM",
+                summary="",
+                context_summary=self._build_context_summary(mem_ctx),
+            )
 
         mem_ctx = self._retriever.retrieve_for_query(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
@@ -132,14 +164,15 @@ class InnerDriveAgent:
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
+            session_id=self._session_id,
+            prompt_cache=self._prompt_cache,
+            prompt_cache_ttl=self._prompt_cache_ttl,
         )
 
         messages = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": f"用户输入：{user_input}\n\n请进行内驱推理，输出 JSON 决策。"},
         ]
-
-        logger.info(f"[inner_drive] start len={len(user_input)}")
 
         for _idx in range(self._max_iterations):
             resp = self._provider.generate(
@@ -153,6 +186,7 @@ class InnerDriveAgent:
                     needs_external_tools=False,
                     reasoning="解析失败，默认不需要外部工具",
                     summary="",
+                    context_summary=self._build_context_summary(mem_ctx),
                 )
 
             # If recall_query is set, execute internal recall and loop
@@ -170,6 +204,7 @@ class InnerDriveAgent:
                 f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
                 f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
             )
+            result.context_summary = self._build_context_summary(mem_ctx)
             return result
 
         logger.warning("[inner_drive] max iterations, defaulting to no tools")
@@ -177,7 +212,37 @@ class InnerDriveAgent:
             needs_external_tools=False,
             reasoning="达到最大迭代次数，默认不需要外部工具",
             summary="",
+            context_summary=self._build_context_summary(mem_ctx),
         )
+
+    def _should_skip_llm(self, user_input: str) -> bool:
+        """Return True for short chat inputs that clearly need no tools.
+
+        Guards against wasting an LLM call on "你好" or simple acknowledgements,
+        while still routing follow-ups after tool calls through the planner so
+        short song/file names are not misclassified.
+        """
+        if len(user_input) >= self._short_input_threshold:
+            return False
+        lower = user_input.lower()
+        if any(kw in user_input for kw in self.TOOL_KEYWORDS):
+            return False
+        if any(kw in lower for kw in ["http", "https", "www", ".com", ".cn"]):
+            return False
+        # If any recent tool call succeeded, the short input may be a follow-up.
+        recent = self._tool_call_history[-2:] if self._tool_call_history else []
+        if any(tc.get("success") for tc in recent):
+            return False
+        return True
+
+    def _build_context_summary(self, mem_ctx) -> str:
+        """Format memory/relationship blocks for Agent 3 reuse."""
+        from prompts.system import _build_relationship_block, _build_memory_block
+        parts = [
+            _build_relationship_block(mem_ctx),
+            _build_memory_block(mem_ctx),
+        ]
+        return "\n\n".join(p for p in parts if p)
 
     def assess_proactive(self, idle_duration: float) -> ProactiveIntent:
         """Decide whether and how to proactively engage the user.
@@ -248,6 +313,9 @@ class InnerDriveAgent:
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
+            session_id=self._session_id,
+            prompt_cache=self._prompt_cache,
+            prompt_cache_ttl=self._prompt_cache_ttl,
         )
 
         review_msg = (
@@ -321,6 +389,9 @@ class InnerDriveAgent:
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
+            session_id=self._session_id,
+            prompt_cache=self._prompt_cache,
+            prompt_cache_ttl=self._prompt_cache_ttl,
         )
 
         messages = [
@@ -387,6 +458,9 @@ class InnerDriveAgent:
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
+            session_id=self._session_id,
+            prompt_cache=self._prompt_cache,
+            prompt_cache_ttl=self._prompt_cache_ttl,
         )
 
         intent_to_tool = {

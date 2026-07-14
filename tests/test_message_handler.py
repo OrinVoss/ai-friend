@@ -45,6 +45,10 @@ class TestMessageHandler(unittest.TestCase):
         self.agent.provider.generate.return_value = "NO_TOOLS"
         self.agent._react_loop.return_value = "Hello!"
         self.agent._pick_proactive_topic.return_value = "聊聊天气"
+        # Give the mocked config concrete values for the new prompt-cache fields.
+        self.agent.config.prompt_cache_ttl_seconds = 60
+        self.agent.config.agent1_short_input_threshold = 20
+        self.agent.config.conversation_examples_max_turns = 3
 
         self.handler = MessageHandler(self.agent)
 
@@ -152,6 +156,38 @@ class TestMessageHandler(unittest.TestCase):
     def test_handle_agent3_intent_plain(self):
         result = self.handler._handle_agent3_intent("你好", "嗨！今天怎么样？")
         self.assertEqual(result, "嗨！今天怎么样？")
+
+    @patch('prompts.system.build_system_prompt')
+    def test_agent3_reuses_context_summary(self, mock_build):
+        """Agent 3 should receive Agent 1's formatted summary to avoid a second retrieval."""
+        mock_build.return_value = "mock prompt"
+        from core.inner_drive import InnerDriveResult
+        self.handler._ensure_inner_drive()
+        drive_result = InnerDriveResult(
+            needs_external_tools=False,
+            reasoning="闲聊",
+            summary="",
+            context_summary="=== 你和用户的关系 ===\n信任: 0.9",
+        )
+        self.handler._run_agent3("你好", drive_result, tool_result=None)
+        # The summary should be forwarded as memory_context_summary.
+        _, kwargs = mock_build.call_args
+        self.assertEqual(
+            kwargs.get("memory_context_summary"),
+            "=== 你和用户的关系 ===\n信任: 0.9",
+        )
+        # No extra retrieval should happen because the summary is reused.
+        self.assertEqual(self.agent.retriever.retrieve_for_query.call_count, 0)
+
+    @patch('prompts.system.build_system_prompt')
+    def test_conversation_examples_hidden_after_threshold(self, mock_build):
+        """Examples should only be injected for the first N turns."""
+        mock_build.return_value = "mock prompt"
+        self.agent.turn_count = 4
+        self.agent.config.conversation_examples_max_turns = 3
+        self.handler.handle_message("你好")
+        _, kwargs = mock_build.call_args
+        self.assertEqual(kwargs.get("demo_turns_remaining"), 0)
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
     def test_handle_agent3_intent_rejected(self, _mock):

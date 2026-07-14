@@ -24,6 +24,15 @@ def _validate(cfg: "Config") -> None:
         cfg.embedding_dim = 1024
     if cfg.api_key == "" and "DEEPSEEK_API_KEY" not in os.environ:
         messages.append("DEEPSEEK_API_KEY not set — LLM calls will fail")
+    if cfg.prompt_cache_ttl_seconds < 0:
+        messages.append(f"prompt_cache_ttl_seconds {cfg.prompt_cache_ttl_seconds} < 0, clamped to 60")
+        cfg.prompt_cache_ttl_seconds = 60
+    if cfg.agent1_short_input_threshold < 0:
+        messages.append(f"agent1_short_input_threshold {cfg.agent1_short_input_threshold} < 0, clamped to 20")
+        cfg.agent1_short_input_threshold = 20
+    if cfg.conversation_examples_max_turns < 0:
+        messages.append(f"conversation_examples_max_turns {cfg.conversation_examples_max_turns} < 0, clamped to 3")
+        cfg.conversation_examples_max_turns = 3
     for msg in messages:
         logger.warning(f"[config] validation: {msg}")
 
@@ -64,6 +73,10 @@ class Config:
     embedding_endpoint: str = "http://localhost:8080/v1/embeddings"
     embedding_dim: int = 1024
     embedding_cache_size: int = 1000
+    # PC-001: hierarchical prompt cache settings (#160)
+    prompt_cache_ttl_seconds: int = 60
+    agent1_short_input_threshold: int = 20
+    conversation_examples_max_turns: int = 3
     # CE-001: configurable conversation style examples (#28)
     conversation_examples: list[dict] = field(default_factory=lambda: [
         {
@@ -142,6 +155,9 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         "AI_FRIEND_EMBEDDING_DIM": "embedding_dim",
         "AI_FRIEND_SHORT_TERM_CAPACITY": "short_term_capacity",
         "AI_FRIEND_LOG_LEVEL": "log_level",
+        "AI_FRIEND_PROMPT_CACHE_TTL": "prompt_cache_ttl_seconds",
+        "AI_FRIEND_AGENT1_SHORT_INPUT_THRESHOLD": "agent1_short_input_threshold",
+        "AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS": "conversation_examples_max_turns",
     }
     for env_var, attr in env_map.items():
         val = os.environ.get(env_var, "")

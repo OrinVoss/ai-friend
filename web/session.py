@@ -99,6 +99,7 @@ class WebAgent:
             consolidator=self.consolidator, short_term=self.short_term,
             config=config, session_id=self.session_id,
         )
+        self.agent.personality_path = self.personality_path
         self.agent._tool_registry = registry
         # Restore turn counter so page refreshes don't reset it (#RS-001)
         try:

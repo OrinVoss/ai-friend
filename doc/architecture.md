@@ -136,6 +136,36 @@ WebSocket 消息 → process_message() → _react_loop() → _send_segments()
 
 ---
 
+## 提示词缓存与 Agent 上下文复用
+
+为减少单次请求中系统提示词的重复构建，项目引入了分层提示词缓存（`core/prompt_cache.py`）和 Agent 1 → Agent 3 上下文摘要复用。
+
+### 分层缓存
+
+`prompts/system.py` 将系统提示拆分为三类块：
+
+| 类型 | 内容 | 缓存策略 |
+|------|------|----------|
+| 静态块 | 身份定义、对话示例、内驱指令、工具说明 | 无 TTL，personality 文件变更时失效 |
+| 慢变块 | 关系指标、长期记忆（facts/experiences/reflections） | TTL 可配置（默认 60 秒） |
+| 动态块 | 当前时间、情绪状态、工具历史、最近对话、破防状态、指令 | 不缓存 |
+
+缓存键为 `(session_id, personality_version, component_name)`。`personality_version` 取 personality 文件的 `mtime:size:path`，因此编辑角色文件会自动让静态块失效。
+
+### Agent 1 携带上下文摘要
+
+`InnerDriveResult` 新增 `context_summary` 字段。Agent 1 完成判断后，会把已格式化的关系/记忆摘要写入该字段。Agent 3 构建 prompt 时，如果 `context_summary` 非空，直接使用它作为慢变块，不再调用 `retriever.retrieve_for_query()`，避免同一请求内两次检索长期记忆。
+
+### 短输入快速返回
+
+Agent 1 对极短闲聊输入（长度 < `agent1_short_input_threshold`，不含工具关键词，且最近 2 轮无成功工具调用）直接返回 `needs_external_tools=false`，跳过 LLM 调用。
+
+### 静态对话示例限制
+
+`conversation_examples_max_turns` 控制系统提示中的对话示例仅在会话前 N 轮注入，之后自动省略，减少长期运行时的 token 开销。
+
+---
+
 ## 情绪模型（四层架构）
 
 **Layer 1 — 多维输入**：sentiment + 交互模式
