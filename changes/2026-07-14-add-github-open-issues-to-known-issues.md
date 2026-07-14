@@ -26,4 +26,4 @@
 
 `3ea0a93` docs: 在 known-issues 中补充 GitHub 待处理 Issue 清单
 `f835580` docs: 更新 GitHub issues changes 提交哈希
-（待补充完整正文后的新提交）
+`d40da07` docs: known-issues 中 GitHub Issue 清单改为完整正文
