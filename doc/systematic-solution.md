@@ -65,6 +65,18 @@ Layer 6: Observability 记录 source/metrics/log
 
 ## 3. 每层设计
 
+### 当前进度总览
+
+| Layer | 主题 | 状态 | 详细文档 |
+|-------|------|------|----------|
+| Layer 0 | Identity & State | 未开始 | `doc/refactor/layer6-personality/` |
+| Layer 1 | Memory Lifecycle | 一期已完成（Observation + Fact 双写） | `doc/refactor/layer1-memory/` |
+| Layer 2 | Context & Prompt Budget | 大部分已完成 | `doc/refactor/layer2-prompt/` |
+| Layer 3 | Async Agent Runtime | 部分已完成 | `doc/refactor/layer4-agent/` |
+| Layer 4 | Tool Runtime | 部分已完成（Prompt 已精简） | `doc/refactor/layer5-tool/` |
+| Layer 5 | Provider Abstraction | 未开始 | - |
+| Layer 6 | Observability | 部分已完成（监控面板） | - |
+
 ### Layer 0: Identity & State —— 一个角色一份完整状态
 
 **核心原则**：`role_id == session_id == memory_namespace == emotion_namespace == sleep_namespace`
@@ -83,6 +95,8 @@ class RoleSession:
 - 所有 SQLite 表已经按 `session_id` 隔离，只需保证 `session_id = role_id`。
 - `personality.json` 旧文件废弃；`personalities/{role_id}.json` 成为唯一人格+情绪数据源。
 - 解决：角色切换混乱、睡眠状态错配、关系指标历史空白、多 session 竞态。
+
+**状态**：未开始。计划与 Layer 6（Personality/Session/记忆绑定）合并实施。
 
 ### Layer 1: Memory Lifecycle —— 记忆有出生、验证、衰减、死亡
 
@@ -169,6 +183,8 @@ class MemoryLifecycleManager:
 - React（Agent 3）默认不读取 Insight；只有 InnerDrive/Planner 在需要时检索。
 - 每日 GC：合并重复、衰减 confidence、删除 noise、压缩 episode、重建过期 insight。
 
+**状态**：一期已完成。新增 `observations` / `facts_v2` 表、`MemoryLifecycleManager`、双写逻辑、配置开关 `use_observation_fact`。二期将实现 Insight 替换 Reflection。
+
 ### Layer 2: Context & Prompt Budget —— Token 是有限资源
 
 **核心抽象**：`ContextBudget` 把 prompt 看成预算分配问题。
@@ -229,6 +245,65 @@ class PromptTemplate:
 | Fact Extractor | raw episodes |
 | Tool Agent | 不读 Memory，只读 task + schema + retry history |
 
+#### 新增问题：Agent 1 短输入过滤过于粗糙
+
+`core/inner_drive.py::_should_skip_llm()` 目前使用硬编码中文关键词列表判断短输入是否需要工具：
+
+```python
+TOOL_KEYWORDS = [
+    "http", "https", "www.", ".com", ".cn", ".net", ".org",
+    "搜索", "查", "找", "搜", "查一下", "查查", "google", "百度",
+    "放歌", "听歌", "音乐", "歌曲", "播放",
+    "通知", "提醒", "闹钟",
+    "文件", "路径", "读取", "读", "打开", "看", "目录", "文件夹",
+    "新闻", "天气", "时间", "日期",
+]
+```
+
+缺陷：
+- **误判**："我不查了"、"别放歌" 命中关键词，本可跳过却调 LLM
+- **漏判**：用户说 "Teeth"（歌名）时没有任何关键词命中，被误判为闲聊
+- **不可维护**：新增工具或场景需要不断扩展关键词表
+
+**推荐改进**：结构化 JSON 规则 + Embedding 语义相似度。
+
+```json
+{
+  "inner_drive_skip_filter": {
+    "short_input_threshold": 20,
+    "url_patterns": ["http://", "https://", "www.", "\\.com", "\\.cn"],
+    "file_path_patterns": ["[A-Za-z]:\\\\", "/home/", "/Users/", "\\.txt", "\\.md"],
+    "explicit_tool_verbs": ["搜索", "查", "找", "播放", "通知", "提醒", "读取", "打开"],
+    "skip_examples": ["你好", "嗯", "好的", "哈哈", "行", "可以", "拜拜", "晚安", "ok"],
+    "tool_examples": ["Teeth", "放首歌", "查下天气", "提醒我", "读这个文件"],
+    "similarity_threshold": 0.72
+  }
+}
+```
+
+判断流程：
+1. 长度、URL、文件路径、最近工具成功等硬规则保留
+2. 用 embedding 比较用户输入与 `skip_examples` / `tool_examples` 的相似度
+3. 最近的是 tool example 且相似度 > threshold → 不跳过
+4. 最近的是 skip example 且相似度 > threshold → 跳过
+5. 都不高 → 回退到规则判断
+
+这样 "Teeth" 会跟 "放首歌" 等 tool examples 语义接近，被正确判定为需要工具；同时避免否定句误判。
+
+**状态**：大部分已完成。
+- [x] 分层 Prompt Cache
+- [x] 静态/慢变/动态 block 分离
+- [x] Agent 1 短输入跳过（当前为关键词版）
+- [x] Agent 1 向 Agent 3 传递 context_summary
+- [x] 静态对话示例仅前 N 轮注入
+- [x] 指令集中化
+- [x] 工具规则从 ToolRegistry 动态生成
+- [x] 情绪摘要化
+- [x] Tool Agent Prompt 精简
+- [ ] 短输入过滤升级为语义相似度（见上）
+- [ ] 监控 Prompt Cache 实际命中率
+- [ ] `ContextBudget` / `ContextAllocator` 完整实现
+
 ### Layer 3: Async Agent Runtime —— 用状态机驱动真实流程
 
 **状态机**（统一 CLI/Web）：
@@ -274,6 +349,17 @@ class CognitiveStateMachine:
 - 全局超时：每阶段可配置超时，整体请求也有硬上限。
 - 错误恢复：阶段失败进入 `FALLBACK`，向用户说明降级原因，不再静默吞异常。
 
+**状态**：部分已完成。
+- [x] `MessageHandlerState` 状态机
+- [x] `ToolExecutionResult` dataclass
+- [x] 魔法数字提取为类常量
+- [x] Agent 1/2 工具注册表隔离
+- [ ] `Agent` 公开方法封装
+- [ ] 全局超时
+- [ ] 依赖注入
+- [ ] 错误处理向用户反馈
+- [ ] 完整的 `CognitiveStateMachine`
+
 ### Layer 4: Tool Runtime —— 工具是独立运行时单元
 
 ```python
@@ -308,6 +394,14 @@ class ToolRuntime:
   ```
 - 工具结果在 dispatcher 层摘要/截断，默认 1000 tokens。
 
+**状态**：部分已完成。
+- [x] Agent 1/2 注册表隔离
+- [x] Tool Agent Prompt 精简
+- [ ] dispatcher 全局别名取消
+- [ ] 统一 HTTP Session 和重试策略
+- [ ] `ToolRuntime` 抽象
+- [ ] `RetryBudget`
+
 ### Layer 5: Provider Abstraction —— 多模型、真异步
 
 ```python
@@ -322,12 +416,21 @@ class BaseLLMProvider(ABC):
 - 使用 `httpx.AsyncClient` 替代同步 `requests`，彻底消除事件循环阻塞。
 - 路由策略：日常聊天 → 本地模型；反思/梦境/复杂推理 → 云端模型。
 
+**状态**：未开始。
+
 ### Layer 6: Observability —— 每个请求可追溯
 
 - 所有 LLM 调用记录 `source`（assess / review / tool_agent / react / proactive / dream）。
 - 结构化日志统一 JSON 输出，解决 Windows 中文乱码。
 - Metrics：`agent_time`, `tool_calls`, `token_in/out`, `memory_hits`, `error_rate`。
 - 监控面板保持现有功能，但改为可配置开关，生产环境可关闭完整 prompt 保存。
+
+**状态**：部分已完成。
+- [x] 监控面板
+- [x] source 字段已填充
+- [x] `monitor_enabled` 配置开关
+- [ ] 结构化日志 JSON 输出
+- [ ] Metrics 收集与暴露
 
 ---
 
@@ -360,53 +463,87 @@ class BaseLLMProvider(ABC):
 
 ## 5. 实施路线图
 
-### Phase 1 — Layer 0 + Layer 3 骨架（2~3 周）
+> 注：实际实施顺序已调整为从 Layer 1 开始，风险最低且能早期验证。
 
-- 强制 `session_id = role_id`，删除旧 `personality.json` 依赖。
-- 把 `Agent` 拆出 `AgentRuntime` + `ConversationRuntime` + `ReactExecutor`。
-- 核心方法改为 `async def`，用 `asyncio` 替代 `_run_sync`。
-- 引入真实状态机，CLI 和 Web 共享同一状态机。
-- 验收：CLI/Web 都能正常对话，单元测试不降级。
+### Phase 1 — Layer 1 记忆生命周期（已完成一期）
 
-### Phase 2 — Layer 1 记忆生命周期（2~3 周）
+- [x] 新增 `Observation` / `FactV2` 数据模型和表
+- [x] 实现 `MemoryLifecycleManager`
+- [x] `MemoryConsolidator` 双写 Observation + FactV2
+- [x] 配置开关 `use_observation_fact`
+- [ ] 二期：新增 `InsightV2` 表，替换 Reflection
+- [ ] 二期：Retrieval 切换到新表
+- [ ] 二期：完整 GC（merge / decay / obsolete）
 
-- 新增 `Observation` / `Fact` / `Insight` 数据模型和表。
-- 改写 `consolidation`：只生成 Observation。
-- 新增 `FactExtractor`：把 Observation 升级为 Fact。
-- 新增 `InsightGenerator`：把 Fact 升级为带证据的 Insight。
-- React 默认不读取 Insight。
-- 验收：记忆表有 type/source/evidence，Reflection 输出带 hypothesis。
+验收：
+- `pytest tests/test_memory_lifecycle.py tests/test_consolidation.py -v` 通过
+- 全量测试不降级
+- 同一喜好重复 3 次后 `verification_count >= 3`
 
-### Phase 3 — Layer 2 Prompt Budget（1~2 周）
+### Phase 2 — Layer 2 Prompt Budget（大部分已完成）
 
-- 实现 `ContextBudget` 和 `ContextAllocator`。
-- 每个 Agent 配 `ContextProfile`。
-- 引入 Jinja2 模板和 prompt 版本管理。
-- 验收：API token 消耗下降 30%+，不同 Agent 上下文不同。
+- [x] 分层 Prompt Cache
+- [x] Agent 1 短输入跳过
+- [x] Agent 1 context_summary 复用
+- [x] 指令集中化
+- [x] 工具规则动态生成
+- [x] 情绪摘要化
+- [ ] 短输入过滤升级为语义相似度
+- [ ] `ContextBudget` / `ContextAllocator` 完整实现
+- [ ] 各 Agent ContextProfile
 
-### Phase 4 — Layer 4 + Layer 5（2 周）
+验收：
+- API token 输入下降 ≥ 20%
+- "Teeth" 这类歌名能被正确判定为需要工具
 
-- 取消 dispatcher 全局别名。
-- 统一 HTTP Session 和重试策略。
-- `BaseLLMProvider` + `httpx.AsyncClient`。
-- 验收：工具调用稳定，Provider 可切换。
+### Phase 3 — Layer 3 Async Agent Runtime（部分已完成）
 
-### Phase 5 — Layer 6 + Web 生产化（1~2 周）
+- [x] `MessageHandlerState` 状态机
+- [x] `ToolExecutionResult`
+- [ ] 完整 `CognitiveStateMachine`
+- [ ] 核心方法全部 `async def`
+- [ ] 依赖注入
+- [ ] 全局超时
+- [ ] 错误恢复向用户反馈
 
-- 结构化日志、metrics、source 字段。
-- 监控面板可配置开关。
-- 修复 #244/#233/#210 等 Web 层问题。
-- 验收：监控面板可用，CORS/Origin/Cookie 正确。
+验收：
+- CLI/Web 共享同一运行时
+- 阶段失败进入 FALLBACK 并向用户说明
+
+### Phase 4 — Layer 0 Identity & State + Layer 6 Observability
+
+- [ ] 强制 `session_id = role_id`
+- [ ] `personalities/{role_id}.json` 成为唯一数据源
+- [ ] 结构化日志 JSON 输出
+- [ ] Metrics 收集
+
+验收：
+- 角色切换数据不串
+- 每次 LLM 调用有非空 source
+
+### Phase 5 — Layer 4 Tool Runtime + Layer 5 Provider Abstraction
+
+- [ ] 取消 dispatcher 全局别名
+- [ ] 统一 HTTP Session 和重试策略
+- [ ] `ToolRuntime` 抽象
+- [ ] `BaseLLMProvider` + `httpx.AsyncClient`
+- [ ] 多后端路由
+
+验收：
+- 工具调用稳定
+- Provider 可切换
+- 无事件循环阻塞
 
 ---
 
 ## 6. 验收标准
 
 1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持 390+ passed。
-2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 30%。
+2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 20%。
 3. **记忆质量**：连续对话 50 轮后，Fact confidence 衰减机制生效，无自相矛盾 Fact。
 4. **稳定性**：Web 端 30 分钟无人访问自动释放资源，shutdown 不丢数据。
 5. **可观测性**：每次 LLM 调用都有非空 `source`，监控面板能按 source 过滤。
+6. **短输入过滤**："Teeth"、"放这首" 等语义明确的短输入被正确路由到工具执行。
 
 ---
 
@@ -414,13 +551,25 @@ class BaseLLMProvider(ABC):
 
 | 方式 | 描述 | 风险 | 适用场景 |
 |------|------|------|----------|
-| **A. 按 Phase 逐层重构（推荐）** | 从 Layer 0 → Layer 6 依次替换 | 单次改动面大，但回归可控 | 准备做 v0.6/v1.0 |
+| **A. 按 Phase 逐层重构（推荐）** | 从 Layer 1 → Layer 2 → Layer 3 → Layer 0/6 → Layer 4/5 | 单次改动面大，但回归可控 | 当前实际推进方式 |
 | **B. 只抽取公共层，保留现有代码** | 新增 `runtime/`, `memory_lifecycle/` 等包，老代码逐步迁移 | 并行代码多，过渡期长 | 想先验证某一层 |
 
 ---
 
 ## 8. 下一步
 
-如果批准方案 A，从 **Phase 1** 开始：先强制 `session_id = role_id` 并拆分 `Agent` 运行时。
+当前实际推进顺序：
 
-如果批准方案 B，从 **Phase 2 中的 `memory_lifecycle/` 模块**开始，与现有 `consolidation` 并行运行，验证 Observation/Fact/Insight 流程后再替换。
+1. **Layer 1 验证**：开启 `use_observation_fact=true` 运行一段时间，验证 `facts_v2` 数据质量
+2. **Layer 2 短输入过滤优化**：实现语义相似度版 `_should_skip_llm`
+3. **Layer 1 二期**：Insight 替换 Reflection
+4. **Layer 3 完整状态机**：`CognitiveStateMachine` + 依赖注入 + 全局超时
+5. **Layer 0**：强制 `session_id = role_id`
+
+---
+
+## 9. 相关文档
+
+- `doc/refactor/`：各 Layer 详细计划与进度
+- `doc/known-issues.md`：原始问题列表
+- `changes/`：每次改动的变更记录
