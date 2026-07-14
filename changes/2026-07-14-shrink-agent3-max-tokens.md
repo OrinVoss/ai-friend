@@ -25,4 +25,4 @@ Agent 3（角色表达层）负责自然语言回复，不需要像 Agent 1 / Ag
 
 ## 提交
 
-`04040c5` perf: 缩小 Agent 3 情绪 max_tokens 映射
+`b60bf00` perf: 缩小 Agent 3 情绪 max_tokens 映射
