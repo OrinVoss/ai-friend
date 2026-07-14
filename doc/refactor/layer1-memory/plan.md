@@ -1,14 +1,4 @@
-# Layer 1: Memory 生命周期重构
-
-## 目标
-
-把当前"直接存 fact/reflection"的模型，改造为 **Observation → Fact → Insight** 三层生命周期模型，让记忆可验证、可衰减、可遗忘、可追溯来源。
-
-## 当前状态
-
-**一期已完成**：Observation + Fact 双写阶段。
-
-旧 `user_facts` 表继续工作，新 `observations` / `facts_v2` 表并行写入。开关默认关闭，验证稳定后进入二期。
+# Layer 1: Memory 生命周期重构 — 实施方案
 
 ## 数据模型
 
@@ -71,14 +61,6 @@ async def archive_old_observations(max_age_days: int)
 async def garbage_collect()
 ```
 
-## 配置
-
-```json
-{
-  "use_observation_fact": false
-}
-```
-
 ## 流程
 
 ```
@@ -103,8 +85,3 @@ MemoryConsolidator.consolidate()
 4. Retrieval 切换到 `facts_v2` + `insights_v2`
 5. 删除旧 `user_facts` / `reflections` 写入逻辑
 6. 写一次性迁移脚本导入旧数据
-
-## 变更记录
-
-- `changes/2026-07-14-memory-layer1-observation-fact.md`
-- Commit: `be1f187`
