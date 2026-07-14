@@ -793,6 +793,24 @@ Identity → Emotion → Relationship → Memory → Tool → Conversation → I
 - `core/inner_drive.py` — Agent 1 使用 Prompt
 - `core/message_handler.py` — 调度调用点
 
+#### 修复记录（2026-07-14 后续）
+
+本次修复范围：
+
+1. **P1-3 Instruction 集中管理**：新建 `prompts/instructions.py`，将 Agent 1/2/3 的指令文本统一迁移为常量；`prompts/system.py` 的 builder 函数改为引用常量，不再硬编码大段指令。
+2. **P2-4 工具名去硬编码**：新建 `prompts/tools_description.py`，提供 `format_tool_rules()` 和 `format_intent_options()`，根据 `ToolRegistry` 中实际注册的工具动态生成触发规则；`_build_inner_drive_instructions_block`、`build_tool_agent_prompt`、`_build_output_rules_block` 均改为从 registry 推导。
+3. **P2-5 情绪状态摘要化（小步）**：在 `models/personality.py` 的 `EmotionalState` 中新增 `to_prompt_summary()`，将情绪格式化的部分逻辑下沉到 model 层；`prompts/system.py` 的 `_build_emotion_block` 改为接收摘要字典。
+
+仍未修复：
+
+- P3-6 没有 Prompt Template Engine（不引入 Jinja2 等外部依赖）。
+- P3-7 没有 Prompt 版本管理 / AB Test。
+- P3-8 没有 Token Budget。
+
+验证：单元测试 9 passed（`tests/test_prompt_instructions.py`），全量测试 386 passed、2 skipped。
+
+相关提交见 `changes/2026-07-14-fix-294-prompt-architecture-remaining.md`。
+
 ---
 
 ### 4.293 #293 [v0.5] 架构审查：三层 Agent 系统成熟度评估与改进建议

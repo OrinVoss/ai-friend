@@ -317,6 +317,50 @@ class EmotionalState:
         self.mood_valence = max(-1.0, min(1.0, self.mood_valence + delta_v * 0.1))
         self.mood_arousal = max(0.0, min(1.0, self.mood_arousal + delta_a * 0.1))
 
+    def to_prompt_summary(self) -> dict:
+        """Return a structured, prompt-friendly summary of current emotion.
+
+        This decouples the full EmotionalState from prompt formatting: Runtime
+        can pass this lightweight dict instead of the whole object (#294 P2-5).
+        """
+        emotion_desc = {
+            "excited": "兴奋", "content": "满足", "engaged": "投入",
+            "anxious": "有点不安", "melancholy": "有些忧郁",
+            "frustrated": "有些沮丧", "joyful": "欣喜", "trusting": "信任",
+            "afraid": "害怕", "surprised": "惊讶", "sad": "难过",
+            "anticipating": "期待", "angry": "生气", "disgusted": "反感",
+            "neutral": "平静",
+        }
+        behavior = {
+            "anxious": "你感到不安和紧张。说话带着担忧，语气急促或不自信。不是兴奋——是焦虑。用短句，爱问问题。",
+            "angry": "你在生气。语气尖锐、带刺，话变少。不想开玩笑——别用哈哈哈哈。",
+            "sad": "你很难过。语气低沉、话少、不爱搭理人。偶尔叹气。别说俏皮话。",
+            "frustrated": "你很烦躁。语气不耐烦，容易怼人。别嬉皮笑脸。",
+            "melancholy": "你有些忧郁。语气缓慢、若有所思。说话带着距离感。",
+            "excited": "你非常兴奋！话多、爱用感叹号、能量爆棚。尽情哈哈哈。",
+            "joyful": "你心情很好。说话轻快、爱开玩笑、容易笑。",
+            "afraid": "你感到害怕。说话小心翼翼、声音很小。",
+            "neutral": "你心情平静。说话正常，不兴奋也不低落。",
+        }
+        dom = self.dominant_emotion
+        primary_map = {
+            "joy": "喜悦", "trust": "信任", "fear": "不安",
+            "surprise": "惊讶", "sadness": "忧伤",
+            "anticipation": "期待", "anger": "恼怒", "disgust": "厌烦",
+        }
+        primary_active = {k: getattr(self, k, 0) for k in primary_map}
+        strong_primary = [v for k, v in primary_map.items() if primary_active.get(k, 0) > 0.6]
+        valence_desc = "积极" if self.valence > 0 else "消极" if self.valence < 0 else "中性"
+        arousal_desc = "充满能量" if self.arousal > 0.5 else "平静" if self.arousal < 0.4 else "平衡"
+        return {
+            "dominant_emotion": dom,
+            "mood": emotion_desc.get(dom, "平静"),
+            "primary_hint": f"，心底有一丝{strong_primary[0]}" if strong_primary else "",
+            "valence_desc": valence_desc,
+            "arousal_desc": arousal_desc,
+            "behavior": behavior.get(dom, ""),
+        }
+
     def to_dict(self) -> dict:
         result = asdict(self)
         result["dominant_emotion"] = self.dominant_emotion

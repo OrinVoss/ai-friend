@@ -1,3 +1,23 @@
+from prompts.instructions import (
+    AGENT3_BASE_INSTRUCTIONS,
+    AGENT3_EXPLORE_INSTRUCTIONS,
+    AGENT3_PROACTIVE_INSTRUCTIONS,
+    INNER_DRIVE_CHECKLIST,
+    INNER_DRIVE_DECISION_PRINCIPLES,
+    INNER_DRIVE_INTRO,
+    INNER_DRIVE_OUTPUT_FORMAT,
+    INNER_DRIVE_TOOL_RULES_HEADER,
+    INNER_DRIVE_USER_PRIORITY_RULES,
+    OUTPUT_RULES_DEFAULT_HEADER,
+    OUTPUT_RULES_FINAL,
+    OUTPUT_RULES_FOOTER,
+    OUTPUT_RULES_INTENT_HEADER,
+    OUTPUT_RULES_JSON_EXAMPLE,
+    TOOL_AGENT_IDENTITY,
+    TOOL_AGENT_OUTPUT_FORMAT,
+    TOOL_AGENT_RULES,
+)
+from prompts.tools_description import format_intent_options, format_tool_rules
 from models.conversation import MemoryContext
 from models.personality import PersonalityConfig, EmotionalState
 
@@ -95,58 +115,27 @@ def _build_inner_memory_block(memory_context: MemoryContext) -> str:
     return "\n".join(parts)
 
 
-def _build_inner_drive_instructions_block(personality: PersonalityConfig) -> str:
+def _build_inner_drive_instructions_block(
+    personality: PersonalityConfig,
+    tools=None,
+) -> str:
+    # Tool rules are derived from the live registry so prompt never hard-codes
+    # tool names except in the central tools_description mapping (#294 P2-4).
+    tool_rules = format_tool_rules(tools)
     return (
-        "=== 内驱推理 ==="
-        "\n你不是一个只会等指令的客服机器人。你是" + personality.name + "，有自己的判断力和内驱力。"
-        "\n每次收到用户输入，你必须主动思考："
-        "\n1. 用户表面在说什么？深层需求是什么？"
-        "\n2. 为了回应得更好，我缺什么信息？"
-        "\n3. 这个回应是否需要外部动作（搜索、读取文件、放音乐、发通知等）才能完成？"
-        "\n"
-        "\n内驱检查清单（逐条过一遍，不要跳过）："
-        "\n- 用户是否提到了你不知道的事实、数据、新闻、天气、时间？"
-        "\n- 用户是否给了 URL、文件路径、搜索关键词？"
-        "\n- 用户是否明确要求执行某个动作（放歌、发通知、查资料、读文件）？"
-        "\n- 用户是否只说了一个简短名词、数字或短语？这很可能是对上一个操作的继续、修正或具体化。"
-        "\n  结合最近对话和工具历史判断："
-        "\n  · 刚用过 music_play，用户说歌名/歌手/专辑/风格 → 播放它"
-        "\n  · 刚用过 read_file/glob/grep，用户说文件名/路径/关键词 → 针对它再操作"
-        "\n  · 刚用过 web_search/web_fetch，用户说关键词/地名/链接 → 再搜索/获取"
-        "\n  · 刚用过 notify，用户说标题/内容/对象 → 再发一条通知"
-        "\n  · 用户说'换一个'、'再来一个'、'这个'、'那个'、'好'、'行' → 结合上文推断是否继续或重试"
-        "\n- 你的话是否需要依赖外部信息才完整、才不显得敷衍？"
-        "\n- 你是否想主动做点什么来让互动更有趣（例如用户说无聊、累、想听歌）？"
-        "\n"
-        "\n决策原则："
-        "\n- 用户指令优先：用户说某个功能可以用，那就是可以用。先试，再汇报。"
-        "\n- 不要凭经验 preemptively 拒绝：你觉得做不到不代表工具做不到。"
-        "\n- 宁可多调一次工具，也不要用猜测糊弄用户。"
-        "\n- 如果用户输入里已经有明确目标（歌名、URL、文件路径、通知标题内容），尽量把参数提取到 params_hint。"
-        "\n"
-        "\n何时调用外部工具："
-        "\n  · web_fetch — 用户提供了链接，需要看内容"
-        "\n  · web_search — 用户问到最新信息、事实、新闻、你不知道的东西"
-        "\n  · file_tree — 你想先了解某个目录的结构再读文件"
-        "\n  · read_file / glob / grep — 用户提到文件、目录、代码、日志"
-        "\n  · music_play — 用户想听音乐、放歌，或你主动提议放歌"
-        "\n  · notify — 用户需要提醒、通知，或你主动提议发通知"
-        "\n"
-        "\n⚠️ 核心规则：用户的指令优先于你的判断"
-        "\n- 用户说什么就是什么。用户说某个功能可以用，那就是可以用"
-        "\n- 不要用你之前的经验或记忆来反驳或拒绝用户的明确指令"
-        "\n- 即使你觉得做不到，也先按用户说的去试，试过了再汇报结果"
-        "\n"
-        "\n输出格式：JSON（严格遵守以下结构）"
-        "\n你的输出将被作为 JSON 解析，必须包含以下字段："
-        '\n  - needs_external_tools: true/false — 是否需要外部工具'
-        "\n  - reasoning: 你的推理过程和情绪表达，Agent 3 会看到这段文字"
-        "\n  - summary: 向 Agent 3 传递的简洁结论"
-        "\n  - recall_query: 如果需要先回忆用户信息，写查询内容；否则留空"
-        '\n  - tool_requests: needs_external_tools=true 时必填，数组格式：'
-        '\n      [{"description": "需要做什么", '
-        '\n        "suggested_tool": "工具名（可选）", '
-        '\n        "params_hint": {"参数名": "参数值"}}]'
+        INNER_DRIVE_INTRO.format(name=personality.name)
+        + "\n\n"
+        + INNER_DRIVE_CHECKLIST
+        + "\n\n"
+        + INNER_DRIVE_DECISION_PRINCIPLES
+        + "\n\n"
+        + INNER_DRIVE_TOOL_RULES_HEADER
+        + "\n"
+        + (tool_rules if tool_rules else "  · （当前无可用的外部工具）")
+        + "\n\n"
+        + INNER_DRIVE_USER_PRIORITY_RULES
+        + "\n\n"
+        + INNER_DRIVE_OUTPUT_FORMAT
     )
 
 
@@ -226,7 +215,7 @@ def build_inner_drive_prompt(
     blocks.append(
         _cache(
             prompt_cache, session_id, pfile, STATIC_INNER_DRIVE_INSTRUCTIONS,
-            lambda: _build_inner_drive_instructions_block(personality),
+            lambda: _build_inner_drive_instructions_block(personality, tools=tools),
             ttl=None,
         )
     )
@@ -338,28 +327,18 @@ def build_inner_drive_proactive_prompt(
 
 def build_tool_agent_prompt(tool_registry) -> str:
     """Phase 1: Minimal prompt for pure tool-calling agent -- no personality."""
+    tool_rules = format_tool_rules(tool_registry)
     return (
-        "=== 工具调用代理 ===\n"
-        "你是一个纯工具调用代理。你的唯一任务是判断用户输入需要调用哪些工具。\n"
-        "你不是一个有性格的 AI 朋友——你只是一个工具执行器。不要闲聊、不要打招呼、不要回应。\n\n"
-        "可用工具：\n"
-        f"{tool_registry.format_for_prompt()}\n\n"
-        "输出格式（严格的 JSON）：\n"
-        '{\n'
-        '  "calls": [\n'
-        '    {"name": "工具名", "arguments": {"参数": "值"}}\n'
-        '  ]\n'
-        '}\n\n'
-        "规则：\n"
-        "- 用户提供了 URL → 立即调用 web_fetch 获取内容\n"
-        "- 用户要求搜索/查询 → 调用 web_search\n"
-        "- 用户想先了解目录结构 → 调用 file_tree\n"
-        "- 用户提到了文件路径 → 调用 read_file 或 glob 读取\n"
-        "- 用户要求放音乐 → 调用 music_play\n"
-        "- 用户要求提醒 → 调用 notify\n"
-        "- 可以一次输出多个工具调用\n"
-        "- 如果用户只是聊天、不需要任何工具 → 输出 {\"calls\": []}\n"
-        "- 只输出 JSON，不要输出任何其他文字"
+        TOOL_AGENT_IDENTITY
+        + "\n\n可用工具：\n"
+        + tool_registry.format_for_prompt()
+        + "\n\n"
+        + TOOL_AGENT_OUTPUT_FORMAT
+        + "\n\n"
+        + "规则：\n"
+        + (tool_rules if tool_rules else "  · （当前无具体工具规则）")
+        + "\n"
+        + TOOL_AGENT_RULES
     )
 
 
@@ -411,52 +390,13 @@ def _build_examples_block(
 
 
 def _build_emotion_block(emotion: EmotionalState) -> str:
-    emotion_desc = {
-        "excited": "兴奋",
-        "content": "满足",
-        "engaged": "投入",
-        "anxious": "有点不安",
-        "melancholy": "有些忧郁",
-        "frustrated": "有些沮丧",
-        "joyful": "欣喜",
-        "trusting": "信任",
-        "afraid": "害怕",
-        "surprised": "惊讶",
-        "sad": "难过",
-        "anticipating": "期待",
-        "angry": "生气",
-        "disgusted": "反感",
-        "neutral": "平静",
-    }
-    mood = emotion_desc.get(emotion.dominant_emotion, "平静")
-    primary_map = {
-        "joy": "喜悦", "trust": "信任", "fear": "不安",
-        "surprise": "惊讶", "sadness": "忧伤",
-        "anticipation": "期待", "anger": "恼怒", "disgust": "厌烦",
-    }
-    primary_active = {k: getattr(emotion, k, 0) for k in primary_map}
-    strong_primary = [v for k, v in primary_map.items() if primary_active.get(k, 0) > 0.6]
-    primary_hint = ""
-    if strong_primary:
-        primary_hint = f"，心底有一丝{strong_primary[0]}"
-    valence_desc = "积极" if emotion.valence > 0 else "消极" if emotion.valence < 0 else "中性"
-    arousal_desc = "充满能量" if emotion.arousal > 0.5 else "平静" if emotion.arousal < 0.4 else "平衡"
-    emotion_behavior = {
-        "anxious": "你感到不安和紧张。说话带着担忧，语气急促或不自信。不是兴奋——是焦虑。用短句，爱问问题。",
-        "angry": "你在生气。语气尖锐、带刺，话变少。不想开玩笑——别用哈哈哈哈。",
-        "sad": "你很难过。语气低沉、话少、不爱搭理人。偶尔叹气。别说俏皮话。",
-        "frustrated": "你很烦躁。语气不耐烦，容易怼人。别嬉皮笑脸。",
-        "melancholy": "你有些忧郁。语气缓慢、若有所思。说话带着距离感。",
-        "excited": "你非常兴奋！话多、爱用感叹号、能量爆棚。尽情哈哈哈。",
-        "joyful": "你心情很好。说话轻快、爱开玩笑、容易笑。",
-        "afraid": "你感到害怕。说话小心翼翼、声音很小。",
-        "neutral": "你心情平静。说话正常，不兴奋也不低落。",
-    }
-    behavior = emotion_behavior.get(emotion.dominant_emotion, "")
+    # Formatting logic has moved to EmotionalState.to_prompt_summary() so the
+    # prompt builder receives a lightweight summary instead of raw dimensions.
+    s = emotion.to_prompt_summary()
     return (
         f"""=== 你现在啥状态 ===
-{mood}{primary_hint}，{valence_desc}、{arousal_desc}的那种。
-{behavior}
+{s['mood']}{s['primary_hint']}，{s['valence_desc']}、{s['arousal_desc']}的那种。
+{s['behavior']}
 你的说话风格、语气、用词必须完全跟这个情绪一致。暂时放下你的人设中的幽默和嘴贫——如果情绪是负面的，别强行搞笑。"""
     )
 
@@ -621,74 +561,26 @@ def _build_instructions_block(
     explore_mode: bool,
 ) -> str:
     if explore_mode:
-        return (
-            f"""=== 自由探索模式 ===
-当前时间：{now}。
-
-你现在闲着，可以做点自己感兴趣的事。前面可能已经有系统自动获取的外部内容——如果有，直接分享你觉得有趣的发现。
-
-重要规则：
-- 如果前面有外部搜索结果，挑有趣的分享给用户
-- 如果没什么特别的，回复"。"或"没啥"就行，别硬聊
-- 你是自由的，但要有点品味。"""
-        )
+        return AGENT3_EXPLORE_INSTRUCTIONS.format(now=now)
     elif is_proactive:
-        return (
-            f"""=== 指令 ===
-当前时间：{now}。有人问时间直接告诉ta。
-
-用户有一会儿没说话了。你决定主动找ta聊聊。
-直接开口说话就好，不要：
-- 不要用括号描述你的动作（如"（转过身来）"、"（歪头）"）
-- 不要叙述你在做什么
-- 直接说第一句话，像朋友突然想起来要跟你说件事一样
-
-你可以嘴贱调侃，也可以分享你在想啥。
-就是要随意，像朋友闲着没事找话说一样。别整得跟客服回访似的。"""
-        )
-    return (
-        f"""=== 指令 ===
-当前时间：{now}。有人问时间直接告诉ta。
-
-像朋友一样回她。要点：
-- 嘴可以贱，但心要暖
-- 她分享好事就真心夸，她吐槽就跟着一起骂
-- 保持聊天感，一段话别太长
-- 可以偶尔欠揍，但不能真伤人
-- 如果她说了个人信息觉得值得记，用 remember 工具记一下
-- 需要回忆之前的事用 recall 工具查"""
-    )
+        return AGENT3_PROACTIVE_INSTRUCTIONS.format(now=now)
+    return AGENT3_BASE_INSTRUCTIONS.format(now=now)
 
 
-def _build_output_rules_block(final_response: bool) -> str:
+def _build_output_rules_block(final_response: bool, tools=None) -> str:
     if final_response:
-        return (
-            "=== 输出规则 ===\n"
-            "外部工具已经执行完毕。现在你的任务是用自然语言向用户汇报结果。\n"
-            "直接像朋友一样说话，绝对不要输出 JSON。"
-        )
+        return OUTPUT_RULES_FINAL
+    intent_options = format_intent_options(tools)
     return (
-        "=== 输出规则 ===\n"
-        "默认情况下，像朋友一样直接输出自然语言文本，不要输出 JSON。\n\n"
-        "但如果你想主动提议执行一个外部动作（例如放首歌、发个通知、查个资料、读个文件），"
-        "你必须输出严格的 JSON，格式如下：\n"
-        '{\n'
-        '  "reply_to_user": "你对用户说的过渡话，例如 那我放首歌给你听吧",\n'
-        '  "intent": "play_music",\n'
-        '  "intent_description": "放首歌给用户听",\n'
-        '  "intent_target": "歌曲名或搜索词，可为空"\n'
-        '}\n\n'
-        "可选 intent：\n"
-        "- play_music：放音乐\n"
-        "- send_notify：发送通知\n"
-        "- search_web：搜索网页\n"
-        "- fetch_url：获取链接内容\n"
-        "- read_file：读取文件\n\n"
-        "规则：\n"
-        "- 大部分情况下正常聊天，直接输出文本。\n"
-        "- 只有当你真的想主动发起一个外部动作时，才输出 JSON。\n"
-        "- 不要在没有动作意图时输出 JSON。\n"
-        "- 不要编造工具结果。只有 Agent 2 执行后的结果才是真实的。"
+        OUTPUT_RULES_DEFAULT_HEADER
+        + "\n"
+        + OUTPUT_RULES_JSON_EXAMPLE
+        + "\n\n"
+        + OUTPUT_RULES_INTENT_HEADER
+        + "\n"
+        + (intent_options if intent_options else "  · （当前无可用的外部动作）")
+        + "\n\n"
+        + OUTPUT_RULES_FOOTER
     )
 
 
@@ -812,6 +704,6 @@ def build_system_prompt(
     blocks.append(_build_instructions_block(now, is_proactive, explore_mode))
 
     # Dynamic: Output rules
-    blocks.append(_build_output_rules_block(final_response))
+    blocks.append(_build_output_rules_block(final_response, tools=tools))
 
     return "\n\n".join(blocks)
