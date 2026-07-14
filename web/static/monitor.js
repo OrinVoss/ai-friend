@@ -37,8 +37,13 @@ function formatContent(content) {
   return esc(JSON.stringify(content, null, 2));
 }
 
-function renderCard(rec) {
+function makeCardKey(rec, index) {
+  return `${rec.timestamp}|${rec.source || ''}|${rec.model}|${index}`;
+}
+
+function renderCard(rec, index) {
   const durCls = clsDuration(rec.duration_ms);
+  const key = makeCardKey(rec, index);
 
   let msgsHtml = '';
   if (rec.messages && rec.messages.length > 0) {
@@ -64,7 +69,7 @@ function renderCard(rec) {
   }
 
   return `
-    <div class="card">
+    <div class="card" data-key="${esc(key)}">
       <div class="card-header">
         <span class="arrow">▶</span>
         <span class="time">${esc(rec.timestamp)}</span>
@@ -88,8 +93,30 @@ function renderCard(rec) {
   `;
 }
 
+function getOpenKeys() {
+  const keys = new Set();
+  document.querySelectorAll('.card-body.open').forEach(body => {
+    const card = body.closest('.card');
+    if (card) keys.add(card.dataset.key);
+  });
+  return keys;
+}
+
+function restoreOpenKeys(keys) {
+  if (!keys || keys.size === 0) return;
+  document.querySelectorAll('.card').forEach(card => {
+    if (keys.has(card.dataset.key)) {
+      const body = card.querySelector('.card-body');
+      const arrow = card.querySelector('.arrow');
+      if (body) body.classList.add('open');
+      if (arrow) arrow.classList.add('open');
+    }
+  });
+}
+
 function fetchData() {
   document.getElementById('status').textContent = '加载中...';
+  const openKeys = getOpenKeys();
   fetch('/api/monitor?limit=0')
     .then(r => r.json())
     .then(data => {
@@ -99,6 +126,7 @@ function fetchData() {
       } else {
         list.innerHTML = data.map(renderCard).join('');
         bindCardHeaders();
+        restoreOpenKeys(openKeys);
       }
       document.getElementById('count').textContent = (data?.length || 0) + ' 条记录';
       document.getElementById('status').textContent = '就绪';
