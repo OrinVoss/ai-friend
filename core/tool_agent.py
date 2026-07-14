@@ -97,7 +97,7 @@ class ToolAgent:
             resp = self._provider.generate(
                 messages,
                 stream=False,
-                max_tokens=512,
+                max_tokens=1024,
                 response_format=self._registry.to_json_schema(),
                 source="tool_agent",
             )
@@ -177,7 +177,7 @@ class ToolAgent:
                     "请调整方式后重新输出 JSON 格式的工具调用。"
                 )})
 
-            resp = self._provider.generate(messages, stream=False, max_tokens=512,
+            resp = self._provider.generate(messages, stream=False, max_tokens=1024,
                                           response_format=json_schema, source="tool_agent")
             cleaned, calls = parse_tool_calls(resp)
             if not calls:

@@ -100,9 +100,9 @@ class InnerDriveAgent:
 
     def __init__(self, provider, personality, ltm, retriever, short_term,
                  tool_registry, max_iterations: int = 5,
-                 max_tokens_assess: int = 512,
+                 max_tokens_assess: int = 1024,
                  max_tokens_proactive: int = 256,
-                 max_tokens_review: int = 512,
+                 max_tokens_review: int = 1024,
                  conv_hist_tokens: int = 1800,
                  tool_call_history: list | None = None):
         self._provider = provider
