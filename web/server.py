@@ -134,6 +134,12 @@ async def index():
     return FileResponse("web/static/index.html")
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    """Silence 404s for browsers requesting a favicon."""
+    return Response(status_code=204)
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_api(req: ChatRequest):
     ensure_session()
@@ -296,8 +302,8 @@ def _calc_delay(emotion: str, seg_len: int) -> float:
 
 
 @app.get("/api/monitor")
-async def monitor_api(limit: int = 50):
-    """Return recent LLM API call records as JSON."""
+async def monitor_api(limit: int = 0):
+    """Return recent LLM API call records as JSON. limit=0 for all."""
     from core.monitor import get_monitor
     return get_monitor().get_all(limit=limit)
 

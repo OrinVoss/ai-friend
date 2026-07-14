@@ -51,11 +51,17 @@
 - 单元测试：`python -m pytest tests/test_provider.py tests/test_provider_abc.py tests/test_inner_drive.py tests/test_message_handler.py -v` 全部通过（59 passed）。
 - 全量测试：`python -m pytest tests --ignore=tests/real_api -q` 通过（366 passed）。
 
+## 5. CSP 兼容修复
+
+- 把 `monitor.html` 中的内联 `<script>` 和 `onclick` 全部拆到外部 `web/static/monitor.js`。
+- `monitor.js` 通过 `addEventListener` 绑定按钮点击和卡片展开事件。
+- `web/server.py` 新增 `/favicon.ico` 路由返回 `204 No Content`，消除浏览器 404。
+
 ## 重启服务
 
-修改后需要重启 Web 服务才能生效。当前服务 PID 30508，重启命令：
+修改后需要重启 Web 服务才能生效。
 
 ```bash
-kill 30508
+# 找到当前 web_main.py 进程并结束，然后重新启动
 nohup .venv/Scripts/python.exe web_main.py > logs/web_service.log 2>&1 &
 ```
