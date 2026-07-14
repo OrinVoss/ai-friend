@@ -103,7 +103,8 @@ class InnerDriveAgent:
                  max_tokens_assess: int = 512,
                  max_tokens_proactive: int = 256,
                  max_tokens_review: int = 512,
-                 conv_hist_tokens: int = 1800):
+                 conv_hist_tokens: int = 1800,
+                 tool_call_history: list | None = None):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
@@ -115,6 +116,7 @@ class InnerDriveAgent:
         self._max_tokens_proactive = max_tokens_proactive
         self._max_tokens_review = max_tokens_review
         self._conv_hist_tokens = conv_hist_tokens
+        self._tool_call_history = tool_call_history
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
@@ -129,6 +131,7 @@ class InnerDriveAgent:
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
+            tool_call_history=self._tool_call_history,
         )
 
         messages = [
@@ -244,6 +247,7 @@ class InnerDriveAgent:
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
+            tool_call_history=self._tool_call_history,
         )
 
         review_msg = (
@@ -316,6 +320,7 @@ class InnerDriveAgent:
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
+            tool_call_history=self._tool_call_history,
         )
 
         messages = [
@@ -381,6 +386,7 @@ class InnerDriveAgent:
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
+            tool_call_history=self._tool_call_history,
         )
 
         intent_to_tool = {

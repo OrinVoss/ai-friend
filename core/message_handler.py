@@ -39,6 +39,7 @@ class MessageHandler:
                 retriever=a.retriever,
                 short_term=a.short_term,
                 tool_registry=isolated,
+                tool_call_history=a._tool_call_history,
             )
 
     def ensure_inner_drive(self):

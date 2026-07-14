@@ -25,6 +25,7 @@ def build_inner_drive_prompt(
     memory_context: MemoryContext,
     conversation_history: str,
     tools=None,
+    tool_call_history: list | None = None,
 ) -> str:
     """Agent 1: Inner drive reasoning prompt -- assess what the AI needs to do."""
     from datetime import datetime
@@ -69,6 +70,9 @@ def build_inner_drive_prompt(
         "\n- 用户是否提到了你不知道的事实、数据、新闻、天气、时间？"
         "\n- 用户是否给了 URL、文件路径、搜索关键词？"
         "\n- 用户是否明确要求执行某个动作（放歌、发通知、查资料、读文件）？"
+        "\n- 用户是否只说了一个简短名词（如歌名、文件名）？结合最近工具历史判断："
+        "\n  · 如果刚放过音乐，用户说了一个歌名 → 要播放这首歌"
+        "\n  · 如果刚读过/搜过文件，用户说了一个文件名 → 要读取这个文件"
         "\n- 你的话是否需要依赖外部信息才完整、才不显得敷衍？"
         "\n- 你是否想主动做点什么来让互动更有趣（例如用户说无聊、累、想听歌）？"
         "\n"
@@ -102,6 +106,13 @@ def build_inner_drive_prompt(
         '\n        "suggested_tool": "工具名（可选）", '
         '\n        "params_hint": {"参数名": "参数值"}}]'
     )
+
+    # Recent tool calls (helps Agent 1 interpret short follow-ups like song names)
+    if tool_call_history:
+        blocks.append("=== 你最近的工具调用 ===")
+        for tc in tool_call_history[-5:]:
+            status = "✅" if tc.get("success", False) else "❌"
+            blocks.append(f"- {status} {tc['name']}: {tc['output'][:100]}")
 
     # Tools available
     if tools:
