@@ -49,26 +49,18 @@
   - 验证 `to_prompt_summary()` 返回结构包含 `valence` / `arousal`。
 - `tests/test_inner_drive.py`：给 TestAssess / TestAssessProactive 的 mock emotion 补充 `to_prompt_summary.return_value`，修复因 Runtime 主动调用该方法导致的 `MagicMock.__format__` TypeError。
 
-### 5. 修复测试环境卡死
-
-- `tests/test_repository.py`：
-  - 原写法在 `setUpClass` 里用 `asyncio.run(db.open())` 创建 aiosqlite 连接，然后在 `setUp` / test 方法里用新的 `asyncio.run()` 操作同一个连接。
-  - aiosqlite 0.22.1 的 connection 与创建它的 event loop 绑定，跨 loop 使用会导致死锁，因此全量测试时 `tests/test_repository.py` 会卡住。
-  - 改为每个 test 的 `setUp` 里新建 `:memory:` 数据库并打开，`tearDown` 里关闭，确保每个 test 都在同一个 event loop 内完成。
-
-### 6. 文档
+### 5. 文档
 
 - `doc/known-issues.md`：更新 `#294` 小节，将 P2-5 标记为已完成。
 
 ## 验证
 
 ```bash
-python -m pytest tests/test_prompt_instructions.py tests/test_conversation_examples.py tests/test_message_handler.py tests/test_inner_drive.py tests/test_agent_proactive.py tests/test_repository.py -v
-# 92 passed
-
-python -m pytest tests --ignore=tests/real_api -q
-# 389 passed, 2 skipped
+python -m pytest tests/test_prompt_instructions.py tests/test_conversation_examples.py tests/test_message_handler.py tests/test_inner_drive.py tests/test_agent_proactive.py -v
+# 75 passed
 ```
+
+> 注：全量测试时 `tests/test_repository.py` 会卡死，详见 `changes/2026-07-14-fix-test-repository-hang.md`。
 
 ## 相关文件
 
@@ -79,6 +71,5 @@ python -m pytest tests --ignore=tests/real_api -q
 - `core/inner_drive.py`
 - `tests/test_prompt_instructions.py`
 - `tests/test_inner_drive.py`
-- `tests/test_repository.py`
 - `doc/known-issues.md`
 - `changes/2026-07-14-complete-294-p2-5-runtime-summary.md`
