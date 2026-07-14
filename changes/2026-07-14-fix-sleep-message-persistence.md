@@ -1,4 +1,4 @@
-# 修复 #156：睡/醒消息持久化不完整
+# 修复睡/醒消息持久化不完整
 
 ## 问题
 
@@ -59,4 +59,4 @@ python -m pytest tests --ignore=tests/real_api -q
 - `web/session.py`
 - `web/server.py`
 - `tests/test_web_agent.py`
-- `changes/2026-07-14-fix-156-sleep-message-persistence.md`
+- `changes/2026-07-14-fix-sleep-message-persistence.md`

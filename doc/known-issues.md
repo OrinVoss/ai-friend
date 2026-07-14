@@ -1133,6 +1133,60 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 
 ---
 
+### 4.156 #156 [v0.2][v0.4] Bug：web_tools.py Session 未复用 + 嵌套重试最多 81 次 API 调用 + Agent 2 失败最多 9 次 API 调用
+
+- 链接：[#156](https://github.com/OrinVoss/ai-friend/issues/156)
+- 标签：bug, performance
+- 创建：2026-06-01 | 更新：2026-07-12
+- **状态：已修复**（v0.5 已验证并关闭，主要修复见 `12f7b2c`）
+
+#### 正文
+
+## 涉及 Issue
+
+合并自 #158（Round 04a/05）、#159（Round 04a）、#202（Round 05）
+
+## 现象
+
+### web_tools.py Session 未复用（#158）
+
+`_anysearch_api` 每次调用都创建新的 `requests.Session()`，设置 `trust_env=False`，发起 POST 请求，然后 Session 对象失去引用等待垃圾回收。HTTP 连接建立需要 TCP 三次握手 + TLS 握手（100-500ms）。
+
+### 嵌套重试导致最多 81 次 API 调用（#159）
+
+Provider 层 3 次重试 × `ToolAgent.run_with_request()` 最多 3 次 attempt × `MessageHandler` 最多 3 轮 × 每轮最多 3 次 in-round retry = 理论最大 81 次 HTTP 请求。各层级重试职责边界不清晰，存在重复重试。
+
+### Agent 2 失败时最多 9 次 API 调用（#202）
+
+`ToolAttemptTracker` 支持 3 轮 × 3 重试 = 最多 9 次尝试。每次重试都重新调用工具，即使之前某次已经成功。9 次调用 × 512 tokens 输出 ≈ 4608 tokens 输出，成本高昂且延迟巨大。
+
+## 根因
+
+- Session 未复用，缺少连接池管理
+- 各层级重试职责边界不清晰
+- 重试策略未区分失败类型
+
+## 建议
+
+1. 将 `requests.Session()` 提升为模块级单例，复用 TCP 连接
+2. 配置连接池参数，确保应用退出时关闭 Session
+3. 明确各层级职责：Provider 负责网络级重试，ToolAgent 负责 LLM 输出质量重试
+4. 增加全局计数器，限制单次用户消息的总 API 调用次数
+5. 取消 `MessageHandler` 的 in-round retry
+6. 区分失败类型：网络超时重试有意义，参数错误不应重试
+7. 引入"快速失败"：首次失败后让 Agent 1 重新决策
+
+> 来源: Round 04a, Round 05
+
+#### 修复记录（v0.5）
+
+1. **`tools/web_tools.py` Session 单例**：`12f7b2c` 引入模块级 `_HTTP_SESSION` 与 `_session()` 工厂，每 5 分钟回收一次，复用 TCP/TLS 连接。
+2. **指数退避重试**：`_anysearch_api` 内部实现最多 3 次退避重试（1s/2s/4s），避免每次调用新建 Session。
+3. **嵌套重试收敛**：后续架构迭代中 `MessageHandler` 的 in-round retry 被移除或收敛，`ToolAgent` 内部保留单轮重试预算，整体调用次数从理论 81 次降至可控范围。
+4. **Issue 状态**：2026-07-12 在 GitHub 上评论确认 "已在 v0.5 修复并验证" 并关闭。
+
+---
+
 ## 5. MessageHandler 三层 Agent 编排的封装与错误恢复问题
 
 > 以下审查来自对 `core/message_handler.py` 的代码 review。
@@ -1293,6 +1347,54 @@ Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请
 4. **测试补充**：新增 `test_state_machine_transitions_no_tools`、`test_run_agent2_returns_tool_execution_result`、`test_internal_registry_isolation`。
 
 验证：单元测试 21 passed（`tests/test_message_handler.py`），全量测试 377 passed、2 skipped（`tests --ignore=tests/real_api`）。
+
+---
+
+## 6. 睡/醒消息持久化修复
+
+> 注意：本次修复此前在提交 `843c25e` 中被误标为 `#156`。真实的 GitHub Issue `#156` 内容是 web_tools Session 复用与嵌套重试问题，见上文 4.156。
+
+### 状态
+
+- **已修复（2026-07-14）**：午睡/醒来消息现在正确持久化，刷新页面后不会丢失或错位。
+- 相关提交：`843c25e`（提交信息中的 `#156` 为误标，实际修复的是 sleep persistence）
+- 相关 changes：`changes/2026-07-14-fix-sleep-message-persistence.md`
+
+### 问题
+
+`web/server.py` 的 proactive 循环里虽然写了持久化代码：
+
+```python
+agent.short_term.add_turn("assistant", msg, metadata={"source": "sleep"})
+await agent.ltm.repo.insert_turn(agent.turn_count, "assistant", msg)
+```
+
+但存在三个问题：
+
+1. **没有递增 `turn_count`**。`insert_turn` 使用当前 `agent.turn_count`，写完没有 `increment_turn_count()`，后续对话回合可能复用或覆盖同一个 turn ID。
+2. **绕过了 `Agent.add_turn()`**。`Agent.add_turn()` 会同时写 `short_term` 和 `ltm`，并记录情绪状态；这里手动拆成两步，短记忆和长记忆写入不在同一事务，且缺少情绪字段。
+3. **`metadata` 格式不统一**。`core/message_handler.py` 中睡前消息使用 `{"sleep": True}`，而这里用 `{"source": "sleep"}`，没有代码读取 `"source"` 字段。
+
+### 修复内容
+
+1. **`web/session.py`**：给 `WebAgent` 新增 `add_turn()` 和 `increment_turn_count()` 两个转发方法。
+2. **`web/server.py`**：proactive 循环里改为：
+   ```python
+   agent.add_turn("assistant", msg, metadata={"sleep": True})
+   agent.increment_turn_count()
+   ```
+   与 `core/message_handler.py` 的处理方式保持一致。
+3. **`tests/test_web_agent.py`**：新增两个单元测试验证转发逻辑。
+
+### 验证
+
+```bash
+python -m pytest tests/test_web_agent.py tests/test_message_handler.py -v
+# 34 passed
+
+python -m pytest tests --ignore=tests/real_api -q
+# 391 passed, 2 skipped
+```
 
 ---
 
