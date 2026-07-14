@@ -134,7 +134,9 @@ async def index():
     return FileResponse("web/static/index.html")
 
 
+# WS-029: silence favicon 404s without weakening CSP
 @app.get("/favicon.ico")
+@app.head("/favicon.ico")
 async def favicon():
     """Silence 404s for browsers requesting a favicon."""
     return Response(status_code=204)
