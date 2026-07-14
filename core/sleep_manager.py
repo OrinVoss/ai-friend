@@ -118,12 +118,24 @@ class SleepManager:
                 wake_chance = 0.2 + (hour - 7) / 3.0
                 wake_chance += max(0, e.arousal - 0.3) * 0.15
                 wake_chance -= r * 0.1
+                # SL-011: guarantee wake-up as the window nears its end
+                if hour >= 9.5:
+                    wake_chance = 1.0
                 if random.random() < min(0.9, wake_chance):
                     self._sleeping = False; self._save_sleep_state()
                     self._last_transition_time = time.time()
                     dream = await self.generate_dream()
                     logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
                     return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"
+
+            # SL-011: hard fail-safe — if still sleeping past the normal wake window,
+            # force wake-up between 10:00-11:00 so the AI never sleeps forever.
+            if 10 <= hour < 11 and self._sleeping:
+                self._sleeping = False; self._save_sleep_state()
+                self._last_transition_time = time.time()
+                dream = await self.generate_dream()
+                logger.info(f"[sleep] forced morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
+                return False, f"太阳都晒屁股了才醒…{'做了个梦：' + dream if dream else '睡过头了！'}"
 
         return False, None
 
