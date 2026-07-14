@@ -63,11 +63,9 @@ class TestMessageHandler(unittest.TestCase):
         result = self.handler.handle_message("你好")
         self.assertIn("zzz", result.lower())
         self.agent._react_loop.assert_not_called()
-        # Sleep reply should be persisted too
-        self.agent.short_term.add_turn.assert_any_call("assistant", result, metadata={"sleep": True})
-        self.agent.ltm.repo.insert_turn_sync.assert_any_call(
-            unittest.mock.ANY, "assistant", result, unittest.mock.ANY
-        )
+        # Sleep reply should be persisted through the Agent facade.
+        self.agent.add_turn.assert_any_call("assistant", result, metadata={"sleep": True})
+        self.assertEqual(self.agent.increment_turn_count.call_count, 2)
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
     def test_handle_proactive(self, _mock):

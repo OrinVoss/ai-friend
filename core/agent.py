@@ -103,6 +103,52 @@ class Agent:
 
     # ── Message entry points (delegate to MessageHandler) ──
 
+    # ── Public accessors for MessageHandler (avoid direct _attr access) ──
+
+    def add_turn(self, role: str, content: str, metadata: dict | None = None) -> None:
+        """Persist a conversation turn to short-term memory and the repository."""
+        self.short_term.add_turn(role, content, metadata=metadata)
+        self.ltm.repo.insert_turn_sync(
+            self.turn_count, role, content,
+            str(self.personality.emotion.to_dict()),
+            is_tool_claim=metadata.get("is_tool_claim") if metadata else False,
+        )
+
+    def record_tool_call(self, name: str, success: bool, output: str) -> None:
+        """Append a tool call record, keeping the rolling window bounded."""
+        self._tool_call_history.append({
+            "name": name,
+            "success": success,
+            "output": output[:200],
+            "time": time.time(),
+        })
+        if len(self._tool_call_history) > 20:
+            self._tool_call_history = self._tool_call_history[-20:]
+
+    def get_tool_call_history(self) -> list[dict]:
+        return self._tool_call_history
+
+    def set_current_input(self, user_input: str) -> None:
+        self.current_input = user_input
+
+    def increment_turn_count(self) -> None:
+        self.turn_count += 1
+
+    def update_last_activity(self) -> None:
+        self.last_activity_time = time.time()
+
+    def get_compressed_summary(self) -> str:
+        return self._context.compressed_summary
+
+    def get_consecutive_negative(self) -> int:
+        return self._consecutive_negative
+
+    def compress_context(self, messages: list[dict]) -> None:
+        """Trigger context compression when the token budget is exceeded."""
+        self._context.compress(messages)
+
+    # ── Message entry points (delegate to MessageHandler) ──
+
     def process_message(self, user_input: str, on_token=None) -> str:
         return self._messages.handle_message(user_input, on_token)
 
@@ -170,14 +216,7 @@ class Agent:
                 else:
                     self._tool_failures = 0  # reset on success
                 for r in results:
-                    self._tool_call_history.append({
-                        "name": r["name"],
-                        "success": r["success"],
-                        "output": r["output"][:200],
-                        "time": time.time(),
-                    })
-                if len(self._tool_call_history) > 20:
-                    self._tool_call_history = self._tool_call_history[-20:]
+                    self.record_tool_call(r["name"], r["success"], r["output"])
                 messages.append({"role": "user", "content": format_tool_results(results)})
             except Exception:
                 logger.exception("[react] unexpected error in iteration")
@@ -195,18 +234,13 @@ class Agent:
 
         if final_text:
             if add_to_history:
-                self.short_term.add_turn("assistant", final_text)
                 # #130: detect stage directions in assistant response → mark as tool_claim
                 is_claim = any(
                     final_text.strip().startswith(p)
                     for p in ['（调用', '(调用', '（前奏', '(前奏', '（搜索', '(搜索']
                 )
-                self.ltm.repo.insert_turn_sync(
-                    self.turn_count, "assistant", final_text,
-                    str(self.personality.emotion.to_dict()),
-                    is_tool_claim=is_claim,
-                )
-                self.turn_count += 1
+                self.add_turn("assistant", final_text, metadata={"is_tool_claim": is_claim})
+                self.increment_turn_count()
 
         if not skip_post_process:
             self._process_emotion()

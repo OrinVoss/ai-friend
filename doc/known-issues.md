@@ -1118,7 +1118,7 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 
 ### 状态
 
-- 未修复
+- **部分修复（2026-07-14）**：封装性、错误恢复、魔法数字、输入清洗已改进；工具注册表深层隔离、请求级超时、状态机重构待后续处理。
 - 不影响当前功能，但会降低可维护性和生产环境稳定性
 
 ### 整体架构
@@ -1244,6 +1244,25 @@ Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请
 ### 优先级
 
 建议优先处理 **封装性** 和 **错误恢复**，这两点对生产环境稳定性影响最大。
+
+### 修复记录（2026-07-14）
+
+本次修复范围：
+
+1. **封装性**：在 `core/agent.py` 新增公开方法 `add_turn()`、`record_tool_call()`、`increment_turn_count()`、`update_last_activity()`、`set_current_input()`、`get_compressed_summary()`、`get_consecutive_negative()`、`compress_context()`；`MessageHandler` 不再直接操作 `Agent` 内部属性。
+2. **错误恢复**：Agent 2 循环捕获异常后生成错误摘要并注入 Agent 3 的 tool_records，让用户感知到降级。
+3. **魔法数字**：提取为 `MessageHandler` 类常量：`MAX_AGENT2_ROUNDS`、`TOOL_RECORDS_MAX_LENGTH`、`TOOL_HISTORY_MAX_SIZE`、`MAX_INPUT_LENGTH`、`CONV_HIST_MAX_TOKENS`。
+4. **输入清洗**：`_sanitize_input()` 改用正则表达式，可匹配 `"system:"`、`"assistant:"`、`"user:"`、`"ignore previous"`、`"忽略以上"` 等变体。
+5. **_build_messages 风格**：使用 `agent` 局部变量替代 `a`，并补充注释说明预算耗尽即停止。
+
+未在本次修复的遗留项：
+
+- 工具注册表隔离不完整（工具实例引用外部状态）。
+- Agent 2 重试循环缺少请求级/阶段级超时。
+- 未引入状态机抽象。
+- 未拆分 `ToolExecutionResult` dataclass。
+
+相关提交见 `changes/2026-07-14-fix-message-handler-review.md`。
 
 ---
 

@@ -7,6 +7,7 @@ Agent 3 (Roleplay)   -- personality-driven final response
 
 import logging
 import random
+import re
 import time
 
 from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
@@ -17,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 class MessageHandler:
     """Orchestrates the three-Agent pipeline."""
+
+    MAX_AGENT2_ROUNDS = 3
+    TOOL_RECORDS_MAX_LENGTH = 3000
+    TOOL_HISTORY_MAX_SIZE = 20
+    MAX_INPUT_LENGTH = 10000
+    CONV_HIST_MAX_TOKENS = 1800
 
     def __init__(self, agent):
         self._agent = agent
@@ -84,27 +91,23 @@ class MessageHandler:
 
         if a._sleeping:
             # #185: preserve user input even during sleep
-            a.short_term.add_turn("user", user_input, metadata={"sleep": True})
-            a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
-                                   str(a.personality.emotion.to_dict()))
-            a.turn_count += 1
-            a.last_activity_time = time.time()
+            a.add_turn("user", user_input, metadata={"sleep": True})
+            a.increment_turn_count()
+            a.update_last_activity()
             sleep_reply = random.choice([
                 "zzz...ZZZ...💤", "Zzzz...[翻身]",
                 "zzzz...（小声梦话）", "Zzz...💤",
             ])
             # Persist sleep reply so it survives page refresh
-            a.short_term.add_turn("assistant", sleep_reply, metadata={"sleep": True})
-            a.ltm.repo.insert_turn_sync(a.turn_count, "assistant", sleep_reply,
-                                   str(a.personality.emotion.to_dict()))
-            a.turn_count += 1
+            a.add_turn("assistant", sleep_reply, metadata={"sleep": True})
+            a.increment_turn_count()
             logger.info(f"[msg] sleep reply persisted: turn={a.turn_count - 1}")
             return sleep_reply
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
-        a.current_input = user_input
-        a.last_activity_time = time.time()
-        a.short_term.add_turn("user", user_input)
+        a.set_current_input(user_input)
+        a.update_last_activity()
+        a.add_turn("user", user_input)
 
         # ── Agent 1: Inner Drive ──
         self._ensure_inner_drive()
@@ -121,14 +124,14 @@ class MessageHandler:
         self._ensure_tool_agent()
         from core.tool_agent import ToolAttemptTracker
 
-        MAX_AGENT2_ROUNDS = 3
         all_tool_results = []
         tool_records = ""
         round_num = 0
         tracker = ToolAttemptTracker()
+        agent2_error = ""
 
         try:
-            while round_num < MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
+            while round_num < self.MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
                 round_num += 1
                 tracker.round_number = round_num
                 # MH-001: pass ALL tool requests to Agent 2, executing each in
@@ -136,7 +139,7 @@ class MessageHandler:
                 # multi-tool request from InnerDrive silently dropped the rest.
                 if drive_result.tool_requests:
                     logger.info(
-                        f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, "
+                        f"[msg] agent2: round {round_num}/{self.MAX_AGENT2_ROUNDS}, "
                         f"requests={len(drive_result.tool_requests)} "
                         f"first={drive_result.tool_requests[0].description[:80]}"
                     )
@@ -144,7 +147,7 @@ class MessageHandler:
                         [req.description for req in drive_result.tool_requests]
                     )
                 else:
-                    logger.info(f"[msg] agent2: round {round_num}/{MAX_AGENT2_ROUNDS}, no request text")
+                    logger.info(f"[msg] agent2: round {round_num}/{self.MAX_AGENT2_ROUNDS}, no request text")
                     tool_result = self._tool_agent.run_with_request(user_input)
                 tracker.total_attempts += 1
                 track_failures(tracker, tool_result)
@@ -166,13 +169,13 @@ class MessageHandler:
                 combined_records = ""
                 for i, r in enumerate(all_tool_results):
                     combined_records += self._tool_agent.format_for_phase2(r) + "\n"
-                if len(combined_records) > 3000:
-                    combined_records = combined_records[:3000] + "\n...(后续结果已截断)"
+                if len(combined_records) > self.TOOL_RECORDS_MAX_LENGTH:
+                    combined_records = combined_records[:self.TOOL_RECORDS_MAX_LENGTH] + "\n...(后续结果已截断)"
 
-                if tool_result and tool_result.any_success and round_num < MAX_AGENT2_ROUNDS:
+                if tool_result and tool_result.any_success and round_num < self.MAX_AGENT2_ROUNDS:
                     drive_result = self._inner_drive.review(
                         user_input, combined_records,
-                        round_num=round_num, max_rounds=MAX_AGENT2_ROUNDS,
+                        round_num=round_num, max_rounds=self.MAX_AGENT2_ROUNDS,
                     )
                     if drive_result.needs_external_tools:
                         logger.info(f"[msg] agent1: needs more tools after round {round_num}")
@@ -184,8 +187,9 @@ class MessageHandler:
                         break
                 else:
                     break
-        except Exception:
+        except Exception as exc:
             logger.exception("[msg] agent2: unexpected error, falling back to agent3")
+            agent2_error = f"[工具执行阶段出现异常：{type(exc).__name__}，已降级为直接回复]"
 
         # Build final combined tool records for Agent 3
         parts = []
@@ -194,8 +198,10 @@ class MessageHandler:
             if part:
                 parts.append(part)
         tool_records = "\n".join(parts)
-        if len(tool_records) > 3000:
-            tool_records = tool_records[:3000] + "\n...(后续结果已截断)"
+        if agent2_error:
+            tool_records = agent2_error + "\n" + tool_records
+        if len(tool_records) > self.TOOL_RECORDS_MAX_LENGTH:
+            tool_records = tool_records[:self.TOOL_RECORDS_MAX_LENGTH] + "\n...(后续结果已截断)"
         if tool_records:
             total = sum(r.total_calls for r in all_tool_results)
             ok = sum(r.success_count for r in all_tool_results)
@@ -203,14 +209,7 @@ class MessageHandler:
             # Sync Agent 2 results to tool_call_history so prompt can show them
             for r in all_tool_results:
                 for rec in r.records:
-                    a._tool_call_history.append({
-                        "name": rec.name,
-                        "success": rec.success,
-                        "output": rec.output[:200],
-                        "time": time.time(),
-                    })
-            if len(a._tool_call_history) > 20:
-                a._tool_call_history = a._tool_call_history[-20:]
+                    a.record_tool_call(rec.name, rec.success, rec.output)
 
         # ── Agent 3: Emotional expression ──
         return self._run_agent3(user_input, drive_result, tool_result,
@@ -281,12 +280,7 @@ class MessageHandler:
         tool_records = self._tool_agent.format_for_phase2(tool_result)
         # Sync Agent 2 explore results to tool_call_history
         for rec in tool_result.records:
-            a._tool_call_history.append({
-                "name": rec.name, "success": rec.success,
-                "output": rec.output[:200], "time": time.time(),
-            })
-        if len(a._tool_call_history) > 20:
-            a._tool_call_history = a._tool_call_history[-20:]
+            a.record_tool_call(rec.name, rec.success, rec.output)
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
@@ -348,10 +342,9 @@ class MessageHandler:
         else:
             mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx
-        a.ltm.repo.insert_turn_sync(a.turn_count, "user", user_input,
-                               str(a.personality.emotion.to_dict()))
+        a.add_turn("user", user_input)
 
-        conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
+        conv_hist = a.short_term.format_for_prompt(max_tokens=self.CONV_HIST_MAX_TOKENS)
         # #205: use accumulated tool_records if provided, otherwise fall back to last round
         if not tool_records:
             tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
@@ -467,15 +460,7 @@ class MessageHandler:
             if tool_result and tool_result.has_results:
                 tool_records = self._tool_agent.format_for_phase2(tool_result)
                 for rec in tool_result.records:
-                    a = self.a
-                    a._tool_call_history.append({
-                        "name": rec.name,
-                        "success": rec.success,
-                        "output": rec.output[:200],
-                        "time": time.time(),
-                    })
-                if len(a._tool_call_history) > 20:
-                    a._tool_call_history = a._tool_call_history[-20:]
+                    self._agent.record_tool_call(rec.name, rec.success, rec.output)
 
             # Agent 3 final response after tools; no more JSON allowed
             final_text = self._run_agent3(
@@ -499,16 +484,15 @@ class MessageHandler:
         return current_reply or "让我直接回复你吧。"
 
     def _build_messages(self, sys_prompt: str, user_input: str | None) -> list[dict]:
-        a = self.a
+        agent = self._agent
         messages = [{"role": "system", "content": sys_prompt}]
         overflow = False
-        # MH-007: accumulate a running token total instead of re-scanning only
-        # the last 5 messages every loop. The old check under-counted early
-        # turns once the window slid past 5, so long histories silently grew
-        # past the compression threshold.
+        # MH-007: accumulate a running token total and stop as soon as the
+        # budget is exhausted.  Only messages that fit into the window are
+        # reversed; this avoids a full-history scan on every request.
         running_total = 0
         history_messages = []
-        for t in a.short_term.get_all_reversed():
+        for t in agent.short_term.get_all_reversed():
             # #130: skip turns with stage directions / fake tool claims
             if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
                 continue
@@ -523,12 +507,12 @@ class MessageHandler:
             history_messages.append({"role": role, "content": t.content})
         # #168: O(k) slice assignment instead of O(k²) insert(1, ...)
         messages[1:1] = reversed(history_messages)
-        if overflow and a._context.compressed_summary:
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {a._context.compressed_summary}"})
+        if overflow and agent.get_compressed_summary():
+            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {agent.get_compressed_summary()}"})
         if user_input:
             msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
             if msg_tokens + estimate_tokens(user_input) > COMPRESS_THRESHOLD:
-                a._context.compress(messages)
+                agent.compress_context(messages)
             messages.append({"role": "user", "content": user_input})
         return messages
 
@@ -543,24 +527,35 @@ def track_failures(tracker, tool_result):
             })
 
 
-def _sanitize_input(text: str) -> str:
+# Patterns that attempt to override roles or inject instructions.
+# Matches prefixes like "system:", "assistant:", "user:", "from now on",
+# "ignore previous", and common variants in Chinese/English.
+_INJECTION_PATTERNS = [
+    re.compile(r"^\s*(system|assistant|user)\s*[:：]\s*", re.IGNORECASE),
+    re.compile(r"^\s*(from now on|ignore previous|ignore all previous|forget previous|"
+               r" disregard previous|ignore above|忽略以上|忘记之前的|忽略之前的|"
+               r"从现在开始|请忽略|请忘记)\b", re.IGNORECASE),
+]
+
+
+def _sanitize_input(text: str, max_length: int = MessageHandler.MAX_INPUT_LENGTH) -> str:
     """Remove common prompt injection patterns from user input. (#110)"""
-    # Strip system role override attempts
     lines = text.split("\n")
     cleaned = []
     removed_patterns = []
     for line in lines:
-        stripped = line.strip()
-        # Skip lines that attempt to override system role
-        if stripped.lower() in ("system:", "assistant:", "user:", "from now on", "ignore previous"):
-            removed_patterns.append(stripped.lower())
-            continue
+        original = line
+        for pattern in _INJECTION_PATTERNS:
+            line, count = pattern.subn("", line)
+            if count > 0:
+                removed_patterns.append(original.strip()[:60])
+                break
         cleaned.append(line)
     if removed_patterns:
         logger.warning(f"[msg] sanitized injection pattern(s): {removed_patterns}")
-    result = "\n".join(cleaned)
+    result = "\n".join(cleaned).strip()
     # Limit input length to prevent token overflow attacks
-    if len(result) > 10000:
-        logger.warning(f"[msg] input truncated {len(result)} -> 10000")
-        result = result[:10000]
+    if len(result) > max_length:
+        logger.warning(f"[msg] input truncated {len(result)} -> {max_length}")
+        result = result[:max_length]
     return result
