@@ -100,7 +100,7 @@ class MusicPlayTool(Tool):
         return "music_play"
 
     def description(self) -> str:
-        return "播放音乐文件。支持指定歌曲名或路径，自动在音乐目录中查找。"
+        return "播放音乐文件。支持指定歌曲名或路径；也可以传 song='random' 随机播放一首。"
 
     def parameters_schema(self) -> dict:
         return {
@@ -108,7 +108,7 @@ class MusicPlayTool(Tool):
             "properties": {
                 "song": {
                     "type": "string",
-                    "description": "歌曲名称或相对于音乐目录的路径",
+                    "description": "歌曲名称、相对于音乐目录的路径，或 'random' 随机播放一首",
                 },
             },
             "required": ["song"],
@@ -128,25 +128,22 @@ class MusicPlayTool(Tool):
 
         logger.info(f"[tool] music_play song={song[:60]}")
 
+        # MU-005: support random playback
+        if song.lower() in ("random", "随机", "随便"):
+            all_songs = self._collect_songs(MUSIC_DIR)
+            if not all_songs:
+                return ToolResult.fail("音乐目录中没有可播放的歌曲")
+            import random
+            chosen = random.choice(all_songs)
+            return self._play(chosen, os.path.relpath(chosen, MUSIC_DIR))
+
         # Try exact path first
         exact = os.path.join(MUSIC_DIR, song)
         if os.path.isfile(exact) and _is_audio(exact):
             return self._play(exact, song)
 
         # Search for matching file
-        matches = []
-        files_scanned = 0
-        for root, _, fnames in os.walk(MUSIC_DIR):
-            for f in fnames:
-                files_scanned += 1
-                if files_scanned > 10_000:  # MU-002: guard against unbounded walk
-                    break
-                if _is_audio(f) and song.lower() in f.lower():
-                    matches.append(os.path.join(root, f))
-            if files_scanned > 10_000:
-                logger.warning(f"[music] file scan limit (10_000) reached")
-                break
-
+        matches = self._find_matches(song)
         if not matches:
             return ToolResult.fail(f"未找到歌曲: {song}")
 
@@ -158,6 +155,34 @@ class MusicPlayTool(Tool):
             )
 
         return self._play(matches[0], os.path.relpath(matches[0], MUSIC_DIR))
+
+    def _collect_songs(self, directory: str) -> list[str]:
+        """Collect all audio files under directory with a scan limit."""
+        songs = []
+        files_scanned = 0
+        for root, _, fnames in os.walk(directory):
+            for f in fnames:
+                files_scanned += 1
+                if files_scanned > 10_000:
+                    logger.warning("[music] file scan limit (10_000) reached")
+                    return songs
+                if _is_audio(f):
+                    songs.append(os.path.join(root, f))
+        return songs
+
+    def _find_matches(self, song: str) -> list[str]:
+        """Find audio files whose names contain the search term."""
+        matches = []
+        files_scanned = 0
+        for root, _, fnames in os.walk(MUSIC_DIR):
+            for f in fnames:
+                files_scanned += 1
+                if files_scanned > 10_000:  # MU-002: guard against unbounded walk
+                    logger.warning("[music] file scan limit (10_000) reached")
+                    return matches
+                if _is_audio(f) and song.lower() in f.lower():
+                    matches.append(os.path.join(root, f))
+        return matches
 
     def _play(self, filepath: str, display_name: str) -> ToolResult:
         # MU-004: resolve real path and verify extension before os.startfile
