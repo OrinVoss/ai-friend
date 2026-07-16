@@ -1,6 +1,6 @@
 # 重构进度总览
 
-> 最后更新：2026-07-14
+> 最后更新：2026-07-16
 
 ## 整体架构六层方案
 
@@ -48,12 +48,25 @@ Layer 6: Personality / Session / 记忆绑定
 - [x] 线索提取规则：`layer1-memory/memory-agent-clues.md`
 - [x] 交叉验证算法：`layer1-memory/memory-agent-verification.md`
 
-**待完成（二期）**：
+**待完成（二期，分阶段）**：
+
+Phase 1（下一步）：
+- [ ] `insights_v2` 表 + `InsightV2` 模型
+- [ ] 用 Insight 替换 Reflection（双写过渡）
 - [ ] Memory Agent P0 实现（answer / correct_fact + 测试）
-- [ ] 用 Insight 替换 Reflection
+- [ ] 开启 `use_observation_fact=true` 灰度验证 `facts_v2` 数据质量
+- [ ] 批量验证旧 Fact（最小版睡眠巩固）
+
+Phase 2：
+- [ ] Memory Agent 完整交叉验证（矛盾传播、分类型时间线、LLM 线索提取）
 - [ ] Retrieval 切换到 `facts_v2` + `insights_v2`
 - [ ] 完整 GC：merge / decay / obsolete / archive
-- [ ] 删除旧 `user_facts` / `reflections` 表
+- [ ] 旧数据迁移 + 删除旧表
+
+Phase 3（按需）：
+- [ ] 跨会话模式发现（完整睡眠巩固）
+- [ ] 语义重构 LLM 层
+- [ ] 证据链可视化（Web 端）
 
 **阻塞项**：无
 
@@ -168,7 +181,7 @@ Layer 6: Personality / Session / 记忆绑定
 2. 同一喜好重复 3 次后，确认 `verification_count >= 3` 且 `confidence` 上升
 3. 用户更正信息后，确认旧 FactV2 被标记为 `contradicted`
 4. 监控 Prompt Cache 实际命中率与 token 节省效果
-5. 根据验证结果，决定是否启动 Layer 1 二期（Memory Agent P0 或 Insight 替换 Reflection）
+5. 启动 Layer 1 Phase 1：`insights_v2` + Insight 替换 Reflection（双写过渡）、Memory Agent P0、批量验证旧 Fact
 
 ## 相关文档
 

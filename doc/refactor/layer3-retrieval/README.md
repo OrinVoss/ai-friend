@@ -14,7 +14,7 @@
 |------|------|
 | 所有 Agent 共享同一份 Context | Tool Agent 也读取人格/情绪/回忆 |
 | 检索只有相似度 | 「相似」不等于「相关」 |
-| 没有线索提取 | 直接拿整句查询去向量库 |
+| 没有时间感知 | 向量做不了时间算术，「上周聊了什么」无法按时间过滤 |
 | 没有交叉验证 | 返回什么就用什么，不判断对错 |
 | React 默认读 Reflection | Reflection 是结论，不是证据，容易自我强化 |
 
@@ -23,12 +23,9 @@
 ```
 Query
   ↓
-Query Analyzer（线索提取）
-  ├── 时间线索
-  ├── 实体线索
-  ├── 关系线索
-  ├── 情绪线索
-  └── 关键词
+Query Analyzer（查询编码 + 时间解析）
+  ├── 整句查询 → embedding 向量（召回主力，不做关键词匹配）
+  └── 时间线索（规则解析 → 绝对日期）
   ↓
 Parallel Retriever（多源并行检索）
   ├── facts_v2
@@ -75,12 +72,10 @@ Agent-specific Context
 ```python
 @dataclass
 class QueryClues:
-    time_ranges: list[tuple[str, str]]
-    entities: list[str]
-    relationships: list[str]
-    emotions: list[str]
-    keywords: list[str]
-    intent: Literal["recall", "verify", "compare", "summarize"]
+    raw_query: str
+    query_embedding: bytes | None = None      # 召回主力，不做关键词匹配
+    time_ranges: list[tuple[str, str]] = field(default_factory=list)
+    intent: Literal["recall", "verify", "compare", "summarize"] | None = None
 ```
 
 ### Parallel Retriever

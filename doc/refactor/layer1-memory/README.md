@@ -15,6 +15,11 @@
 - `README.md` — 本说明
 - `plan.md` — 完整实施方案
 - `progress.md` — 当前进度与待办
+- `insights-from-hms.md` — HMS 启发记录
+- `memory-agent.md` — Memory Agent 设计（记忆智能体）
+- `memory-agent-clues.md` — 线索提取（向量召回）
+- `memory-agent-verification.md` — 交叉验证算法
+- `sleep-cycle.md` — 睡眠循环：系统内部工作的统一窗口
 
 ## 配置
 

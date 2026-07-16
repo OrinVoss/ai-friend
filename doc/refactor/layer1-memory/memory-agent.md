@@ -25,7 +25,22 @@ Memory Agent 是一个独立的智能体，负责：
 2. **交叉验证**：检查多条证据是否一致，标记矛盾或过时信息
 3. **重构回答**：组装最终结论，附带置信度和证据来源
 
-它不是 LLM Agent，而是一个**确定性推理组件**（可以可选地调用 LLM 做最终语义重构）。
+Memory Agent 本体是**确定性推理组件**，不调用 LLM。职责边界显式拆成两层：
+
+```
+MemoryAgent（确定性，可单测）
+  ├── _extract_clues()   → 结构化线索
+  ├── _retrieve()        → 证据列表
+  ├── _cross_verify()    → 验证后的证据（含置信度）
+  └── _reconstruct()     → 结构化 MemoryAnswer
+
+语义重构层（可选，独立 LLM 调用，不属于 Memory Agent 本体）
+  MemoryAnswer → LLM → 自然语言回复
+```
+
+- 确定性部分输入输出可预测，可单元测试
+- LLM 只在最后一步介入，且**可选**：Agent 3 可以直接消费 `MemoryAnswer` 的结构化字段（answer / confidence / evidences），不必经过 LLM 重构
+- 避免「确定性组件悄悄变成 LLM Agent」，语义重构策略也可独立替换
 
 ---
 
@@ -35,12 +50,10 @@ Memory Agent 是一个独立的智能体，负责：
 用户问题 / Agent 1 请求
     ↓
 Memory Agent
-    ├── 1. 线索提取（Clue Extraction）
-    │      ├── 时间线索：今天/昨天/上周/2026年7月
-    │      ├── 实体线索：人名、地点、物品、事件
-    │      ├── 关系线索：我和用户、用户和他人
-    │      ├── 情绪线索：开心/难过/生气/焦虑
-    │      └── 关键词：直接搜索词
+    ├── 1. 查询编码（Query Encoding）
+    │      ├── 整句查询 → embedding 向量（召回主力，本地向量模型）
+    │      ├── 时间解析：仅时间词用规则，转绝对日期范围
+    │      └── 不做关键词/实体提取（由向量隐式处理）
     ├── 2. 并行检索（Parallel Retrieval）
     │      ├── observations：原始存档，找直接证据
     │      ├── facts_v2：经验证事实，找结论
@@ -68,13 +81,11 @@ Memory Agent
 ```python
 @dataclass
 class MemoryClues:
-    """从查询中提取的线索。"""
-    time_ranges: list[tuple[str, str]]        # (start, end) ISO format
-    entities: list[str]                       # 人名、地点、物品
-    relationships: list[str]                  # 关系描述
-    emotions: list[str]                       # 情绪标签
-    keywords: list[str]                       # 直接搜索词
+    """从查询中提取的线索。召回以向量为主，不做关键词匹配。"""
     raw_query: str                            # 原始查询
+    query_embedding: bytes | None = None      # 整句查询向量（召回主力）
+    time_ranges: list[tuple[str, str]] = field(default_factory=list)  # 绝对日期范围
+    intent: str | None = None                 # 可选，向量锚点分类
 
 
 @dataclass
@@ -127,10 +138,8 @@ class MemoryAgent:
         fact = await self.ltm.repo.get_fact_v2_by_id(fact_id)
         if not fact:
             return MemoryAnswer(answer="Fact not found", confidence=0.0)
-        clues = MemoryClues(
-            time_ranges=[], entities=[fact.fact_key], relationships=[],
-            emotions=[], keywords=[fact.fact_value], raw_query=fact.fact_value,
-        )
+        clues = MemoryClues(raw_query=f"{fact.fact_key} {fact.fact_value}")
+        clues.query_embedding = await self._encode(clues.raw_query)
         evidences = await self._retrieve_parallel(clues, max_evidence=10)
         verified = await self._cross_verify(evidences, target_fact=fact)
         return self._reconstruct_fact_verification(fact, verified)
@@ -138,16 +147,20 @@ class MemoryAgent:
     async def correct_fact(self, old_fact_id: int, new_value: str,
                            source_turn: int) -> FactV2:
         """用户纠正某个 Fact。"""
-        # 1. 创建 Observation（不可变 archive）
+        # 1. 先取旧 Fact，并创建 Observation（不可变 archive）
+        # Observation 内容保留「旧值 → 新值」完整上下文：
+        # 一期只做简单值替换，但未来支持复杂纠正（实体归属变化、
+        # 「我当时说的是气话」这类置信度修正）时，需要原始纠正语境。
+        old_fact = await self.ltm.repo.get_fact_v2_by_id(old_fact_id)
+        old_value = old_fact.fact_value if old_fact else "unknown"
         obs = await self.lifecycle.observe(
-            content=f"用户纠正：{new_value}",
+            content=f"用户纠正：{old_value} → {new_value}",
             source_turn=source_turn,
             created_by="user_correction",
         )
         # 2. 标记旧 Fact 为 contradicted
         await self.lifecycle.contradict_fact(old_fact_id, reason="user correction")
         # 3. 创建新 Fact
-        old_fact = await self.ltm.repo.get_fact_v2_by_id(old_fact_id)
         new_fact = await self.lifecycle.promote_fact(
             observation_ids=[obs.id],
             category=old_fact.category if old_fact else "preference",
@@ -164,7 +177,7 @@ class MemoryAgent:
     # ── 内部方法 ──
 
     async def _extract_clues(self, query: str) -> MemoryClues:
-        """从查询中提取线索。一期可用正则/关键词，二期可用 LLM。"""
+        """编码查询向量并解析时间范围。不做关键词匹配，召回全靠向量。"""
         pass
 
     async def _retrieve_parallel(self, clues: MemoryClues,
@@ -233,33 +246,59 @@ if user_says_correction:
 | `InnerDriveAgent` | 调用 Memory Agent 获取 context_summary |
 | `Agent 3` | 调用 Memory Agent 回答用户关于过去的问题 |
 
+### 7.1 集成注意事项
+
+- **Agent 3 Prompt 需要理解置信度**：`MemoryAnswer` 带 `confidence` 和 `contradictions`，Agent 3 的 Prompt 模板要显式处理——低置信度记忆标为「待确认」，矛盾信息显式展示，而不是当作确定事实
+- **`InnerDriveAgent.assess()` 改造**：用 `memory_agent.answer()` 替代 `retriever.get_context()`，把 `answer` 字段写入 `context_summary` 传给 Agent 3。具体替换点：
+
+  ```python
+  # 现状（core/inner_drive.py）
+  memory_context = await retriever.retrieve_for_query(user_input)  # 相似度 TopK，不判断对错
+
+  # 替换后
+  memory_answer = await memory_agent.answer(user_input)
+  memory_context = memory_answer.answer  # 带置信度和证据链
+  ```
+
+  注意这一个替换点**同时升级两个消费方**：Agent 1 自己的决策依据，和经 `context_summary` 传给 Agent 3 的记忆摘要（#160 的复用链路），不需要改 Agent 3 的调用侧。
+
+  灰度策略：加配置开关 `use_memory_agent`（默认 false），与 `use_observation_fact` 同款模式——新旧路径并存，实测对比召回质量后再切默认。
+- **复用 `FactChecker` 时的性能**：`_cross_verify()` 调用 `is_contradiction()` 时应复用已有 embedding，不产生新的 embedding 计算；批量矛盾检测做缓存，避免 O(n²) 次调用
+- **Observation 不可变性**：`Repository` 只提供 `observations` 的 INSERT/SELECT，不提供 UPDATE 接口（vough 封存）
+
 ---
 
 ## 8. 实现优先级
 
-### P0：基础版本（1~2 天）
+### P0：基础版本
 
 - [ ] `MemoryClues` / `MemoryEvidence` / `MemoryAnswer` 数据模型
-- [ ] `MemoryAgent.answer()`：关键词检索 + 简单交叉验证
+- [ ] `MemoryAgent.answer()`：向量检索 + 简单交叉验证
 - [ ] `MemoryAgent.correct_fact()`：用户纠正通道
 - [ ] `tests/test_memory_agent.py`
 
-### P1：交叉验证增强（2~3 天）
+### P1：交叉验证增强 + 最小版睡眠巩固
 
-- [ ] `_extract_clues()`：时间、实体、关系提取
-- [ ] `_cross_verify()`：时间线检查、矛盾检测、stale 检测
+- [ ] `_extract_clues()`：时间解析（统一为绝对日期范围）+ 意图向量锚点（可选）
+- [ ] `_cross_verify()`：分类型时间线检查、矛盾检测、stale 检测
 - [ ] `verify_fact()`：主动验证旧 Fact
+- [ ] **批量验证（最小版睡眠式巩固）**：低负载时取最近未验证的 Fact，批量跑 `verify_fact()`，低置信度的触发 decay——只复用已有能力，先解决「旧 Fact 无人验证」的核心问题
 
-### P2：语义重构（2~3 天）
+### P2：完整交叉验证与 GC
 
 - [ ] 集成 embedding 做语义相似度验证
-- [ ] 可选 LLM 调用：把验证后的证据交给 LLM 生成自然语言答案
+- [ ] 矛盾向上传播：Fact 被推翻时，依赖它的 Insight 标记为可疑
+- [ ] 完整 GC：merge / decay / obsolete / archive
+- [ ] `_extract_clues()` LLM 版本
+
+### P3：完整睡眠巩固与可视化（优先级最低，按需）
+
+- [ ] 模式提炼：从 Observation 聚类中发现新模式（周期触发）
+- [ ] 跨会话模式发现
+- [ ] 语义重构 LLM 层（Agent 3 可直接用 `MemoryAnswer.answer`，这层是锦上添花）
 - [ ] 证据链可视化（Web 端展示）
 
-### P3：睡眠式巩固（Layer 1 二期）
-
-- [ ] 在 `MemoryConsolidator` 中调用 `MemoryAgent.verify_fact()` 做批量验证
-- [ ] 基于验证结果自动 decay / obsolete 旧 Fact
+> 说明：原「语义重构」从 P2 降为 P3。Agent 3 直接消费结构化 `MemoryAnswer` 即可，LLM 重构不是核心路径。
 
 ---
 

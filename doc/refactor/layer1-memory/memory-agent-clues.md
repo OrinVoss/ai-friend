@@ -1,146 +1,119 @@
-# Memory Agent：线索提取规则
+# Memory Agent：线索提取（向量召回）
 
-> 目标：把用户/Agent 的自然语言查询，拆解为结构化的 `MemoryClues`，供并行检索使用。
-
----
-
-## 1. 线索类型
-
-| 线索类型 | 说明 | 示例 |
-|----------|------|------|
-| `time_ranges` | 时间范围 | 今天、昨天、上周、2026-07-01 到 2026-07-14 |
-| `entities` | 人名、地点、物品、事件 | 小星、外滩、Teeth、月光奏鸣曲 |
-| `relationships` | 关系描述 | 我和用户、用户和女朋友、用户和老板 |
-| `emotions` | 情绪标签 | 开心、难过、生气、焦虑、无聊 |
-| `keywords` | 直接搜索词 | 火锅、披萨、编程、音乐 |
-| `intent` | 查询意图 | recall / verify / compare / summarize |
+> 目标：把用户/Agent 的自然语言查询编码为向量 + 最小结构化线索，供并行检索使用。
+> 核心原则：**召回全靠向量模型，不做关键词匹配。**
 
 ---
 
-## 2. 提取规则（一期：规则 + 正则）
+## 1. 设计原则
 
-### 2.1 时间线索
+- 整句查询直接 embedding，向量相似度负责语义召回——「我喜欢吃什么」自然命中「火锅」，不需要任何关键词表、停用词表、分词
+- 只有「时间」保留规则解析：向量做不了时间算术（「上周」是相对于查询当天的），这是结构化问题，不是语义问题
+- 不提取实体、不提取关键词、不做停用词过滤——这些都由向量隐式处理
+- 本地向量模型（Qwen3.5-0.8B）编码一次几毫秒、零 API 成本，每条查询只编码一次
+
+---
+
+## 2. 线索组成
+
+| 线索 | 提取方式 | 说明 |
+|------|----------|------|
+| `query_embedding` | 向量模型整句编码 | 召回主力 |
+| `time_ranges` | 正则解析 → 绝对日期 | 唯一保留的规则线索 |
+| `intent`（可选） | 与意图锚点句做向量比对 | 见 2.3 |
+
+```python
+@dataclass
+class MemoryClues:
+    raw_query: str                              # 原始查询
+    query_embedding: bytes | None = None        # 整句查询向量（召回主力）
+    time_ranges: list[tuple[str, str]] = field(default_factory=list)  # 绝对日期范围
+    intent: str | None = None                   # 可选，向量锚点分类结果
+```
+
+### 2.1 查询向量
+
+一期直接用整句编码，单次调用。不拆子查询、不做多向量扩展——先验证单向量召回质量，不够再扩。
+
+### 2.2 时间解析（保留规则）
 
 ```python
 TIME_PATTERNS = [
-    (r"今天", ("today", "today")),
-    (r"昨天", ("yesterday", "yesterday")),
-    (r"前天", ("-2 days", "-2 days")),
-    (r"上周|上星期", ("-7 days", "-1 days")),
-    (r"这周|本周", ("monday this week", "today")),
-    (r"上个月", ("-30 days", "-1 days")),
-    (r"这个月|本月", ("-30 days", "today")),
+    (r"今天", "today"),
+    (r"昨天", "-1d"),
+    (r"前天", "-2d"),
+    (r"上周|上星期", "last_week"),
+    (r"这周|本周", "this_week"),
+    (r"上个月", "last_month"),
+    (r"这个月|本月", "this_month"),
     (r"(\d{4})年(\d{1,2})月", "custom"),
     (r"(\d{1,2})月(\d{1,2})日", "custom"),
 ]
 ```
 
-一期只提取明确的相对时间词，不处理复杂自然语言时间。
+**所有相对时间词在提取时立即解析为绝对日期范围**（`time_ranges` 里只存 ISO 日期，不存「昨天」这种相对词），避免跨会话时语义漂移：
 
-### 2.2 实体线索
+| 相对时间词 | 解析结果（以查询当天为基准） |
+|-----------|------------------------------|
+| 昨天 | `[today-1, today-1]` |
+| 上周/上星期 | `[上周一, 上周日]`（自然周） |
+| 上个月 | `[上月1号, 上月末]`（自然月） |
+| 这周/本月 | `[周期起点, today]` |
 
-```python
-ENTITY_PATTERNS = [
-    # 人名（常见中文人名，2-3字）
-    (r"[\u4e00-\u9fff]{2,3}", "person"),
-    # 英文歌名/专辑名（首字母大写或全大写）
-    (r"\b[A-Z][a-zA-Z0-9\s&'-]{2,30}\b", "entity"),
-    # 地点（常见后缀）
-    (r"[\u4e00-\u9fff]{2,10}(?:外滩|公园|公司|学校|医院|餐厅|电影院)", "location"),
-]
-```
+「上周」这类词存在歧义（自然周 vs 过去 7 天），一期统一按自然周期解析，并在 `MemoryClues` 中保留 `raw_query`，以便二期修正。
 
-注意：中文人名误报率高，一期只作为弱线索。
+### 2.3 意图判断（向量锚点，可选）
 
-### 2.3 关系线索
+不用正则。准备 4 组锚点句，启动时编码缓存；查询向量与锚点逐一比对，取最近且超过阈值的意图：
 
 ```python
-RELATIONSHIP_PATTERNS = [
-    (r"我和(.+)", "user_and_other"),
-    (r"(.+)和(.+)", "other_and_other"),
-    (r"我(.+)你", "user_and_agent"),
-    (r"你(.+)我", "agent_and_user"),
-]
-```
-
-### 2.4 情绪线索
-
-```python
-EMOTION_KEYWORDS = {
-    "joy": ["开心", "高兴", "快乐", "兴奋", "爽"],
-    "sad": ["难过", "伤心", "沮丧", "低落", "郁闷"],
-    "angry": ["生气", "愤怒", "气死", "烦", "讨厌"],
-    "anxious": ["焦虑", "紧张", "担心", "害怕", "慌"],
-    "bored": ["无聊", "没意思", "闲", "空虚"],
+INTENT_ANCHORS = {
+    "recall":    ["还记得吗", "我们上次聊了什么", "之前发生过什么"],
+    "verify":    ["是不是这样", "你确定吗", "我说的对吗"],
+    "compare":   ["有什么区别", "哪个更好", "比较一下"],
+    "summarize": ["总结一下", "讲讲这段时间", "概括一下"],
 }
+# similarity(query, anchor_group) = max over anchors
+# 阈值（如 0.65）以下视为无明确意图，intent=None
 ```
 
-### 2.5 关键词线索
-
-剩下的名词性词汇直接作为 keywords。可以用简单的停用词过滤：
-
-```python
-STOP_WORDS = {"的", "了", "在", "是", "我", "你", "他", "她", "它",
-              "我们", "你们", "他们", "这", "那", "什么", "怎么", "为什么"}
-```
-
-### 2.6 意图判断
-
-```python
-INTENT_PATTERNS = [
-    (r"还记得|记得吗|上次|之前", "recall"),
-    (r"是不是|对吗|真的吗|确定吗", "verify"),
-    (r"比较|对比|哪个更|区别", "compare"),
-    (r"总结|概括|说说|讲讲", "summarize"),
-]
-```
+意图只影响验证严格度和回答组织方式，不影响召回，误判代价低。
 
 ---
 
 ## 3. 提取流程
 
 ```python
-def extract_clues(query: str) -> MemoryClues:
+async def extract_clues(query: str) -> MemoryClues:
     clues = MemoryClues(raw_query=query)
-    
-    # 1. 时间
-    for pattern, time_range in TIME_PATTERNS:
-        if re.search(pattern, query):
-            clues.time_ranges.append(parse_time_range(time_range, query))
-    
-    # 2. 实体
-    for pattern, entity_type in ENTITY_PATTERNS:
-        for match in re.finditer(pattern, query):
-            clues.entities.append(match.group(0))
-    
-    # 3. 关系
-    for pattern, rel_type in RELATIONSHIP_PATTERNS:
-        if re.search(pattern, query):
-            clues.relationships.append(rel_type)
-    
-    # 4. 情绪
-    for emotion, keywords in EMOTION_KEYWORDS.items():
-        if any(kw in query for kw in keywords):
-            clues.emotions.append(emotion)
-    
-    # 5. 关键词
-    words = tokenize(query)
-    clues.keywords = [w for w in words if w not in STOP_WORDS and len(w) > 1]
-    
-    # 6. 意图
-    for pattern, intent in INTENT_PATTERNS:
-        if re.search(pattern, query):
-            clues.intent = intent
-            break
-    
+    clues.query_embedding = await embed(query)       # 唯一的语义提取步骤
+    clues.time_ranges = parse_time_ranges(query)     # 仅时间用规则
     return clues
 ```
 
 ---
 
-## 4. 二期：LLM 提取
+## 4. 检索时如何使用
 
-当规则提取不足时，可以调用 LLM 做结构化提取：
+- **向量召回**：`query_embedding` 并行检索 `observations` / `facts_v2` / `experiences`（各表都有 embedding 列），按余弦相似度取 TopK
+- **时间过滤**：若 `time_ranges` 非空，对召回结果按 `created_at` 做范围过滤（post-filter，不参与召回打分）
+- **不做任何 SQL LIKE / 关键词过滤**
+
+---
+
+## 5. 为什么实体 / 情绪 / 关系不单独提取
+
+- **实体**：「Teeth 是谁唱的」整句编码后，向量检索自然命中含 Teeth 的记忆；硬提取实体反而引入误报（中文人名正则会把「开心」「今天」当成人名）
+- **情绪**：「我昨天不开心」的情绪语义已包含在整句向量里；若 `experiences` 带情绪标签，二期可加情绪锚点向量做过滤
+- **关系**：单用户单角色场景下关系线索区分度低，一期忽略
+
+关键原则：结构化提取每多一步，就多一处误报漏报的源头。向量召回把「理解」交给模型，规则只处理它确实做不了的事（时间算术）。
+
+---
+
+## 6. 二期：LLM 提取（可选，默认不启用）
+
+仅当向量召回质量实测不足时才引入。调用 LLM 做结构化提取：
 
 ```python
 CLUE_EXTRACTION_PROMPT = """从下面这句话中提取记忆检索线索。
@@ -148,30 +121,28 @@ CLUE_EXTRACTION_PROMPT = """从下面这句话中提取记忆检索线索。
 输出 JSON：
 {
   "time_ranges": [["2026-07-01", "2026-07-14"]],
-  "entities": ["Teeth", "外滩"],
-  "relationships": ["user_and_agent"],
-  "emotions": ["joy"],
-  "keywords": ["音乐", "照片"],
+  "queries": ["用户喜欢的音乐", "用户去过的地点"],
   "intent": "recall"
 }
 
+queries 用于多向量扩展：把原始查询改写成 1~3 个不同角度的子查询，分别编码召回。
 只输出 JSON，不要其他内容。
 
 查询：{query}
 """
 ```
 
-使用 `response_format={"type": "json_object"}` 约束输出。
+使用 `response_format={"type": "json_object"}` 约束输出。注意成本——每次记忆查询多一次 LLM 调用，与「记忆查询要便宜」的原则冲突，所以默认不启用。
 
 ---
 
-## 5. 测试用例
+## 7. 测试用例
 
-| 输入 | 期望提取结果 |
-|------|-------------|
-| 「我们上次聊了什么」 | intent=recall, time_ranges=[最近], keywords=[] |
-| 「我最喜欢吃什么」 | intent=recall, keywords=["喜欢", "吃"] |
-| 「Teeth 是谁唱的」 | intent=recall, entities=["Teeth"], keywords=["唱"] |
-| 「我昨天不开心」 | intent=recall, time_ranges=[昨天], emotions=["sad"] |
-| 「我和女朋友吵架了」 | intent=recall, relationships=["user_and_other"], emotions=["angry"] |
-| 「2026年7月我们去哪了」 | intent=recall, time_ranges=[2026-07-01, 2026-07-31] |
+| 输入 | 期望结果 |
+|------|----------|
+| 「我们上次聊了什么」 | 向量召回近期高相似记忆，intent≈recall |
+| 「我最喜欢吃什么」 | 命中 preference 类 facts_v2，无需关键词表 |
+| 「Teeth 是谁唱的」 | 命中含 Teeth 的记忆，无需实体提取 |
+| 「我昨天不开心」 | time_ranges=[昨天的绝对日期]，向量命中情绪相关记忆 |
+| 「2026年7月我们去哪了」 | time_ranges=[2026-07-01, 2026-07-31]，时间 post-filter 生效 |
+| 「上周二我和谁吵架了」 | time_ranges 命中上周范围，向量召回冲突相关记忆 |

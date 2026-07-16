@@ -9,11 +9,16 @@
 | 维度 | 说明 | 权重 |
 |------|------|------|
 | `consistency` | 多条证据是否相互一致 | 0.30 |
-| `timeline` | 时间线是否吻合 | 0.20 |
+| `verification_count` | Fact 被验证次数 | 0.20 |
 | `source_quality` | 证据来源质量（Fact > Observation > Experience） | 0.20 |
 | `freshness` | 证据是否过时 | 0.15 |
-| `verification_count` | Fact 被验证次数 | 0.10 |
+| `timeline` | 时间线是否吻合 | 0.10 |
 | `contradiction` | 是否存在矛盾 | 0.05 |
+
+权重设计理由：
+
+- `verification_count` 是所有维度中**最可靠的信号**——它代表这条 Fact 被独立证据反复确认的次数，权重给到 0.20
+- `timeline` 只表示「没有明显时间矛盾」，上限不高，降为 0.10；且对偏好/身份/关系类事实，长时间跨度反而是稳定性的佐证（见 3.2）
 
 ---
 
@@ -22,7 +27,7 @@
 ```
 evidences
   ↓
-按主题/实体分组
+按主题聚类（embedding 余弦相似度）
   ↓
 对每组证据做以下检查：
   ├── 一致性检查：同一主题的证据是否指向同一结论？
@@ -48,7 +53,7 @@ def check_consistency(evidences: list[MemoryEvidence]) -> float:
     if len(evidences) <= 1:
         return 1.0
     
-    # 按主题分组（基于 keywords / entities 的相似度）
+    # 按主题分组（基于证据 embedding 的余弦相似度）
     groups = group_by_topic(evidences)
     consistent_groups = 0
     
@@ -61,22 +66,34 @@ def check_consistency(evidences: list[MemoryEvidence]) -> float:
     return consistent_groups / len(groups) if groups else 0.5
 ```
 
-### 3.2 时间线检查
+### 3.2 时间线检查（分事实类型）
+
+时间跨度对置信度的影响**取决于事实类型**，不能一刀切：
+
+- **事件类**（event）：跨度越大，证据链越散，置信度越低
+- **偏好/身份/关系类**（preference / identity / relationship）：跨度几乎不影响置信度——「用户住在北京」横跨 365 天的证据反而佐证稳定性
 
 ```python
-def check_timeline(evidences: list[MemoryEvidence]) -> float:
+# 稳定型分类：长时间跨度是稳定性的佐证，不是减分项
+STABLE_CATEGORIES = {"preference", "identity", "relationship"}
+
+def check_timeline(evidences: list[MemoryEvidence],
+                   category: str = "event") -> float:
     """时间线是否吻合。返回 0.0 ~ 1.0。"""
     dated = [e for e in evidences if e.timestamp]
     if len(dated) <= 1:
         return 1.0
     
     sorted_evidences = sorted(dated, key=lambda e: e.timestamp)
-    # 检查时间顺序是否合理（比如不应该先看到结果后看到原因）
-    # 一期简单实现：时间跨度越大，置信度越低
     first = datetime.fromisoformat(sorted_evidences[0].timestamp)
     last = datetime.fromisoformat(sorted_evidences[-1].timestamp)
     days = (last - first).days
     
+    if category in STABLE_CATEGORIES:
+        # 稳定型事实：跨度大 → 轻微加分（封顶 1.0）
+        return min(0.8 + days / 365 * 0.2, 1.0)
+    
+    # 事件类事实：跨度越大，置信度越低
     if days <= 1:
         return 1.0
     elif days <= 7:
@@ -144,12 +161,13 @@ def score_source_quality(evidence: MemoryEvidence) -> float:
 ### 3.6 综合置信度
 
 ```python
-def compute_confidence(evidences: list[MemoryEvidence]) -> float:
+def compute_confidence(evidences: list[MemoryEvidence],
+                       category: str = "event") -> float:
     if not evidences:
         return 0.0
     
     consistency = check_consistency(evidences)
-    timeline = check_timeline(evidences)
+    timeline = check_timeline(evidences, category=category)
     freshness = check_freshness(evidences)
     avg_source_quality = sum(score_source_quality(e) for e in evidences) / len(evidences)
     avg_verification = sum(
@@ -162,15 +180,31 @@ def compute_confidence(evidences: list[MemoryEvidence]) -> float:
     
     confidence = (
         consistency * 0.30 +
-        timeline * 0.20 +
+        verification_score * 0.20 +
         avg_source_quality * 0.20 +
         freshness * 0.15 +
-        verification_score * 0.10 +
+        timeline * 0.10 +
         contradiction_penalty * 0.05
     )
     
     return round(confidence, 2)
 ```
+
+### 3.7 矛盾向上传播（二期）
+
+当一条 Fact 被新证据推翻（`correct_fact` 或 `contradict_fact`）时，不能只标记这条 Fact：
+
+```
+Fact A 被标记为 contradicted
+  ↓
+查询 insights_v2 中 evidence_fact_ids 包含 A 的所有 Insight
+  ↓
+这些 Insight 标记为可疑（needs_more_evidence=true，confidence 降权）
+  ↓
+等待下次验证时重新评估
+```
+
+理由：Insight 是从 Fact 推理出来的，前提倒了，结论必须连带质疑。否则旧 Insight 会继续作为「有效记忆」被检索出来。
 
 ---
 

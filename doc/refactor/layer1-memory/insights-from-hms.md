@@ -56,7 +56,7 @@ HMS 的核心：像全息底片一样，用碎片化线索还原完整经历。
 ```
 Query
   ↓
-提取线索（时间、实体、关系、情绪）
+提取线索（整句向量 + 时间解析，不做关键词匹配）
   ↓
 并行检索：facts_v2 + observations + experiences + relationship
   ↓
@@ -152,9 +152,19 @@ class MemoryRetriever:
 - `importance < 0.3` 且 `freshness < 0.2` 的 Fact 直接标记 `obsolete`
 - Observation 超过 30 天且未被任何 Fact 引用 → archive
 
-### P3：睡眠式巩固（Layer 1 二期）
+### P3：睡眠式巩固（分层实施）
 
-在 `MemoryConsolidator` 中新增 `_replay_and_consolidate()`：
+「睡眠式巩固」不是一个功能，而是三种不同难度的能力，分开实施：
+
+| 能力 | 触发时机 | 实现难度 | 优先级 |
+|------|----------|----------|--------|
+| 批量验证旧 Fact | 低负载时异步执行 | 低（复用 `MemoryAgent.verify_fact()`） | P1（随 Memory Agent 落地） |
+| 从 Observation 提炼新模式 | 周期触发（每 N 轮） | 中（聚类 + LLM） | P2 |
+| 跨会话模式发现 | 每日/每周定时 | 高 | P3 |
+
+**最小版（先做）**：取最近未验证的 Fact，批量 `verify_fact()`，低置信度的触发 decay。只复用已有能力，先解决「旧 Fact 无人验证」的核心问题。
+
+**完整版（后做）**：在 `MemoryConsolidator` 中新增 `_replay_and_consolidate()`：
 
 1. 取最近 50 条 Observation
 2. 按主题聚类（可用 embedding）

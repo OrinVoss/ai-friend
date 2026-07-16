@@ -7,6 +7,7 @@
 ```
 doc/refactor/
 ├── README.md                 # 本说明
+├── self-system.md            # 【入口】自我系统：统一人格架构（六层方案的总装图）
 ├── progress.md               # 当前重构进度总览
 ├── layer1-memory/            # Layer 1: Memory 生命周期重构
 │   ├── README.md
@@ -16,7 +17,7 @@ doc/refactor/
 │   └── README.md
 ├── layer3-retrieval/         # Layer 3: 多阶段 Retrieval
 │   └── README.md
-├── layer4-agent/             # Layer 4: Agent Runtime 解耦
+├── layer4-agent/             # Layer 4: Agent Runtime 解耦（含独处循环三零件文档）
 │   └── README.md
 ├── layer5-tool/              # Layer 5: Tool Agent 精简
 │   └── README.md
@@ -24,6 +25,8 @@ doc/refactor/
 │   └── README.md
 └── decisions/                # 重要技术决策记录
 ```
+
+**先读 `self-system.md`**：六层是建设顺序，自我系统是运行形态。理解整体应该长什么样，再看各层怎么建。
 
 ## 当前总览
 

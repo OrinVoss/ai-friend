@@ -49,6 +49,12 @@ class ToolExecutionResult:
 - [ ] 依赖注入：`MessageHandler` 直接构造 `InnerDriveAgent` / `ToolAgent`，测试不便
 - [ ] `_sanitize_input` 过于简单，无法防御变体注入
 
+## 设计文档
+
+- `proactive-think-loop.md` — Agent 1 主动沉思循环设计（待实现）：主动路径加有界思考循环，响应路径不动
+- `inner-drive-state.md` — 内驱状态设计（待实现）：Agent 的「内心世界」，挂念/好奇/反思/计划/灵感的类型化生命周期管理
+- `solo-activity.md` — 独处活动与内化（待实现）：explore 等独处活动结束后生成第一人称感悟，沉淀为记忆/谈资/情绪
+
 ## 依赖
 
 - Layer 3 确定不同 Agent 的 Context 边界后，状态机与注册表隔离才能更彻底
