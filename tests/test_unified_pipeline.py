@@ -116,5 +116,33 @@ class TestCliFrontend(unittest.TestCase):
         ui.display.respond.assert_called_once_with("zzz...ZZZ...💤", prefix="小星")
 
 
+class TestCliPrompt(unittest.TestCase):
+    def test_prompt_printed_once_per_wait(self):
+        """Field regression 2026-07-16: the input prompt must be printed once
+        per wait, not on every 0.1s poll iteration."""
+        from unittest.mock import patch
+        from core.cli_controller import CliController
+
+        a = MagicMock()
+        a.personality.config.name = "Luna"
+        a.personality.config.first_run_greeting = ""
+        a._running = True
+        a.turn_count = 0
+        ui = MagicMock()
+        a.ui = ui
+        # no input for 3 polls, then Ctrl-C to exit
+        ui.reader.read_line.side_effect = [None, None, None, KeyboardInterrupt]
+        ctrl = CliController(a)
+        with patch("core.runtime_driver.RuntimeDriver") as mock_driver, \
+                patch("builtins.print") as mock_print:
+            ctrl.run()
+
+        prompt_calls = [c for c in mock_print.call_args_list
+                        if c.args and "用户输入" in str(c.args[0])]
+        self.assertEqual(len(prompt_calls), 1)
+        mock_driver.return_value.start_in_thread.assert_called_once()
+        mock_driver.return_value.stop.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1353,6 +1353,7 @@ Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请
 ### 状态
 
 - **已修复（2026-07-14）**：午睡/醒来消息现在正确持久化，刷新页面后不会丢失或错位。
+- **根因补刀（2026-07-16）**：2026-07-14 的修复把写入路径统一到了 `Agent.add_turn()`，但 `add_turn` 里 `metadata.get("is_tool_claim")` 对 `{"sleep": True}` 这类不带该键的 metadata 返回 `None`，`insert_turn` 的 `int(is_tool_claim)` 直接 `TypeError: int(None)`——睡眠消息仍然写不进去，且在 RuntimeDriver 里炸掉整个 tick（日志 `claim=None` + `tick error`）。已改为 `bool(metadata.get("is_tool_claim"))`，见 `changes/2026-07-16-fix-sleep-persist-root-cause-cli-spam.md`。
 - 相关提交：`843c25e`（提交信息中的 `#156` 为误标，实际修复的是 sleep persistence）
 - 相关 changes：`changes/2026-07-14-fix-sleep-message-persistence.md`
 

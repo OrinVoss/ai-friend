@@ -113,7 +113,7 @@ class RuntimeDriver:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning(f"[runtime] tick error: {e}")
+                logger.warning(f"[runtime] tick error: {e}", exc_info=True)
                 await asyncio.sleep(self._tick_error)
 
     # ── Hosting ──

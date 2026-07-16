@@ -43,15 +43,27 @@ class CliController:
         engine = ConversationEngine(a)
         frontend = _CliFrontend(a.ui, a.personality.config.name)
         driver = RuntimeDriver(engine, frontend)
+        # Restore turn counter so restarts don't reset it (#RS-001 parity
+        # with Web; also keeps conversation_turns.turn_number monotonic).
+        try:
+            from core.async_utils import run_async
+            a.turn_count = run_async(a.ltm.repo.get_max_turn_number())
+        except Exception as e:
+            logger.warning(f"[cli] restore turn_count failed: {e}")
         driver.start_in_thread()
+        prompt_shown = False
         try:
             while a._running:
-                if a.ui:
+                # Print the prompt once per wait — reprinting on every poll
+                # iteration floods the terminal (field report 2026-07-16).
+                if a.ui and not prompt_shown:
                     print("\033[33m用户输入: \033[0m", end="", flush=True)
+                    prompt_shown = True
                 user_input = a.ui.reader.read_line() if a.ui else None
                 if user_input is None:
                     time.sleep(0.1)
                     continue
+                prompt_shown = False
                 if user_input.startswith("/"):
                     self._handle_command(user_input)
                     continue

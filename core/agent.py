@@ -108,10 +108,13 @@ class Agent:
     def add_turn(self, role: str, content: str, metadata: dict | None = None) -> None:
         """Persist a conversation turn to short-term memory and the repository."""
         self.short_term.add_turn(role, content, metadata=metadata)
+        # metadata without the is_tool_claim key (e.g. {"sleep": True}) must
+        # coerce to False — a raw .get() returns None and int(None) crashes
+        # insert_turn, silently dropping the turn (#156 root cause).
         self.ltm.repo.insert_turn_sync(
             self.turn_count, role, content,
             str(self.personality.emotion.to_dict()),
-            is_tool_claim=metadata.get("is_tool_claim") if metadata else False,
+            is_tool_claim=bool(metadata.get("is_tool_claim")) if metadata else False,
         )
 
     def record_tool_call(self, name: str, success: bool, output: str) -> None:
