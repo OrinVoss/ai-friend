@@ -1,7 +1,7 @@
 # 统一管线：CLI 与 Web 共用一条对话引擎
 
 > 目标：CLI 和 Web 不再是两份对话管线实现，而是同一个会话引擎的两个「前端」——新功能只写一次，两端同时获得。
-> 状态：P0（装配统一）、P1（管线统一）、P2（Runtime 下沉）已完成（2026-07-16）；P1/P2 默认 `cli_shared_pipeline=false` 灰度中；P3 待实施。
+> 状态：P0（装配统一）、P1（管线统一）、P2（Runtime 下沉）、P3（收尾）全部完成（2026-07-16）。CLI 与 Web 已共用同一引擎与时间驱动，`cli_shared_pipeline` 灰度开关已随 P3 移除。
 > 归属：systems/（接口层）；收口 `cli.md` 的「双轨管线」根因和 `emotion.md` 的 CLI 情绪缺失。
 
 ---
@@ -139,9 +139,9 @@ CLI 启动时同样跑一个——睡眠、做梦、主动搭话在 CLI 自然�
 | **P0 装配统一** ✅ | 新建 `SessionFactory`，`main.py` 和 `web/session.py` 都改调它；行为不变，先消灭配置漂移（2026-07-16 完成） | 无 |
 | **P1 管线统一** ✅ | `MessageHandler` 包出 `ConversationEngine` 事件接口；CLI 切换（`cli_shared_pipeline` 开关，灰度后默认开）；删除 CliController 内联 ReAct（引擎与开关 2026-07-16 完成，见 `changes/2026-07-16-unified-pipeline-p1-conversation-engine.md`；旧状态机保留至 P3 灰度验证后删除） | P0 |
 | **P2 Runtime 下沉** ✅ | 主动/睡眠循环抽成 `RuntimeDriver`；CLI 启动同款；睡眠/主动消息进 CLI（2026-07-16 完成，见 `changes/2026-07-16-unified-pipeline-p2-runtime-driver.md`；CLI 侧随 `cli_shared_pipeline` 灰度生效） | P1 |
-| **P3 收尾** | 删除死代码（旧 CLI 循环、Web 端 `_split_segments` 等）；命令层评估统一；文档对齐 | P2 |
+| **P3 收尾** ✅ | 删除死代码（旧 CLI 循环、Web 端 `_split_segments` 等）；命令层评估统一；文档对齐（2026-07-16 完成，见 `changes/2026-07-16-unified-pipeline-p3-cleanup.md`） | P2 |
 
-每期独立可上线，`cli_shared_pipeline` 默认先 false 灰度，验证后翻 true。
+每期独立可上线，`cli_shared_pipeline` 默认先 false 灰度，验证后翻 true。（注：开关已于 P3 移除，新管线成为唯一路径。）
 
 ---
 
@@ -149,9 +149,9 @@ CLI 启动时同样跑一个——睡眠、做梦、主动搭话在 CLI 自然�
 
 | 已立案问题 | 解决方式 |
 |-----------|---------|
-| CLI 情绪永不更新（`emotion.md` P0） | 管线只有一条，情绪更新自然覆盖 CLI（P1 已实现，`cli_shared_pipeline=true` 后生效；灰度验证中） |
-| CLI 无睡眠循环（`cli.md` P0） | RuntimeDriver 共享（P2 已实现，`cli_shared_pipeline=true` 后生效） |
-| `<tool_call>` 原始标记喷给用户（`cli.md` P0） | 引擎只发清理后的事件，前端不再接触原始流（P1 已实现，开关开启后生效） |
+| CLI 情绪永不更新（`emotion.md` P0） | 管线只有一条，情绪更新自然覆盖 CLI（P1 已实现，P3 起成为唯一管线） |
+| CLI 无睡眠循环（`cli.md` P0） | RuntimeDriver 共享（P2 已实现，P3 起 CLI 默认运行） |
+| `<tool_call>` 原始标记喷给用户（`cli.md` P0） | 引擎只发清理后的事件，前端不再接触原始流（P1 已实现，P3 起成为唯一管线） |
 | 装配配置漂移（`provider.md`） | SessionFactory 单一接线（P0）✅ 2026-07-16 |
 | Web `session_id` 共享竞态（`web.md` P0） | Factory 为每 session 建独立 Repository（P0）✅ 2026-07-16 |
 | 新功能选边问题（Think Loop / Memory Agent / 挂念浮现） | 引擎一处接入，两端同时获得 |
@@ -168,7 +168,7 @@ CLI 启动时同样跑一个——睡眠、做梦、主动搭话在 CLI 自然�
 | `core/cli_controller.py` | 删除内联 ReAct，改为输入循环 + Frontend 实现 | P1 |
 | `core/runtime_driver.py`（新建） | 主动/睡眠驱动下沉 | P2 |
 | `web/server.py` | 后台循环改调 RuntimeDriver | P2 |
-| `config.py` | `cli_shared_pipeline` 开关 | P1 |
+| `config.py` | `cli_shared_pipeline` 开关（P1 新增，P3 已移除） | P1 |
 | `tests/test_unified_pipeline.py`（新建） | 见下 | 各期 |
 
 ---
@@ -179,7 +179,7 @@ CLI 启动时同样跑一个——睡眠、做梦、主动搭话在 CLI 自然�
 
 1. **等价性**：同一输入经引擎产生的事件序列，CLI mock 前端与 Web mock 前端收到的一致 ✅（`tests/test_unified_pipeline.py`，2026-07-16）
 2. SessionFactory：两个 session 的 Repository 互不共享 `session_id` ✅（`tests/test_session_factory.py`，2026-07-16）
-3. 开关回退：`cli_shared_pipeline=false` 时 CLI 走旧路径行为不变（P1 灰度期间）✅（`tests/test_unified_pipeline.py::TestCliSharedPipelineSwitch`，2026-07-16）
+3. 开关回退：`cli_shared_pipeline=false` 时 CLI 走旧路径行为不变（P1 灰度期间）✅（P1 验收通过；P3 起开关与旧路径一并移除）
 4. RuntimeDriver：tick 触发 proactive 时，前端收到 `on_proactive` 事件 ✅（`tests/test_runtime_driver.py`，2026-07-16）
 
 验收：

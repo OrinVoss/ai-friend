@@ -132,7 +132,7 @@ CLI 是最早的界面（`main.py` → `core/cli_controller.py` 状态机），W
 
 - 对话处理全部改走 `agent.process_message` / `process_proactive` / `decide_proactive_action`（即 `MessageHandler` 管线），`CliController` 只保留：输入读取、输出渲染（on_token 回调 + 系统提示）、命令分发、状态机外壳
 - 一次收敛自动获得：prompt 缓存、输入清洗、`is_tool_claim`、Agent 3 intent、内驱主动决策 + rate limit
-- 灰度开关 `cli_shared_pipeline`：默认先关，新旧管线并存一段时间，日志对比同输入下两轮管线行为，确认无回归后默认开，再删旧路径（灰度可回退，与 `../enhancement-overview.md` 第 2 节原则一致）
+- 灰度开关 `cli_shared_pipeline`：默认先关，新旧管线并存一段时间，日志对比同输入下两轮管线行为，确认无回归后默认开，再删旧路径（灰度可回退，与 `../enhancement-overview.md` 第 2 节原则一致）（✅ 已落地：P1 新增开关，P3 移除开关与旧路径，统一管线成为唯一路径，2026-07-16）
 - 重复方法（`_ensure_inner_drive` 等）随旧路径删除自然去重
 
 **5. 主动循环对齐 Web**
@@ -190,7 +190,7 @@ CLI 是最早的界面（`main.py` → `core/cli_controller.py` 状态机），W
 | `core/sleep_manager.py` | 同步检查包装（薄壳，不改睡眠逻辑） | P0 |
 | `ui/cli.py` | 行编辑输入（历史/多行/中断/粘贴合并）、交错重绘、死参数与线程收尾 | P2 |
 | `core/agent.py` | `_process_emotion` 的 consolidate 触发点参数化（避免双触发） | P0 |
-| `config.py` / `config.example.json` | `cli_emotion_update`、`cli_shared_pipeline` 开关 | P0/P1 |
+| `config.py` / `config.example.json` | `cli_emotion_update`、`cli_shared_pipeline` 开关（`cli_shared_pipeline` 已随统一管线 P3 移除，2026-07-16） | P0/P1 |
 | `main.py` | VT 启用尝试与降级接线 | P2 |
 | `tests/test_cli_controller.py` | 新增覆盖（现仅 8 个命令/boot 测试） | 各期 |
 
@@ -203,7 +203,7 @@ CLI 是最早的界面（`main.py` → `core/cli_controller.py` 状态机），W
 1. 流式中含 `<tool_call>` 的回复：终端全程不出现标记文本，工具结果正常执行
 2. CLI 对话 3 轮后 `personality.emotion` 有变化；`cli_emotion_update=false` 时行为同现状；consolidate 不双触发
 3. 睡眠时间窗内：CLI 打印入睡消息、用户输入得到睡觉回复、不主动开口；跨端一致（Web 睡着的 session，CLI 同 session 也睡）
-4. 开关回退：`cli_shared_pipeline` 开/关下，同一输入的最终回复语义一致
+4. 开关回退：`cli_shared_pipeline` 开/关下，同一输入的最终回复语义一致（P1 验收通过；P3 起开关移除、新管线唯一）
 5. 粘贴 3 行文本 → 1 条消息、1 轮回复；Ctrl+C 中断生成回到提示符，进程不退出
 6. 主动消息 30 分钟内不重复（rate limit 生效）
 

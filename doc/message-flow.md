@@ -8,7 +8,7 @@
 
 ## 三层流水线总览
 
-编排器：Web 路径由 `MessageHandler`（core/message_handler.py）统一编排三层流水线；CLI 路径由 `CliController` 状态机（core/cli_controller.py）以相同模式内联编排。
+编排器：CLI 与 Web 路径统一由 `MessageHandler`（core/message_handler.py）经 `ConversationEngine`（core/conversation_engine.py）编排三层流水线；CLI 仅剩输入循环与终端渲染（core/cli_controller.py）。时间驱动（睡眠/主动/探索）由 `RuntimeDriver`（core/runtime_driver.py）统一承担。
 
 ```
 用户输入
@@ -50,19 +50,26 @@
               后处理: Emotion → Memory → Reflection
 ```
 
-## 状态机总览（CLI 主循环，CliController）
+## 引擎与编排状态（ConversationEngine + MessageHandlerState）
 
-Web 路径不走此状态机，由 `MessageHandler` 内部的轻量 `MessageHandlerState`（ASSESSING / EXECUTING_TOOLS / GENERATING_RESPONSE 等）记录编排阶段。
+统一管线 P0–P3 完成后，CLI 与 Web 共用同一条管线：用户输入经 `ConversationEngine.handle_message` 进入 `MessageHandler`；时间驱动（睡眠/主动/探索）由 `RuntimeDriver` 按同一节奏驱动两端。CLI 旧的内联状态机（BOOT/IDLE/PERCEIVE/THINK/ACT/REFLECT）已随 P3 移除。
+
+`MessageHandler` 内部以轻量 `MessageHandlerState`（ASSESSING / EXECUTING_TOOLS / HANDLING_INTENT / GENERATING_RESPONSE / DONE 等）记录编排阶段，供观测与测试。
 
 ```
-BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ REFLECT ──▶ IDLE
-(启动)   (等待)    (理解输入+   (调用LLM)  (输出)    (更新状态+   (循环)
-                   检索记忆)               │         记忆合并)
-                                          │
-                                    ┌─────┴──────┐
-                                    │ 有 tool_call│
-                                    └─────┬──────┘
-                                          └──▶ THINK (多轮 ReAct 迭代, 仅 recall/remember)
+用户输入 ──▶ ConversationEngine.handle_message ──▶ MessageHandler
+                                                      │
+              ┌───────────────────────────────────────┼────────────────────────┐
+              ▼                                       ▼                        ▼
+        Agent 1 assess                          Agent 2 多轮工具           Agent 3 生成
+        (可跳过: 短输入)                        (3轮×3重试+review)         (含意图审批回路)
+                                                      │
+                                                      ▼
+                                              事件: on_token / on_message_done
+                                              / on_proactive / on_sleep_reply
+
+时间 tick ──▶ RuntimeDriver.run() ──▶ engine.handle_proactive / handle_explore
+                                      / get_sleep_state / generate_dream
 ```
 
 ## CLI 模式 vs Web 模式
@@ -70,9 +77,9 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 | 阶段 | CLI | Web |
 |------|-----|-----|
 | 等待输入 | 守护线程读 stdin → Queue | WebSocket 协程等待 receive_text() |
-| 处理消息 | 状态机 _on_think → _on_act → _on_reflect | process_message() → MessageHandler 编排三层 → _react_loop() |
-| 输出 | 打字机效果逐字打印 | 单条 segment 全量推送（分段暂禁用，见第 4 节） |
-| 主动对话 | IDLE 状态内轮询 | asyncio.create_task(_proactive_loop) |
+| 处理消息 | engine.handle_message → MessageHandler 编排三层 → _react_loop() | process_message() → MessageHandler 编排三层 → _react_loop() |
+| 输出 | 打字机效果逐字打印 | 单条 segment 全量推送（分段代码已随 P3 删除，见第 4 节） |
+| 主动对话 | RuntimeDriver 守护线程 | RuntimeDriver asyncio task |
 | 空闲检测 | time.sleep(0.1) 轮询 | await asyncio.sleep(5/15) 协程睡眠 |
 | 封装层 | 无（直接操作 Agent） | `WebAgent` 封装 `Agent` 私有接口（#45） |
 
@@ -262,7 +269,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 路径由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 路径由 `CliController._on_perceive/_on_think` 以相同模式内联执行。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 

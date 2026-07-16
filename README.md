@@ -140,9 +140,9 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 | | CLI | Web |
 |------|-----|-----|
 | 启动 | `python main.py` | `python web_main.py` |
-| 驱动 | 状态机循环 | 事件驱动 |
+| 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
 | 输入 | stdin 线程 | WebSocket |
-| 输出 | 打字机效果 | 分段独立气泡 + 情绪调速（6 级 fallback 分段） |
+| 输出 | 打字机效果 | 单条气泡（分段推送已随统一管线 P3 移除） |
 | 主题 | - | 浅色主题，响应式 |
 
 ### 自主行为系统
@@ -197,7 +197,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **记忆生命周期（双写中）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（`use_observation_fact` 开关）
 - **语义检索维度自适应** — 向量按 BLOB 实际维度解码，维度不匹配时日志告警而非静默降级
 - **数据库自动备份** — 检测到 schema 迁移将执行时自动 `VACUUM INTO` 快照到 `data/backups/`，滚动保留最近 5 份（`db_backup_enabled` / `db_backup_keep`）
-- **统一管线（灰度中）** — CLI 经 `cli_shared_pipeline` 切换到与 Web 相同的 ConversationEngine 管线（P1；情绪更新、Prompt 缓存随之覆盖 CLI）
+- **统一管线** — CLI 与 Web 共用同一 ConversationEngine + RuntimeDriver（统一管线 P0-P3 完成；情绪、睡眠、主动行为两端一致）
 
 ---
 
@@ -336,7 +336,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（444 用例，35 个测试文件）
+├── tests/                     单元测试（424 用例，34 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -345,7 +345,6 @@ ai-friend/
 │   ├── test_retrieval.py       检索评分 + 语义维度回归（22 用例）
 │   ├── test_message_handler.py 消息处理测试（21 用例）
 │   ├── test_repository.py      Repository 数据访问 + session 隔离（19 用例）
-│   ├── test_segmentation.py    分段推送测试（18 用例）
 │   ├── test_embeddings.py      嵌入引擎测试（16 用例）
 │   ├── test_web_agent.py       WebAgent 主动行为测试（15 用例）
 │   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
@@ -356,7 +355,7 @@ ai-friend/
 │   ├── test_consolidation.py   记忆合并 FactChecker 集成测试（12 用例）
 │   ├── test_provider.py        Provider 测试（10 用例）
 │   ├── test_notify_tool.py     通知工具测试（9 用例）
-│   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
+│   ├── test_cli_controller.py  CLI 控制器测试（8 用例）
 │   ├── test_agent_proactive.py Agent 主动行为测试（8 用例）
 │   ├── test_rate_limit.py      限流测试（7 用例）
 │   ├── test_memory_lifecycle.py 记忆生命周期（Observation→Fact）测试（7 用例）
@@ -387,7 +386,7 @@ ai-friend/
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
 │   ├── sleep_manager.py       睡眠系统：窗口判断 + 梦境生成 + 状态持久化
 │   ├── proactivity.py         主动行为：评分 + 话题选择 + 频率限制
-│   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
+│   ├── cli_controller.py      CLI 输入循环 + 命令层（ConversationEngine 前端）
 │   ├── provider.py             LLMProvider(ABC) 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，trust_env=False）
 │   ├── monitor.py             LLM API 调用监控（环形缓冲，开发调试用）
 │   ├── embedding_server.py    共享 embedding server 启动（CLI/Web 共用）

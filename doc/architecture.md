@@ -94,7 +94,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     ├── core/context_manager.py  (上下文窗口管理)
     ├── core/sleep_manager.py    (睡眠/唤醒)
     ├── core/proactivity.py      (主动行为引擎)
-    ├── core/cli_controller.py   (CLI 状态机)
+    ├── core/cli_controller.py   (CLI 输入循环)
     ├── core/message_handler.py  (消息入口 + 三层编排 + 重试循环)
     ├── core/personality.py  (四层情绪引擎)
     ├── core/provider.py     (LLM API 客户端)
@@ -134,19 +134,24 @@ models / prompts                  （纯数据 / 模板层，被各层引用）
 
 ## Agent 循环
 
-### 状态机 (CLI)
+### 统一管线（CLI + Web，P0-P3 已完成）
 
 ```
-BOOT → IDLE → PERCEIVE → THINK → ACT → REFLECT → IDLE
-                ↑          │              │
-                │    有 tool_call         │
-                └────── 继续迭代 ←───────┘
-```
+用户输入 / 时间 tick
+    │
+    ▼
+ConversationEngine（core/conversation_engine.py，唯一管线）
+    ├── handle_message      → MessageHandler 三层 Agent 编排
+    ├── handle_proactive / handle_explore
+    └── 事件：on_token / on_message_done / on_proactive / on_sleep_reply / on_error
+    │
+    ├── CLI 前端：core/cli_controller.py（输入循环 + _CliFrontend 打字机渲染）
+    └── Web 前端：web/server.py（WS 帧）+ web/session.py
 
-### 事件驱动 (Web)
-
-```
-WebSocket 消息 → process_message() → _react_loop() → _send_segments()
+时间驱动：RuntimeDriver（core/runtime_driver.py）
+    ├── Web：asyncio task（WS init 时启动）
+    └── CLI：守护线程（start_in_thread）
+    └── 睡眠/唤醒/做梦/主动搭话/自由探索，两端同一节奏
 ```
 
 ---
@@ -246,7 +251,7 @@ Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部�
 
 | | CLI | Web |
 |------|-----|-----|
-| 驱动 | 状态机循环 | 事件驱动 |
+| 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
 | 输入 | stdin 线程 | WebSocket |
 | 输出 | 打字机效果 | 分段独立气泡 + 情绪调速 |
 | 主动对话 | IDLE 轮询 | proactive_loop 协程 |
@@ -364,7 +369,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 │   ├── personality.py       情绪引擎（四层）
 │   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
 │   ├── proactivity.py       主动行为（评分 + 频率限制）
-│   ├── cli_controller.py    CLI 状态机（run + 命令分发）
+│   ├── cli_controller.py    CLI 输入循环 + 命令层（ConversationEngine 前端）
 │   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
 │   ├── monitor.py           LLM API 调用监控（环形缓冲，开发调试用）
 │   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）

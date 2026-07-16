@@ -91,28 +91,6 @@ class TestConversationEngine(unittest.TestCase):
         self.assertAlmostEqual(summary["valence"], 0.6)
 
 
-class TestCliSharedPipelineSwitch(unittest.TestCase):
-    def test_old_path_when_flag_off(self):
-        from core.cli_controller import CliController
-        a = MagicMock()
-        a.config.cli_shared_pipeline = False
-        a._running = False  # legacy state machine exits immediately
-        a.ui = None
-        ctrl = CliController(a)
-        ctrl._run_shared_pipeline = MagicMock()
-        ctrl.run()
-        ctrl._run_shared_pipeline.assert_not_called()
-
-    def test_new_path_when_flag_on(self):
-        from core.cli_controller import CliController
-        a = MagicMock()
-        a.config.cli_shared_pipeline = True
-        ctrl = CliController(a)
-        ctrl._run_shared_pipeline = MagicMock()
-        ctrl.run()
-        ctrl._run_shared_pipeline.assert_called_once()
-
-
 class TestCliFrontend(unittest.TestCase):
     def test_stream_then_done_no_double_render(self):
         from core.cli_controller import _CliFrontend

@@ -79,10 +79,6 @@ class Config:
     conversation_examples_max_turns: int = 3
     # ML-001: Layer 1 Memory lifecycle switch
     use_observation_fact: bool = False
-    # UP-001: unified-pipeline P1 gray switch — CLI runs over the shared
-    # ConversationEngine (same pipeline as Web) instead of the legacy
-    # CliController inline state machine.
-    cli_shared_pipeline: bool = False
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5
