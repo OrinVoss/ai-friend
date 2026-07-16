@@ -17,6 +17,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import load_config
+from core.conversation_engine import ConversationEngine, Frontend
+from core.runtime_driver import RuntimeDriver
 from web.session import SessionManager
 from web.schemas import ChatRequest, ChatResponse, StatusResponse, HistoryResponse
 from web.rate_limit import RateLimiter, RateLimitMiddleware
@@ -384,75 +386,19 @@ async def _send_segments(websocket: WebSocket, agent, response: str, emotion: st
     }, ensure_ascii=False))
 
 
-async def _proactive_loop(websocket: WebSocket, session_id: str):
-    cooldown = 0
-    sleep_cooldown = 0
-    while True:
-        try:
-            # Use the most recently active WebSocket for this session
-            active_ws = session_manager.get_active_ws(session_id) or websocket
-            _, agent = session_manager.get_or_create(session_id)
+class _WsProactiveFrontend(Frontend):
+    """Web proactive frontend: emits sleep/wake/proactive messages as
+    segment+done frames over the session's most recently active WebSocket.
+    `on_proactive` is async — RuntimeDriver awaits it in its own loop."""
 
-            # Sleep/Wake cycle (only check if not in transition cooldown)
-            if sleep_cooldown == 0:
-                should_sleep, msg = await agent.get_sleep_state()
-                if msg:
-                    logger.info(f"Sleep/wake message: sleeping={agent.is_sleeping} msg={msg[:50]}")
-                    agent.last_activity_time = time.time()
-                    cooldown = 60
-                    sleep_cooldown = 120  # 10 min cooldown on sleep transitions
-                    await _send_segments(active_ws, agent, msg, agent.emotion)
-                    # Store sleep/wake message in history so it survives page refresh
-                    agent.add_turn("assistant", msg, metadata={"sleep": True})
-                    agent.increment_turn_count()
-                    if should_sleep:
-                        await agent.generate_dream()
-            else:
-                sleep_cooldown = max(0, sleep_cooldown - 1)
-            if agent.is_sleeping:
-                await asyncio.sleep(30)
-                continue
+    def __init__(self, session_id: str, fallback_ws: WebSocket):
+        self._session_id = session_id
+        self._fallback = fallback_ws
 
-            idle = time.time() - agent.last_activity_time
-            if idle < 30 or cooldown > 0:
-                cooldown = max(0, cooldown - 1)
-                await asyncio.sleep(5)
-                continue
-
-            score = agent.calculate_proactivity(idle)
-            if random.random() < score:
-                loop = asyncio.get_event_loop()
-
-                # Agent 1 (InnerDrive) decides what to do
-                intent = await loop.run_in_executor(
-                    None, agent.decide_proactive_action, idle
-                )
-
-                if intent.action == "explore" and agent.check_rate_limit("explore"):
-                    response = await loop.run_in_executor(
-                        None, agent.process_explore_with_intent, intent
-                    )
-                elif intent.action == "chat" and agent.check_rate_limit("chat"):
-                    response = await loop.run_in_executor(
-                        None, agent.process_proactive_with_intent, intent
-                    )
-                else:
-                    if intent.action == "silent":
-                        logger.debug(f"[proactive] inner drive chose silent: {intent.reasoning[:80]}")
-                    else:
-                        logger.debug(f"[proactive] rate limit blocked action={intent.action}")
-                    response = None
-                if response:
-                    agent.last_activity_time = time.time()
-                    agent.record_rate_limit(intent.action)
-                    cooldown = 12
-                    await _send_segments(active_ws, agent, response, agent.emotion)
-            await asyncio.sleep(15)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.warning(f"Proactive error: {e}")
-            await asyncio.sleep(30)
+    async def on_proactive(self, text: str) -> None:
+        ws = session_manager.get_active_ws(self._session_id) or self._fallback
+        _, agent = session_manager.get_or_create(self._session_id)
+        await _send_segments(ws, agent, text, agent.emotion)
 
 
 @app.websocket("/ws")
@@ -503,8 +449,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 role_id = data.get("role_id")
                 session_id, agent = session_manager.get_or_create(sid, role_id)
                 logger.info(f"[ws] init session={session_id} role={agent.role_id} sid_param={sid}")
-                # Register proactive task per-session (replaces old task if exists)
-                task = asyncio.create_task(_proactive_loop(websocket, session_id))
+                # Register proactive task per-session (replaces old task if exists).
+                # unified-pipeline P2: the loop lives in RuntimeDriver now;
+                # the WS handler only provides the frontend adapter.
+                engine = ConversationEngine(agent.agent)
+                driver = RuntimeDriver(engine, _WsProactiveFrontend(session_id, websocket))
+                task = asyncio.create_task(driver.run())
                 session_manager.register_proactive(session_id, task, websocket)
                 await websocket.send_text(json.dumps({
                     "type": "init_ok", "session_id": session_id,

@@ -6,6 +6,7 @@ pipeline implementations. The engine owns no conversation state of its own
 — the Agent remains the source of truth.
 """
 import logging
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -74,17 +75,20 @@ class ConversationEngine:
             fe.on_message_done(result)
         return result
 
-    def handle_proactive(self, fe: Frontend, intent=None) -> Optional[str]:
-        """Proactive chat turn. Emits on_proactive when a message is produced."""
-        result = self._agent.process_proactive(on_token=fe.on_token, intent=intent)
-        if result:
+    def handle_proactive(self, fe: Optional[Frontend] = None, intent=None) -> Optional[str]:
+        """Proactive chat turn. Emits on_proactive when a frontend is given
+        and a message is produced. RuntimeDriver passes fe=None and emits
+        the event itself (so async frontends can be awaited)."""
+        result = self._agent.process_proactive(
+            on_token=fe.on_token if fe is not None else None, intent=intent)
+        if result and fe is not None:
             fe.on_proactive(result)
         return result or None
 
-    def handle_explore(self, fe: Frontend, intent=None) -> Optional[str]:
+    def handle_explore(self, fe: Optional[Frontend] = None, intent=None) -> Optional[str]:
         """Free-explore turn. Silent stays silent — no event when unshared."""
         result = self._agent.process_explore(intent=intent)
-        if result:
+        if result and fe is not None:
             fe.on_proactive(result)
         return result
 
@@ -103,3 +107,38 @@ class ConversationEngine:
 
     def get_relationship(self) -> dict:
         return self._agent.ltm.get_relationship()
+
+    # ── Runtime driver support (unified-pipeline P2) ──
+
+    @property
+    def is_sleeping(self) -> bool:
+        return self._agent._sleeping
+
+    @property
+    def idle_seconds(self) -> float:
+        return time.time() - self._agent.last_activity_time
+
+    def touch(self) -> None:
+        """Mark user-visible activity (resets the idle clock)."""
+        self._agent.update_last_activity()
+
+    def calculate_proactivity(self, idle_seconds: float) -> float:
+        return self._agent._calculate_proactivity(idle_seconds)
+
+    def decide_proactive_action(self, idle_seconds: float):
+        """InnerDrive decides chat / explore / silent. Blocking (LLM)."""
+        return self._agent.decide_proactive_action(idle_seconds)
+
+    def check_rate_limit(self, action: str) -> bool:
+        return self._agent.check_rate_limit(action)
+
+    def record_rate_limit(self, action: str) -> None:
+        self._agent.record_rate_limit(action)
+
+    def persist_proactive_message(self, text: str, metadata: dict | None = None) -> None:
+        """Persist an engine-initiated message (sleep/wake) to history."""
+        self._agent.add_turn("assistant", text, metadata=metadata)
+        self._agent.increment_turn_count()
+
+    async def generate_dream(self) -> str:
+        return await self._agent._generate_dream()

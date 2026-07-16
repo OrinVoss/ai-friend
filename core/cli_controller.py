@@ -409,9 +409,12 @@ class CliController:
 
         Compared with the legacy state machine above, this path also gets
         emotion updates, context_summary reuse and prompt caching for free,
-        because all of it lives in MessageHandler.
+        because all of it lives in MessageHandler. P2: a RuntimeDriver runs
+        in a daemon thread, so the CLI also sleeps, dreams and reaches out
+        proactively — same rhythm as the Web.
         """
         from core.agent import AgentState
+        from core.runtime_driver import RuntimeDriver
         a = self.a
         if a.ui:
             a.ui.start()
@@ -420,6 +423,8 @@ class CliController:
         self._on_boot()
         engine = ConversationEngine(a)
         frontend = _CliFrontend(a.ui, a.personality.config.name)
+        driver = RuntimeDriver(engine, frontend)
+        driver.start_in_thread()
         try:
             while a._running:
                 if a.ui:
@@ -441,6 +446,8 @@ class CliController:
                     a.personality.save(a.config.personality_file)
         except KeyboardInterrupt:
             pass
+        finally:
+            driver.stop()
         self._on_shutdown()
 
 

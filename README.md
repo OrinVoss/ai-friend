@@ -336,7 +336,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（435 用例，34 个测试文件）
+├── tests/                     单元测试（444 用例，35 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -364,6 +364,7 @@ ai-friend/
 │   ├── test_user_facts_unique_migration.py 唯一约束迁移测试（3 用例）
 │   ├── test_session_factory.py 统一装配测试（5 用例）
 │   ├── test_unified_pipeline.py 统一管线引擎测试（13 用例）
+│   ├── test_runtime_driver.py 时间驱动循环测试（9 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_session_manager.py 会话管理测试（6 用例）
 │   ├── test_memory_tools.py    记忆工具测试（6 用例）
@@ -373,13 +374,14 @@ ai-friend/
 │   ├── test_music_tool.py      音乐工具测试（4 用例）
 │   └── test_conversation_examples.py 对话示例测试（2 用例）
 │
-├── core/                      核心引擎（18 模块，三层架构）
+├── core/                      核心引擎（19 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
 │   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
 │   ├── agent.py                核心引擎：Agent 3 Roleplay + ReAct 循环
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── session_factory.py     CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
 │   ├── conversation_engine.py 统一对话引擎 + Frontend 事件接口（统一管线 P1）
+│   ├── runtime_driver.py      睡眠/主动/探索时间驱动（统一管线 P2，CLI 线程 + Web 任务两种宿主）
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
 │   ├── prompt_cache.py        Prompt 分层缓存（静态/慢变/动态块复用，#160）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）

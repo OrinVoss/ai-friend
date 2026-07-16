@@ -352,7 +352,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（18 模块，三层架构）
+├── core/                    核心引擎（19 模块，三层架构）
 │   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策）
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
