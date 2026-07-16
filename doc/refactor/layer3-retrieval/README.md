@@ -2,32 +2,171 @@
 
 ## 目标
 
-从单一的 "Embedding TopK" 改成多阶段检索，让不同 Agent 拿到不同粒度、不同来源的上下文。
+从单一的「Embedding TopK」检索，升级为多阶段、分 Agent、可交叉验证的检索体系。
 
 ## 当前状态
 
-未开始。
+**未开始**（Memory Agent 属于 Layer 1 的组件，但会依赖本层的多阶段检索策略）。
 
-## 关键问题
+## 核心问题
 
-- 所有 Agent 共享同一个 Context
-- Tool Agent 读取了不需要的人格/情绪/共同回忆
-- Reflection 直接被 React 读取，容易自我强化
+| 问题 | 表现 |
+|------|------|
+| 所有 Agent 共享同一份 Context | Tool Agent 也读取人格/情绪/回忆 |
+| 检索只有相似度 | 「相似」不等于「相关」 |
+| 没有线索提取 | 直接拿整句查询去向量库 |
+| 没有交叉验证 | 返回什么就用什么，不判断对错 |
+| React 默认读 Reflection | Reflection 是结论，不是证据，容易自我强化 |
 
-## 预期方向
+## 整体架构
 
 ```
-Query → Intent → Fact → Episode → Reflection → Rank → Context Builder
+Query
+  ↓
+Query Analyzer（线索提取）
+  ├── 时间线索
+  ├── 实体线索
+  ├── 关系线索
+  ├── 情绪线索
+  └── 关键词
+  ↓
+Parallel Retriever（多源并行检索）
+  ├── facts_v2
+  ├── observations
+  ├── experiences
+  ├── relationship
+  └── insights（二期）
+  ↓
+Cross Verifier（交叉验证）
+  ├── 一致性检查
+  ├── 时间线检查
+  ├── 矛盾检测
+  └── 新鲜度检查
+  ↓
+Reranker（重排序）
+  ├── 按 Agent 类型加权
+  ├── 按置信度加权
+  └── 按新鲜度加权
+  ↓
+Context Builder（按 Agent Profile 组装）
+  ├── Agent 1: facts + episodes + insights
+  ├── Agent 2: 不读 Memory
+  └── Agent 3: hot_facts + recent_episodes + relationship
+  ↓
+Agent-specific Context
 ```
 
-不同 Agent 使用不同 Retrieval：
+## 各 Agent 的 Retrieval Profile
 
-- React：只读 Fact + Episode
-- Planner：读 Fact + Episode + Reflection
-- Fact Extractor：读 Episode
-- Tool Agent：不读 Memory
+| Agent | 可读取的记忆 | 读取方式 | 目的 |
+|-------|-------------|----------|------|
+| **Agent 1 (InnerDrive)** | facts_v2, experiences, insights, relationship | 完整交叉验证 | 决策依据 |
+| **Agent 2 (ToolAgent)** | 不读 Memory | - | 纯工具执行 |
+| **Agent 3 (Roleplay)** | hot_facts, recent_episodes, relationship | 简化检索，不做深度交叉验证 | 回复参考 |
+| **Fact Extractor** | observations, conversation_turns | 原始文本检索 | 提取候选事实 |
+| **Memory Agent** | 全部 | 完整交叉验证 | 回答记忆问题 |
+
+## 核心组件
+
+### Query Analyzer
+
+负责把自然语言查询拆解为结构化线索：
+
+```python
+@dataclass
+class QueryClues:
+    time_ranges: list[tuple[str, str]]
+    entities: list[str]
+    relationships: list[str]
+    emotions: list[str]
+    keywords: list[str]
+    intent: Literal["recall", "verify", "compare", "summarize"]
+```
+
+### Parallel Retriever
+
+并行调用多个 Repository 方法：
+
+```python
+class ParallelRetriever:
+    async def retrieve(self, clues: QueryClues, limit: int = 20) -> RetrievalBundle:
+        async with asyncio.TaskGroup() as tg:
+            facts_task = tg.create_task(self._search_facts(clues))
+            obs_task = tg.create_task(self._search_observations(clues))
+            exp_task = tg.create_task(self._search_experiences(clues))
+            rel_task = tg.create_task(self._get_relationship())
+        return RetrievalBundle(
+            facts=facts_task.result(),
+            observations=obs_task.result(),
+            experiences=exp_task.result(),
+            relationship=rel_task.result(),
+        )
+```
+
+### Cross Verifier
+
+对检索结果做一致性验证：
+
+```python
+class CrossVerifier:
+    async def verify(self, bundle: RetrievalBundle) -> VerifiedBundle:
+        # 1. 同一主题的证据是否一致？
+        # 2. 时间线是否吻合？
+        # 3. Fact 是否被 contradicted / decayed？
+        # 4. 最近 Observation 是否支持旧 Fact？
+```
+
+### Context Builder
+
+根据 Agent 类型组装最终上下文：
+
+```python
+class ContextBuilder:
+    def build(self, agent_type: str, bundle: VerifiedBundle) -> str:
+        if agent_type == "agent1":
+            return self._build_full_context(bundle)
+        elif agent_type == "agent3":
+            return self._build_light_context(bundle)
+        elif agent_type == "agent2":
+            return ""
+```
+
+## 与 Memory Agent 的关系
+
+Memory Agent 是 Layer 3 的**用户**，它调用 Parallel Retriever 和 Cross Verifier 来完成自己的交叉验证逻辑。Layer 3 提供的是通用检索基础设施。
+
+## 实现优先级
+
+### P0：基础多源检索
+
+- [ ] `QueryClues` 数据模型
+- [ ] `ParallelRetriever` 并行检索
+- [ ] `ContextBuilder` 按 Agent 类型组装
+- [ ] `tests/test_parallel_retriever.py`
+
+### P1：交叉验证
+
+- [ ] `CrossVerifier` 一致性/时间线/矛盾/新鲜度检查
+- [ ] 与 `FactChecker` 集成
+- [ ] `tests/test_cross_verifier.py`
+
+### P2：Reranker
+
+- [ ] 按 Agent Profile 加权排序
+- [ ] 置信度 + 新鲜度 + 相关性综合评分
+
+### P3：不同 Agent 不同上下文
+
+- [ ] Agent 3 只读 hot_facts + recent_episodes
+- [ ] Agent 2 不读 Memory
+- [ ] Agent 1 可读 insights
 
 ## 依赖
 
-- Layer 1 完成 Fact/Observation 分层
-- Layer 2 完成 Prompt 静态化，否则 Context Builder 收益有限
+- Layer 1 Memory 生命周期：稳定的数据模型和 `facts_v2` / `observations`
+- Layer 2 Prompt Budget：Context Builder 的输出需要符合预算分配
+
+## 相关文档
+
+- `doc/refactor/layer1-memory/memory-agent.md`
+- `doc/refactor/layer2-prompt/README.md`
