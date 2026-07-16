@@ -141,18 +141,27 @@ class MemoryRetriever:
         from memory.embeddings import EmbeddingEngine
 
         scores = []
+        unusable = 0
         for c in candidates:
             semantic = 0.0
             if hasattr(c, 'embedding') and c.embedding is not None:
                 try:
-                    vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding))
+                    vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding), dim=len(qvec))
                     semantic = float(np.dot(vec, qvec))
-                except Exception:
-                    pass
+                except Exception as e:
+                    unusable += 1
+                    logger.debug(f"[retrieval] fact embedding unusable "
+                                 f"(id={getattr(c, 'id', '?')}): {e}")
 
             keyword = self._keyword_score_single(c, keywords, query)
             final = semantic * SEMANTIC_WEIGHT + keyword * KEYWORD_WEIGHT
             scores.append((c, final))
+
+        if unusable:
+            logger.warning(
+                f"[retrieval] {unusable}/{len(candidates)} fact embeddings unusable "
+                f"(query dim={len(qvec)}); those candidates scored by keyword only"
+            )
 
         scores.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scores[:30]]
@@ -175,15 +184,23 @@ class MemoryRetriever:
 
         from memory.embeddings import EmbeddingEngine
         scored = []
+        unusable = 0
         for exp in combined:
             sim = 0.0
             if hasattr(exp, 'embedding') and exp.embedding is not None:
                 try:
-                    vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding))
+                    vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding), dim=len(qvec))
                     sim = float(np.dot(vec, qvec))
-                except Exception:
-                    pass
+                except Exception as e:
+                    unusable += 1
+                    logger.debug(f"[retrieval] experience embedding unusable "
+                                 f"(id={getattr(exp, 'id', '?')}): {e}")
             scored.append((exp, sim))
+        if unusable:
+            logger.warning(
+                f"[retrieval] {unusable}/{len(combined)} experience embeddings unusable "
+                f"(query dim={len(qvec)})"
+            )
         scored.sort(key=lambda x: x[1], reverse=True)
         return [exp for exp, _ in scored[:5]]
 

@@ -103,6 +103,79 @@ class TestHybridScoreType(unittest.TestCase):
         self.assertIsInstance(score, float)
 
 
+class TestBytesToVecDim(unittest.TestCase):
+    """RT-007 regression: bytes_to_vec must not hardcode a dimension."""
+
+    def test_infer_dim_from_blob(self):
+        """1024-dim roundtrip works without an explicit dim."""
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        vec = np.random.rand(1024).astype(np.float32)
+        blob = EmbeddingEngine.vec_to_bytes(vec)
+        out = EmbeddingEngine.bytes_to_vec(blob)
+        np.testing.assert_array_equal(out, vec)
+
+    def test_explicit_dim_mismatch_raises(self):
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        blob = EmbeddingEngine.vec_to_bytes(np.ones(1024, dtype=np.float32))
+        with self.assertRaises(ValueError):
+            EmbeddingEngine.bytes_to_vec(blob, dim=512)
+
+    def test_explicit_dim_match_ok(self):
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        blob = EmbeddingEngine.vec_to_bytes(np.ones(1024, dtype=np.float32))
+        out = EmbeddingEngine.bytes_to_vec(blob, dim=1024)
+        self.assertEqual(len(out), 1024)
+
+
+class TestHybridScoreSemanticDim(unittest.TestCase):
+    """RT-007 regression: facts with production-dim (1024) embeddings must
+    actually get semantic scores, not silently degrade to keyword-only."""
+
+    @staticmethod
+    def _unit_vec(dim, seed):
+        import numpy as np
+        rng = np.random.RandomState(seed)
+        v = rng.rand(dim).astype(np.float32)
+        return v / np.linalg.norm(v)
+
+    @staticmethod
+    def _retriever(qvec):
+        engine = MagicMock()
+        engine.encode_single.return_value = qvec
+        return MemoryRetriever(MagicMock(), embedding_engine=engine)
+
+    def test_semantic_score_applied_for_matching_dim(self):
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        qvec = self._unit_vec(1024, seed=1)
+        retriever = self._retriever(qvec)
+        aligned = UserFact(id=1, fact_key="k1", fact_value="v", category="preference",
+                           confidence=0.9, importance=0.5, composite_score=0.5,
+                           embedding=EmbeddingEngine.vec_to_bytes(qvec))
+        zero = UserFact(id=2, fact_key="k2", fact_value="v", category="preference",
+                        confidence=0.9, importance=0.5, composite_score=0.5,
+                        embedding=EmbeddingEngine.vec_to_bytes(np.zeros(1024, dtype=np.float32)))
+        # aligned is listed second; only a working semantic path can put it first
+        result = retriever._hybrid_score("查询", [zero, aligned], [], query_vec=qvec)
+        self.assertEqual(result[0].id, 1)
+
+    def test_dim_mismatch_logs_warning_and_degrades(self):
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        qvec = self._unit_vec(1024, seed=2)
+        retriever = self._retriever(qvec)
+        bad = UserFact(id=3, fact_key="k", fact_value="v", category="preference",
+                       confidence=0.9, importance=0.5, composite_score=0.5,
+                       embedding=EmbeddingEngine.vec_to_bytes(np.ones(512, dtype=np.float32)))
+        with self.assertLogs("memory.retrieval", level="WARNING") as cm:
+            result = retriever._hybrid_score("查询", [bad], [], query_vec=qvec)
+        self.assertEqual(result, [bad])  # no crash, fact still returned
+        self.assertTrue(any("unusable" in m for m in cm.output))
+
+
 class TestLongTermImport(unittest.TestCase):
     """P2: import re should be at top of long_term.py, not inline."""
 

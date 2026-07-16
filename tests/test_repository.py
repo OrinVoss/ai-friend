@@ -123,6 +123,27 @@ class TestRepositoryFacts(unittest.TestCase):
         results = asyncio.run(self.repo.search_facts("待删除", limit=10))
         self.assertEqual(len(results), 0)
 
+    def test_get_similar_facts_session_isolated(self):
+        """Facts from other sessions must not leak into similarity results."""
+        asyncio.run(self.repo.upsert_fact("preference", "最爱颜色", "蓝", confidence=0.9))
+        other = Repository(self.db)
+        other.session_id = "sess_other"
+        asyncio.run(other.upsert_fact("preference", "最爱食物", "披萨", confidence=0.8))
+
+        similar = asyncio.run(self.repo.get_similar_facts("preference", "最爱", limit=5))
+        self.assertEqual(len(similar), 1)
+        self.assertEqual(similar[0].fact_key, "最爱颜色")
+
+    def test_deactivate_fact_other_session_noop(self):
+        """deactivate_fact with another session's id must not take effect."""
+        other = Repository(self.db)
+        other.session_id = "sess_other"
+        fid = asyncio.run(other.upsert_fact("event", "他的事", "x", confidence=0.5))
+        asyncio.run(self.repo.deactivate_fact(fid))
+
+        facts = asyncio.run(other.get_active_facts(limit=10))
+        self.assertEqual(len(facts), 1)
+
 
 class TestRepositoryRelationship(unittest.TestCase):
     def setUp(self):

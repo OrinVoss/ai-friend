@@ -26,11 +26,19 @@
 
 ### P0-1 语义检索静默失效：1024 维向量撞上 512 的默认值
 
+> ✅ **已修复（2026-07-16，`changes/2026-07-16-fix-embedding-dim-session-isolation.md`）**：`bytes_to_vec` 改为 `dim=None` 按 BLOB 长度推断，两个调用点显式传 `dim=len(qvec)`；静默 `except: pass` 改为逐条 debug + 每次检索一条汇总 warning。启动自检未做。
+>
+> 🔴 **顺带发现**：`experiences` 表写入了 embedding 列，但 `_row_to_experience`（`repository.py:604`）从不读回，experience 语义检索路径是死代码——向量写了没人用，接线或停写归 Layer 1 二期决策。
+
 `memory/embeddings.py:120` —— `bytes_to_vec(data, dim=512)` 维度写死 512；两个消费方 `memory/retrieval.py:148` 和 `retrieval.py:182` 调用时都不传 dim。生产库实测全部 BLOB 为 4096 字节 = 1024 维 → `bytes_to_vec` 抛 `ValueError`，被 `retrieval.py:150` 的 `except Exception: pass` 吞掉，`semantic = 0.0`。
 
 后果：**混合检索（语义 0.6 + 关键词 0.4，`retrieval.py:132-133`）实际退化为纯关键词打分，且日志无一字提及**。`embedding_version` 本是为这类不一致准备的版本字段，但全项目只有写入和行映射引用它（`repository.py:601,632,647`、`models/memory.py:37,100,133`），**没有任何逻辑读取**——保险丝装了，没接线。
 
 ### P0-2 跨 session 数据泄漏：矛盾检测可以删掉别的角色的事实
+
+> ⚠️ **部分修复（2026-07-16）**：`get_similar_facts()` 已加 `session_id` 过滤，`deactivate_fact()` 已加 session 校验 + 未命中 warning（`changes/2026-07-16-fix-embedding-dim-session-isolation.md`）。**剩余**：`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 写方法仍无 session 校验。
+>
+> 🔴 **新发现**：`user_facts` 唯一约束为 `UNIQUE(category, fact_key)`（`database.py:113`），不含 session_id——两个 session 写同一 key 会触发 `ON CONFLICT` 把另一个 session 的行原地覆盖。需迁移为 `UNIQUE(category, fact_key, session_id)`，属 schema 变更，排在 P0-4 备份之后做。
 
 `storage/repository.py:137-145` —— `get_similar_facts()` 的 WHERE 没有 `session_id` 过滤（同文件其他查询都有）。consolidation 的矛盾检测（`memory/consolidation.py:262-269`）拿它找「相似旧事实」，命中后 `resolve()` 经 `deactivate_fact()` 按 id 直接置 `is_active=0`（`repository.py:117-124`，同样无 session 校验）。
 
@@ -83,7 +91,7 @@ schema_version 表存在且已 stamp（`database.py:353-357`），但迁移不�
 
 ### P0：正确性地基（纯 bug 修复 + 备份，无需灰度开关）
 
-**1. 让语义检索真正生效**
+**1. 让语义检索真正生效**（✅ 核心修复已完成 2026-07-16；启动自检未做）
 
 - `bytes_to_vec` 不再写死维度：按 BLOB 长度推断（`len(data) // 4`），或调用方传入当前引擎维度——二选一，全项目统一
 - 加启动自检：open 后抽一条 BLOB 解码并与 `encode_single` 结果做点积，失败 `logger.warning`——把「静默 0 分」变成「启动一句话」
@@ -95,7 +103,7 @@ schema_version 表存在且已 stamp（`database.py:353-357`），但迁移不�
 - retrieval 只解码 version 匹配的行；不匹配的行视同无向量，并入批量重嵌入（`consolidation.py:536-537` 的 `WHERE embedding IS NULL` 扩为 `OR embedding_version != ?`）
 - 换模型/换维度 = 常量 +1，旧向量自动滚动重建——这就是这个字段本来的使命
 
-**3. 补齐 session 隔离**
+**3. 补齐 session 隔离**（⚠️ 部分完成 2026-07-16：`get_similar_facts` + `deactivate_fact` 已堵；其余按 id 写方法待补，另见 P0-2 新发现的唯一约束问题）
 
 - `get_similar_facts()` 加 `session_id = ?`（self.session_id 现成）
 - 按 id 写的方法（`deactivate_fact` / `update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 三个）加 `AND session_id = ?`，跨 session id 直接写不进去
@@ -179,9 +187,9 @@ schema_version 升级为迁移台账：每个迁移（ALTER 批次 / #RM-001 / #
 
 测试：
 
-1. 1024 维 `vec_to_bytes` → `bytes_to_vec` 不抛异常，`_hybrid_score` 对带向量候选给出 semantic > 0 的分
+1. 1024 维 `vec_to_bytes` → `bytes_to_vec` 不抛异常，`_hybrid_score` 对带向量候选给出 semantic > 0 的分 ✅（`tests/test_retrieval.py::TestBytesToVecDim` / `TestHybridScoreSemanticDim`，2026-07-16）
 2. embedding_version 不匹配的行不参与打分，且出现在重嵌入批次里
-3. `get_similar_facts` 只返回本 session 行；用他 session 的 id 调 `deactivate_fact` 不生效
+3. `get_similar_facts` 只返回本 session 行；用他 session 的 id 调 `deactivate_fact` 不生效 ✅（`tests/test_repository.py`，2026-07-16）
 4. 触发迁移的 open 先生成备份文件；第 6 份备份产生时最旧被删
 5. per-session prune：session A 刷 1200 条 turns，session B 的 100 条原样保留
 6. 锁文件存在时第二个 `Database.open()` 报清晰错误

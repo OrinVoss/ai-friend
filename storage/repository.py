@@ -115,12 +115,16 @@ class Repository:
             await self.db.commit()
 
     async def deactivate_fact(self, fact_id: int) -> None:
-        """Soft-delete a fact (set is_active=0). Used when a fact is contradicted."""
+        """Soft-delete a fact (set is_active=0). Used when a fact is contradicted.
+        Session-scoped: an id belonging to another session is a no-op."""
         logger.info(f"[db] deactivate_fact id={fact_id}")
         async with self.db.cursor() as c:
             await c.execute(
-                "UPDATE user_facts SET is_active = 0, composite_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (fact_id,))
+                "UPDATE user_facts SET is_active = 0, composite_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
+                (fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] deactivate_fact id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
@@ -133,15 +137,17 @@ class Repository:
             await self.db.commit()
 
     async def get_similar_facts(self, category: str, key: str, limit: int = 5) -> list[UserFact]:
-        """Find facts with similar category or key for contradiction checking."""
+        """Find facts with similar category or key for contradiction checking.
+        Session-scoped like every other query in this class."""
         async with self.db.cursor() as c:
             await c.execute("""
                 SELECT * FROM user_facts
                 WHERE is_active = 1
+                  AND session_id = ?
                   AND (category = ? OR fact_key LIKE ?)
                 ORDER BY composite_score DESC
                 LIMIT ?
-            """, (category, f"%{key}%", limit))
+            """, (self.session_id, category, f"%{key}%", limit))
             return [self._row_to_fact(r) for r in await c.fetchall()]
 
     # ── Experiences ──

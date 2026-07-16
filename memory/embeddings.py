@@ -117,10 +117,16 @@ class EmbeddingEngine:
         return np.dot(doc_vecs, query_vec)
 
     @staticmethod
-    def bytes_to_vec(data: bytes, dim: int = 512) -> np.ndarray:
-        """Deserialize BLOB -> float32 array."""
+    def bytes_to_vec(data: bytes, dim: int | None = None) -> np.ndarray:
+        """Deserialize BLOB -> float32 array.
+
+        dim=None accepts whatever the blob contains (length is inferred).
+        Pass an explicit dim to validate — callers should use len(query_vec)
+        so a mismatched stored embedding fails loudly instead of silently
+        zeroing the semantic score.
+        """
         vec = np.frombuffer(data, dtype=np.float32)
-        if len(vec) != dim:
+        if dim is not None and len(vec) != dim:
             raise ValueError(f"Expected {dim} floats, got {len(vec)}")
         return vec
 
