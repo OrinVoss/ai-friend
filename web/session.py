@@ -268,7 +268,9 @@ class SessionManager:
         self._create_count: int = 0  # #123: throttle cleanup_old
 
     async def open(self):
-        self.db = Database(self.config.db_path)
+        self.db = Database(self.config.db_path,
+                           backup_enabled=self.config.db_backup_enabled,
+                           backup_keep=self.config.db_backup_keep)
         await self.db.open()
         self.repo = Repository(self.db)
         # SN-005/006: build the shared clients once for all future sessions.

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import aiosqlite
 
@@ -30,8 +31,15 @@ ALLOWED_ALTERATIONS = {
 
 
 class Database:
-    def __init__(self, db_path: str):
+    # Current schema target; bump when adding migrations. initialize() stamps
+    # it into schema_version, and open() uses it to decide whether a
+    # pre-migration backup is needed (version behind => migrations will run).
+    CURRENT_SCHEMA_VERSION = 2
+
+    def __init__(self, db_path: str, backup_enabled: bool = True, backup_keep: int = 5):
         self.db_path = db_path
+        self.backup_enabled = backup_enabled
+        self.backup_keep = backup_keep
         self._lock_init: asyncio.Lock | None = None
         self._lock_loop_id: int = 0
         self.conn: aiosqlite.Connection | None = None
@@ -46,12 +54,18 @@ class Database:
 
     async def open(self) -> None:
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+        # Check for a pre-existing non-empty file BEFORE connect — aiosqlite
+        # creates the file on connect, which would make a fresh database look
+        # like an existing one worth backing up.
+        pre_existing = (os.path.exists(self.db_path)
+                        and os.path.getsize(self.db_path) > 0)
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
         await self.conn.execute("PRAGMA journal_mode=WAL")
         await self.conn.execute("PRAGMA wal_autocheckpoint=1000")  # #247: auto-checkpoint every 1000 pages
         await self.conn.execute("PRAGMA foreign_keys=ON")
         await self.conn.execute("PRAGMA busy_timeout=5000")  # #154
+        await self._backup_before_migration(pre_existing)
         await self.initialize()
         try:
             result = await self.conn.execute("PRAGMA integrity_check")
@@ -350,11 +364,12 @@ class Database:
             # current schema version so subsequent initialize() runs can detect/
             # version-gate new migrations.
             # ML-001: version 2 adds observations / facts_v2 tables.
-            if current_version < 2:
+            if current_version < self.CURRENT_SCHEMA_VERSION:
                 await c.execute(
-                    "INSERT OR IGNORE INTO schema_version (version) VALUES (2)"
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
+                    (self.CURRENT_SCHEMA_VERSION,),
                 )
-                logger.info(f"[db] schema migrated from {current_version} to 2")
+                logger.info(f"[db] schema migrated from {current_version} to {self.CURRENT_SCHEMA_VERSION}")
 
             # #157: create indexes for frequently-queried columns
             await c.executescript("""
@@ -398,3 +413,87 @@ class Database:
             logger.info(f"[db] closed: {self.db_path}")
             await self.conn.close()
             self.conn = None
+
+    # ── Backup (P0-3: snapshot before destructive migrations) ──
+
+    async def _backup_before_migration(self, pre_existing: bool) -> None:
+        """Snapshot the DB before initialize() applies schema migrations.
+
+        A backup is taken only when all of these hold:
+        - backups are enabled and this is a file-backed database
+        - `pre_existing`: the file existed and was non-empty before connect
+          (a fresh DB has nothing to lose)
+        - schema_version is behind CURRENT_SCHEMA_VERSION, meaning
+          initialize() is about to run migrations — some of which (#SR-002)
+          are destructive. Up-to-date databases open without a backup.
+        """
+        if not self.backup_enabled or self.db_path == ":memory:":
+            return
+        if not pre_existing:
+            return
+        version = 0
+        try:
+            async with self.cursor() as c:
+                await c.execute("SELECT MAX(version) FROM schema_version")
+                row = await c.fetchone()
+                version = row[0] if row and row[0] else 0
+        except aiosqlite.Error:
+            version = 0  # pre-schema_version database — migrations will run
+        if version >= self.CURRENT_SCHEMA_VERSION:
+            return
+        await self.backup()
+
+    async def backup(self) -> str | None:
+        """Create a consistent snapshot in <db_dir>/backups/ via VACUUM INTO.
+
+        VACUUM INTO yields a self-contained, compacted copy, so the snapshot
+        doubles as space reclamation. Keeps the newest `backup_keep` files.
+        Returns the backup path, or None when skipped/failed.
+        """
+        if self.conn is None or self.db_path == ":memory:":
+            return None
+        db_dir = os.path.dirname(self.db_path) or "."
+        backups_dir = os.path.join(db_dir, "backups")
+        os.makedirs(backups_dir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(self.db_path))[0]
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = os.path.join(backups_dir, f"{stem}.{ts}.db")
+        # Same-second collision guard (e.g. rapid successive opens in tests)
+        n = 1
+        while os.path.exists(backup_path):
+            backup_path = os.path.join(backups_dir, f"{stem}.{ts}-{n}.db")
+            n += 1
+        try:
+            await self.commit()  # flush pending writes before the snapshot
+            escaped = backup_path.replace("'", "''")
+            async with self.cursor() as c:
+                await c.execute(f"VACUUM INTO '{escaped}'")
+            size_kb = os.path.getsize(backup_path) // 1024
+            logger.info(f"[db] backup created: {backup_path} ({size_kb} KB)")
+        except aiosqlite.Error as e:
+            logger.warning(f"[db] backup failed: {e}")
+            return None
+        self._rotate_backups(backups_dir, stem)
+        return backup_path
+
+    def _rotate_backups(self, backups_dir: str, stem: str) -> None:
+        """Delete oldest snapshots beyond backup_keep.
+
+        Sorted by mtime rather than name: same-second collision suffixes
+        (`-1`, `-2`, ...) do not sort lexically after the plain timestamp.
+        """
+        try:
+            names = [
+                f for f in os.listdir(backups_dir)
+                if f.startswith(stem + ".") and f.endswith(".db")
+            ]
+            names.sort(key=lambda f: os.path.getmtime(os.path.join(backups_dir, f)))
+        except OSError:
+            return
+        excess = len(names) - self.backup_keep
+        for name in names[:max(excess, 0)]:
+            try:
+                os.remove(os.path.join(backups_dir, name))
+                logger.info(f"[db] backup rotated out: {name}")
+            except OSError as e:
+                logger.warning(f"[db] failed to delete old backup {name}: {e}")

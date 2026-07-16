@@ -36,7 +36,8 @@ async def main():
         auto_start_embedding(logger)
 
         # Initialize storage
-        db = Database(config.db_path)
+        db = Database(config.db_path, backup_enabled=config.db_backup_enabled,
+                      backup_keep=config.db_backup_keep)
         await db.open()
         repo = Repository(db)
 

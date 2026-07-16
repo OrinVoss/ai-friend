@@ -79,6 +79,9 @@ class Config:
     conversation_examples_max_turns: int = 3
     # ML-001: Layer 1 Memory lifecycle switch
     use_observation_fact: bool = False
+    # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
+    db_backup_enabled: bool = True
+    db_backup_keep: int = 5
     # CE-001: configurable conversation style examples (#28)
     conversation_examples: list[dict] = field(default_factory=lambda: [
         {

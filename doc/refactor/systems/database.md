@@ -38,13 +38,15 @@
 
 > ⚠️ **部分修复（2026-07-16）**：`get_similar_facts()` 已加 `session_id` 过滤，`deactivate_fact()` 已加 session 校验 + 未命中 warning（`changes/2026-07-16-fix-embedding-dim-session-isolation.md`）。**剩余**：`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 写方法仍无 session 校验。
 >
-> 🔴 **新发现**：`user_facts` 唯一约束为 `UNIQUE(category, fact_key)`（`database.py:113`），不含 session_id——两个 session 写同一 key 会触发 `ON CONFLICT` 把另一个 session 的行原地覆盖。需迁移为 `UNIQUE(category, fact_key, session_id)`，属 schema 变更，排在 P0-4 备份之后做。
+> 🔴 **新发现**：`user_facts` 唯一约束为 `UNIQUE(category, fact_key)`（`database.py:113`），不含 session_id——两个 session 写同一 key 会触发 `ON CONFLICT` 把另一个 session 的行原地覆盖。需迁移为 `UNIQUE(category, fact_key, session_id)`，属 schema 变更，排在 P0-3 备份（已完成）之后做。
 
 `storage/repository.py:137-145` —— `get_similar_facts()` 的 WHERE 没有 `session_id` 过滤（同文件其他查询都有）。consolidation 的矛盾检测（`memory/consolidation.py:262-269`）拿它找「相似旧事实」，命中后 `resolve()` 经 `deactivate_fact()` 按 id 直接置 `is_active=0`（`repository.py:117-124`，同样无 session 校验）。
 
 后果：角色 A 的一次矛盾检测可以把角色 B 的事实软删。Layer 6 一角色一 session 落地（`../layer6-personality/README.md`）后多角色共存是常态，这个洞就从「潜在」变「日常」。
 
 ### P0-3 数据库零备份，而迁移在每次启动时自动执行
+
+> ✅ **已修复（2026-07-16，`changes/2026-07-16-database-auto-backup.md`）**：`open()` 在 `initialize()` 前检测——文件非空且 `schema_version` 落后于 `CURRENT_SCHEMA_VERSION` 时自动 `VACUUM INTO` 快照到 `data/backups/`，按 mtime 滚动保留最近 `db_backup_keep`（默认 5）份；新库与已是最新版本的库不备份。配置 `db_backup_enabled` / `db_backup_keep`。
 
 人格文件加载前先 `shutil.copy2` 备份（`core/personality.py:105-109`，PE-004），但 DB——唯一不可替代的自我状态载体——没有任何备份机制。同时 `initialize()`（`database.py:92`）在每次 `open()` 自动跑全部迁移，其中 #SR-002 含**不可逆的 DELETE**（`database.py:341-346`）。生产库当前 schema_version=1，下次启动就要一次性建两张新表 + 跑合并迁移——没有任何回滚点。后面 Layer 1 二期旧表数据迁移、三期删旧表（`../layer1-memory/plan.md` Step 7），每一步都是销毁性操作，都踩在同一条「先动手、无备份」的线上。
 
@@ -109,7 +111,7 @@ schema_version 表存在且已 stamp（`database.py:353-357`），但迁移不�
 - 按 id 写的方法（`deactivate_fact` / `update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 三个）加 `AND session_id = ?`，跨 session id 直接写不进去
 - 依赖：无，越早越好——Layer 6 落地前必须把洞堵上
 
-**4. 自动备份（先于一切销毁性操作）**
+**4. 自动备份（先于一切销毁性操作）**（✅ 已完成 2026-07-16：迁移前 `VACUUM INTO` 快照 + 滚动保留 5 份；差异——按 mtime 滚动而非文件名排序，以兼容同秒碰撞后缀）
 
 - `open()` 检测到有迁移要执行时，先 `VACUUM INTO 'data/backups/ai_friend.YYYYMMDD-HHMMSS.db'`——备份与空间回收一步完成，且 VACUUM INTO 产物是一致性快照
 - 保留最近 5 份，滚动删除；配置 `db_backup_enabled` / `db_backup_keep`，默认开
@@ -161,9 +163,9 @@ schema_version 升级为迁移台账：每个迁移（ALTER 批次 / #RM-001 / #
 ## 4. 与现有设计的关系
 
 - **自我系统（`../self-system.md`）**：记忆是自我状态四组件之一，SQLite 是其唯一载体。本方案不动状态模型，只让载体可靠——备份对应「状态唯一」前提下的「状态不丢」，物理回收对应「万物有生命周期」的存储层兑现
-- **Layer 1（`../layer1-memory/plan.md`）**：新旧表双写、旧表迁移与删除路线归 Layer 1，本方案不重复；只要求 P0-4 备份先落地，二期/三期的销毁性操作才有回滚点
+- **Layer 1（`../layer1-memory/plan.md`）**：新旧表双写、旧表迁移与删除路线归 Layer 1，本方案不重复；P0-3 备份已落地（2026-07-16），二期/三期的销毁性操作已有回滚点
 - **睡眠循环（`../layer1-memory/sleep-cycle.md`）**：Stage 3 GC 是物理回收的统一窗口，本方案提供 per-session prune / 快照保留窗 / 物理 DELETE 三个存储原语给它调用
-- **Layer 6（`../layer6-personality/README.md`）**：P0-3 session 隔离是角色隔离的存储前提；P1-6 单写者护栏与「一角色一 session」互补
+- **Layer 6（`../layer6-personality/README.md`）**：P0-2 session 隔离是角色隔离的存储前提；P1-6 单写者护栏与「一角色一 session」互补
 - **Memory Agent / 检索（`../layer1-memory/memory-agent.md`、`../layer3-retrieval/README.md`）**：P0-1/P0-2 修好后，向量召回与置信度设计才建立在真实语义分之上，否则上层所有排序都在吃关键词的残羹
 - **工具系统增强（`../layer5-tool/enhancement-plan.md`）**：同为基础设施层增强，无依赖，可并行
 
@@ -190,7 +192,7 @@ schema_version 升级为迁移台账：每个迁移（ALTER 批次 / #RM-001 / #
 1. 1024 维 `vec_to_bytes` → `bytes_to_vec` 不抛异常，`_hybrid_score` 对带向量候选给出 semantic > 0 的分 ✅（`tests/test_retrieval.py::TestBytesToVecDim` / `TestHybridScoreSemanticDim`，2026-07-16）
 2. embedding_version 不匹配的行不参与打分，且出现在重嵌入批次里
 3. `get_similar_facts` 只返回本 session 行；用他 session 的 id 调 `deactivate_fact` 不生效 ✅（`tests/test_repository.py`，2026-07-16）
-4. 触发迁移的 open 先生成备份文件；第 6 份备份产生时最旧被删
+4. 触发迁移的 open 先生成备份文件；第 6 份备份产生时最旧被删 ✅（`tests/test_database_backup.py`，2026-07-16）
 5. per-session prune：session A 刷 1200 条 turns，session B 的 100 条原样保留
 6. 锁文件存在时第二个 `Database.open()` 报清晰错误
 7. 两个线程经 run_async 各 upsert 100 次，最终行数与值正确（锁修复后）
@@ -208,7 +210,7 @@ schema_version 升级为迁移台账：每个迁移（ALTER 批次 / #RM-001 / #
 ## 7. 相关文档
 
 - `../self-system.md` — 统一架构：记忆是自我状态组件，本文档是其存储地基
-- `../layer1-memory/plan.md` — 新旧表双写与旧表删除路线（本方案 P0-4 是其前置）
+- `../layer1-memory/plan.md` — 新旧表双写与旧表删除路线（本方案 P0-3 是其前置，已完成）
 - `../layer1-memory/sleep-cycle.md` — Stage 3 GC：物理回收的统一调度窗口
 - `../layer1-memory/memory-agent.md` — 向量召回的消费方，依赖 P0-1 修复后的真实语义分
-- `../layer6-personality/README.md` — 角色/session 绑定，依赖 P0-3 的存储层隔离
+- `../layer6-personality/README.md` — 角色/session 绑定，依赖 P0-2 的存储层隔离

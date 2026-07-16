@@ -196,6 +196,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **Prompt 分层缓存** — system prompt 拆为静态/慢变/动态块，静态块跨调用复用，减少重复 token 消耗（#160）
 - **记忆生命周期（双写中）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（`use_observation_fact` 开关）
 - **语义检索维度自适应** — 向量按 BLOB 实际维度解码，维度不匹配时日志告警而非静默降级
+- **数据库自动备份** — 检测到 schema 迁移将执行时自动 `VACUUM INTO` 快照到 `data/backups/`，滚动保留最近 5 份（`db_backup_enabled` / `db_backup_keep`）
 
 ---
 
