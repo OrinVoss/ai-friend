@@ -197,6 +197,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **记忆生命周期（双写中）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（`use_observation_fact` 开关）
 - **语义检索维度自适应** — 向量按 BLOB 实际维度解码，维度不匹配时日志告警而非静默降级
 - **数据库自动备份** — 检测到 schema 迁移将执行时自动 `VACUUM INTO` 快照到 `data/backups/`，滚动保留最近 5 份（`db_backup_enabled` / `db_backup_keep`）
+- **统一管线（灰度中）** — CLI 经 `cli_shared_pipeline` 切换到与 Web 相同的 ConversationEngine 管线（P1；情绪更新、Prompt 缓存随之覆盖 CLI）
 
 ---
 
@@ -335,7 +336,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（422 用例，33 个测试文件）
+├── tests/                     单元测试（435 用例，34 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -362,6 +363,7 @@ ai-friend/
 │   ├── test_database_backup.py 数据库自动备份测试（6 用例）
 │   ├── test_user_facts_unique_migration.py 唯一约束迁移测试（3 用例）
 │   ├── test_session_factory.py 统一装配测试（5 用例）
+│   ├── test_unified_pipeline.py 统一管线引擎测试（13 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_session_manager.py 会话管理测试（6 用例）
 │   ├── test_memory_tools.py    记忆工具测试（6 用例）
@@ -371,12 +373,13 @@ ai-friend/
 │   ├── test_music_tool.py      音乐工具测试（4 用例）
 │   └── test_conversation_examples.py 对话示例测试（2 用例）
 │
-├── core/                      核心引擎（17 模块，三层架构）
+├── core/                      核心引擎（18 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
 │   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
 │   ├── agent.py                核心引擎：Agent 3 Roleplay + ReAct 循环
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── session_factory.py     CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
+│   ├── conversation_engine.py 统一对话引擎 + Frontend 事件接口（统一管线 P1）
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
 │   ├── prompt_cache.py        Prompt 分层缓存（静态/慢变/动态块复用，#160）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）

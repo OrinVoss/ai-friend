@@ -9,6 +9,7 @@ import time
 
 from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
 from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
+from core.conversation_engine import ConversationEngine, Frontend
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,12 @@ class CliController:
     # ── Main run loop ──
 
     def run(self) -> None:
+        # UP-001: unified-pipeline P1 gray switch — when enabled, the CLI runs
+        # over the shared ConversationEngine (same pipeline as Web) instead of
+        # the legacy inline state machine below.
+        if getattr(self.a.config, "cli_shared_pipeline", False):
+            self._run_shared_pipeline()
+            return
         from core.agent import AgentState
         a = self.a
         if a.ui:
@@ -394,3 +401,82 @@ class CliController:
             a.ui.display_help()
         elif a.ui:
             a.ui.display.print_system(f"未知命令: {cmd}")
+
+    # ── Shared pipeline (unified-pipeline P1, gray) ──
+
+    def _run_shared_pipeline(self) -> None:
+        """CLI over the unified ConversationEngine — the same pipeline as Web.
+
+        Compared with the legacy state machine above, this path also gets
+        emotion updates, context_summary reuse and prompt caching for free,
+        because all of it lives in MessageHandler.
+        """
+        from core.agent import AgentState
+        a = self.a
+        if a.ui:
+            a.ui.start()
+            a.ui.display_banner(a.personality.config.name)
+        a.state = AgentState.BOOT
+        self._on_boot()
+        engine = ConversationEngine(a)
+        frontend = _CliFrontend(a.ui, a.personality.config.name)
+        try:
+            while a._running:
+                if a.ui:
+                    print("\033[33m用户输入: \033[0m", end="", flush=True)
+                user_input = a.ui.reader.read_line() if a.ui else None
+                if user_input is None:
+                    time.sleep(0.1)
+                    continue
+                if user_input.startswith("/"):
+                    self._handle_command(user_input)
+                    continue
+                try:
+                    engine.handle_message(user_input, frontend)
+                except Exception as e:
+                    logger.error(f"[cli] engine error: {e}", exc_info=True)
+                    if a.ui:
+                        a.ui.display.print_error(str(e))
+                if a.turn_count > 0 and a.turn_count % 10 == 0:
+                    a.personality.save(a.config.personality_file)
+        except KeyboardInterrupt:
+            pass
+        self._on_shutdown()
+
+
+class _CliFrontend(Frontend):
+    """Terminal frontend: typewriter streaming with a lazy name prefix.
+
+    Only the first generation pass streams (tool rounds don't), so a reply
+    that never streamed is rendered whole via display.respond on done.
+    """
+
+    def __init__(self, ui, name: str):
+        self._ui = ui
+        self._name = name
+        self._streamed = False
+
+    def on_token(self, token: str) -> None:
+        if not token:
+            return
+        if not self._streamed and self._ui:
+            print("\r", end="", flush=True)
+            print(f"\033[1;36m{self._name}:\033[0m ", end="", flush=True)
+        self._streamed = True
+        if self._ui:
+            print(token, end="", flush=True)
+
+    def on_message_done(self, text: str) -> None:
+        if self._streamed:
+            print()
+        elif self._ui and text:
+            self._ui.display.respond(text, prefix=self._name)
+        self._streamed = False
+
+    def on_sleep_reply(self, text: str) -> None:
+        if self._ui:
+            self._ui.display.respond(text, prefix=self._name)
+
+    def on_error(self, error: str) -> None:
+        if self._ui:
+            self._ui.display.print_error(error)

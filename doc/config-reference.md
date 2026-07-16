@@ -72,6 +72,7 @@
 | `prompt_cache_ttl_seconds` | int | `60` | 慢变提示词块（关系、长期记忆）缓存 TTL（秒），`0` 表示立即过期 |
 | `agent1_short_input_threshold` | int | `20` | Agent 1 短输入快速返回阈值（字符数），输入长度小于该值且不含工具关键词时跳过 LLM |
 | `conversation_examples_max_turns` | int | `3` | 系统提示中对话示例仅在会话前 N 轮注入，`0` 表示始终不注入 |
+| `cli_shared_pipeline` | bool | `false` | 统一管线 P1 灰度开关：开启后 CLI 走与 Web 相同的 ConversationEngine 管线（情绪更新、Prompt 缓存随之覆盖 CLI） |
 
 `conversation_examples` 每项格式：
 
