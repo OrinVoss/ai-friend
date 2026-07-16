@@ -17,22 +17,22 @@ Layer 6: Personality / Session / 记忆绑定
 
 ## 当前总览
 
-| Layer | 主题 | 状态 | 负责人 |
-|-------|------|------|--------|
-| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | 一期已完成，双写阶段 | Kimi |
-| Layer 2 | Prompt 分层与静态化 | 大部分已完成 | Kimi |
-| Layer 3 | 多阶段 Retrieval | 未开始 | - |
-| Layer 4 | Agent Runtime 解耦 | 部分已完成 | Kimi |
-| Layer 5 | Tool Agent 精简 | 大部分已完成（Prompt 已精简） | Kimi |
-| Layer 6 | Personality / Session / 记忆绑定 | 未开始 | - |
+| Layer | 主题 | 代码状态 | 文档状态 | 负责人 |
+|-------|------|----------|----------|--------|
+| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | 一期已完成，双写阶段 | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
+| Layer 2 | Prompt 分层与静态化 | 大部分已完成 | 完整（含短输入过滤优化方案） | Kimi |
+| Layer 3 | 多阶段 Retrieval | 未开始 | 设计完成 | Kimi |
+| Layer 4 | Agent Runtime 解耦 | 部分已完成 | 完整 | Kimi |
+| Layer 5 | Tool Agent 精简 | 大部分已完成（Prompt 已精简） | 完整 | Kimi |
+| Layer 6 | Personality / Session / 记忆绑定 | 未开始 | 设计完成 | Kimi |
 
 ---
 
 ## Layer 1: Memory 生命周期
 
-**状态**：一期已完成并推送
+**代码状态**：一期已完成并推送
 
-**已完成**：
+**已完成（代码）**：
 - [x] 新增 `observations` / `facts_v2` 表
 - [x] 新增 `Observation` / `FactV2` 数据模型
 - [x] 实现 `MemoryLifecycleManager`（observe / promote / verify / contradict / decay / gc）
@@ -41,7 +41,15 @@ Layer 6: Personality / Session / 记忆绑定
 - [x] 测试覆盖（19 个新测试 + 全量 401 passed）
 - [x] Changes 文档：`changes/2026-07-14-memory-layer1-observation-fact.md`
 
+**已完成（文档）**：
+- [x] 完整实施方案：`layer1-memory/plan.md`
+- [x] HMS 启发记录：`layer1-memory/insights-from-hms.md`
+- [x] Memory Agent 设计：`layer1-memory/memory-agent.md`
+- [x] 线索提取规则：`layer1-memory/memory-agent-clues.md`
+- [x] 交叉验证算法：`layer1-memory/memory-agent-verification.md`
+
 **待完成（二期）**：
+- [ ] Memory Agent P0 实现（answer / correct_fact + 测试）
 - [ ] 用 Insight 替换 Reflection
 - [ ] Retrieval 切换到 `facts_v2` + `insights_v2`
 - [ ] 完整 GC：merge / decay / obsolete / archive
@@ -65,8 +73,10 @@ Layer 6: Personality / Session / 记忆绑定
 - [x] 工具规则从 ToolRegistry 动态生成（`prompts/tools_description.py`）
 - [x] 情绪摘要化（`EmotionalState.to_prompt_summary()`）
 - [x] Tool Agent Prompt 精简
+- [x] 短输入过滤优化方案已写入文档
 
 **待完成**：
+- [ ] 短输入过滤升级为语义相似度（方案已设计，代码未改）
 - [ ] 监控 Prompt Cache 命中率与 token 节省
 - [ ] 进一步压缩 Agent 3 Prompt
 
@@ -76,10 +86,17 @@ Layer 6: Personality / Session / 记忆绑定
 
 ## Layer 3: 多阶段 Retrieval
 
-**状态**：未开始
+**代码状态**：未开始
+**文档状态**：设计完成
+
+**已完成（文档）**：
+- [x] 多阶段检索架构（Query Analyzer → Parallel Retriever → Cross Verifier → Reranker → Context Builder）
+- [x] 各 Agent Retrieval Profile（Agent 1/2/3、Fact Extractor、Memory Agent）
 
 **待完成**：
-- [ ] Query → Intent → Fact → Episode → Reflection → Rank → Context Builder
+- [ ] `QueryClues` 数据模型 + `ParallelRetriever`
+- [ ] `CrossVerifier` 与 `FactChecker` 集成
+- [ ] `ContextBuilder` 按 Agent 类型组装
 - [ ] 不同 Agent 使用不同 Retrieval 策略
 - [ ] React 默认不读取 Reflection
 
@@ -126,13 +143,20 @@ Layer 6: Personality / Session / 记忆绑定
 
 ## Layer 6: Personality / Session / 记忆绑定
 
-**状态**：未开始
+**代码状态**：未开始
+**文档状态**：设计完成
+
+**已完成（文档）**：
+- [x] RoleSession 数据模型设计
+- [x] 绑定关系图（Role → personality / session / sleep / embedding）
+- [x] 实施步骤（5 步）
 
 **待完成**：
-- [ ] 角色定义文件规范化（`personalities/{role_id}.json`）
-- [ ] Session 创建时绑定 `role_id`
+- [ ] 强制 `session_id = role_id`
+- [ ] 废弃根目录 `personality.json`
+- [ ] `PersonalityManager` 统一加载/保存
+- [ ] 情绪状态持久化到 personality 文件
 - [ ] 多角色数据隔离验证
-- [ ] 角色管理接口（CLI / Web）
 
 **阻塞项**：需要先明确多角色产品形态
 
@@ -144,11 +168,11 @@ Layer 6: Personality / Session / 记忆绑定
 2. 同一喜好重复 3 次后，确认 `verification_count >= 3` 且 `confidence` 上升
 3. 用户更正信息后，确认旧 FactV2 被标记为 `contradicted`
 4. 监控 Prompt Cache 实际命中率与 token 节省效果
-5. 根据验证结果，决定是否启动 Layer 1 二期
+5. 根据验证结果，决定是否启动 Layer 1 二期（Memory Agent P0 或 Insight 替换 Reflection）
 
 ## 相关文档
 
-- `doc/refactor/layer1-memory/`
+- `doc/refactor/layer1-memory/`（plan / insights-from-hms / memory-agent / clues / verification）
 - `doc/refactor/layer2-prompt/`
 - `doc/refactor/layer3-retrieval/`
 - `doc/refactor/layer4-agent/`
