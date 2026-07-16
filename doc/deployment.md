@@ -45,8 +45,12 @@ python main.py
 
 # 生产模式 — Web
 pip install uvicorn
-uvicorn web.server:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn web.server:app --host 0.0.0.0 --port 8000
 ```
+
+> 注意：会话、WebSocket 连接、速率限制等状态都保存在进程内存中
+> （`web/server.py` 的模块级 `session_manager`），只能单进程运行，
+> **不要** 使用 `--workers` 多进程模式。
 
 ---
 
@@ -54,30 +58,40 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000 --workers 4
 
 本地语义搜索依赖 llama.cpp 嵌入服务。
 
+**自动启动**：`main.py` 和 `web_main.py` 启动时都会调用
+`core/embedding_server.py` 的 `auto_start_embedding()`——若 8080 端口
+无服务且模型文件存在，自动拉起 `start_embedding_server.bat`（非阻塞，
+后台线程等待就绪，最长 90 秒），服务器输出写入
+`logs/embedding_server.log`。模型缺失或服务启动失败时自动降级，见下文。
+
 ### 1. 下载模型
 
 ```bash
 # 从 Hugging Face 下载 Qwen3.5-0.8B-Q6_K.gguf
-# 放到 models/ 目录
-models/
-  └── Qwen3.5-0.8B-Q6_K.gguf  (~640MB)
+# 放到 memory/ 目录（llama-server 二进制在 memory/llama-bin/）
+memory/
+  ├── Qwen3.5-0.8B-Q6_K.gguf  (~640MB)
+  └── llama-bin/
+        └── llama-server.exe 等
 ```
 
 ### 2. 启动 llama-server
+
+通常无需手动启动（见上文自动启动）。需要手动时：
 
 ```bash
 # Windows
 start_embedding_server.bat
 
-# 或手动启动
-llama-server.exe -m models/Qwen3.5-0.8B-Q6_K.gguf \
-  --host 127.0.0.1 --port 8080 \
-  --embeddings --n-gpu-layers 999
+# 或手动启动（与 bat 等效）
+memory\llama-bin\llama-server.exe -m memory\Qwen3.5-0.8B-Q6_K.gguf \
+  --embeddings --pooling mean --port 8080 \
+  -ngl 99 --ctx-size 2048 --batch-size 512 --threads 4 --host 127.0.0.1
 
-# macOS / Linux
-llama-server -m models/Qwen3.5-0.8B-Q6_K.gguf \
-  --host 127.0.0.1 --port 8080 \
-  --embeddings --n-gpu-layers 999
+# macOS / Linux（需自行准备对应平台的 llama-server 二进制）
+llama-server -m memory/Qwen3.5-0.8B-Q6_K.gguf \
+  --embeddings --pooling mean --port 8080 \
+  -ngl 99 --ctx-size 2048 --batch-size 512 --threads 4 --host 127.0.0.1
 ```
 
 ### 3. 验证
@@ -162,7 +176,16 @@ ai-friend.example.com {
 | 文件 | 说明 | 备份建议 |
 |------|------|----------|
 | `data/ai_friend.db` | SQLite 数据库（全部记忆） | 每日备份 |
+| `data/ai_friend.db-wal` / `.db-shm` | WAL 模式伴随文件 | 随主库一起处理 |
 | `personalities/*.json` | 角色定义 + 情绪状态 | 定期备份 |
+
+> 系统**没有内置自动备份机制**（P0-4 待办，方案见
+> `doc/refactor/systems/database.md`），需自行用脚本或计划任务完成。
+> 数据库运行在 WAL 模式（`PRAGMA journal_mode=WAL`，每 1000 页自动
+> checkpoint），最新写入可能暂存在 `.db-wal` 中——直接复制 `.db` 文件前
+> 应先做 checkpoint（见下文「数据库维护」）或在应用退出后复制
+> （应用关闭时会执行 `wal_checkpoint(TRUNCATE)`）。角色文件加载时
+> 会自动生成 `.bak` 副本，但这不能替代整体备份。
 
 ### 备份脚本
 
@@ -209,6 +232,12 @@ python -c "import os; print(f'{os.path.getsize(\"data/ai_friend.db\") / 1024:.0f
 | `AI_FRIEND_WEB_PORT` | — | Web 监听端口覆盖 |
 | `AI_FRIEND_EMBEDDING_ENDPOINT` | — | 嵌入服务端点覆盖 |
 | `AI_FRIEND_EMBEDDING_DIM` | — | 嵌入维度覆盖 |
+| `AI_FRIEND_SHORT_TERM_CAPACITY` | — | 短期记忆容量覆盖 |
+| `AI_FRIEND_MAX_TOOL_ITERATIONS` | — | ReAct 工具循环上限覆盖 |
+| `AI_FRIEND_TYPING_SPEED` | — | 打字机速度覆盖 |
+| `AI_FRIEND_PROMPT_CACHE_TTL` | — | Prompt 缓存 TTL（秒）覆盖 |
+| `AI_FRIEND_AGENT1_SHORT_INPUT_THRESHOLD` | — | Agent 1 短输入阈值覆盖 |
+| `AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS` | — | 对话示例轮数上限覆盖 |
 
 ---
 
@@ -233,6 +262,7 @@ New-NetFirewallRule -DisplayName "AI Friend" -Direction Inbound -Protocol TCP -L
 ### 生产环境 checklist
 
 - [ ] 使用环境变量注入 API Key（**不要** 写入 config.json）
+- [ ] 确认 Web 绑定地址：默认 `web_host=0.0.0.0` 监听所有网卡——仅本机使用改为 `127.0.0.1`；局域网/公网暴露必须先过反向代理 + HTTPS
 - [ ] 设置 Nginx/Caddy 反向代理 + HTTPS
 - [ ] 配置合适的 CORS（`config.allowed_origins`）和 CSP 头
 - [ ] 确认速率限制满足预期（默认 REST/WS 聊天 30/60s）

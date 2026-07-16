@@ -44,7 +44,7 @@ python web_main.py
 | `personality.interests` | 兴趣领域 |
 
 - `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的模板。
-- Web 端启动时选择角色；一个角色可拥有多个 session，每个 session 的情绪与记忆相互独立。
+- Web 端启动时选择角色；角色与 session 严格一一对应（`session_id = role_id`），每个角色拥有独立的情绪与记忆。
 
 ### CLI 内置命令
 
@@ -55,6 +55,7 @@ python web_main.py
 | `/mood` | 查看当前心情 |
 | `/status` | 查看关系状态和统计 |
 | `/forget` | 清除短期记忆 |
+| `/help` | 帮助 |
 
 ---
 
@@ -104,16 +105,30 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   ├── long_term.py     (SQLite CRUD)
     │   ├── embeddings.py    (EmbeddingEngine, Qwen3.5-0.8B, llama.cpp, LRU cache)
     │   ├── retrieval.py     (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
-    │   └── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码)
+    │   ├── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码 + 双写 Observation/FactV2)
+    │   ├── fact_checker.py  (矛盾检测 + 置信度衰减 + 用户纠正)
+    │   └── lifecycle.py     (MemoryLifecycleManager: Observation→Fact 生命周期)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
     ├── storage/             (aiosqlite 异步, WAL, 版本化迁移；session_roles 记录 session→role 映射)
     ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
-    └── models/              (EmotionalState, EmotionEvent)
+    └── models/              (EmotionalState / Turn / UserFact / Observation / FactV2 等)
 
 后处理（不变）:
     Emotion → Memory consolidation → Reflection
 ```
+
+### 模块依赖
+
+```
+storage ← memory ← tools ← core   （主体单向依赖，无环）
+models / prompts                  （纯数据 / 模板层，被各层引用）
+```
+
+- `core/agent.py` 是装配枢纽，直接依赖 15 个内部模块（全项目最多）。
+- 跨层例外：`storage/repository.py`、`memory/long_term.py` 等直接使用 `core/async_utils.py` 的 `run_async()`，`memory/consolidation.py` 使用 `core/personality.py`；被引用方不回依赖，故不成环。
+- 潜在环靠函数内 lazy import 打破：`agent ↔ cli_controller`、`short_term ↔ context_manager`、`prompts.system → core.prompt_cache`；`core/inner_drive.py` 顶层零内部 import（全部延迟到方法内）。
+- 双装配（已知问题）：`main.py`（CLI）与 `web/session.py`（Web）各自独立装配一遍全栈，无共享工厂。
 
 ---
 
@@ -196,12 +211,14 @@ Agent 1 对极短闲聊输入（长度 < `agent1_short_input_threshold`，不含
 2. **Query-Guided**：语义 (0.6) + 关键词 (0.4) 混合评分 → LLM 重排序
 3. **On-Demand**：LLM 主动调 recall 工具回溯
 
-语义搜索：基于 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, llama.cpp, 512维），
+语义搜索：基于 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, llama.cpp, 1024维），
 通过本地 llama-server /v1/embeddings API 计算余弦相似度。嵌入服务器不可用时自动降级为纯关键词检索。
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆表已按 `session_id` 隔离，包括 `user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离：`session_roles` 表记录 `session_id → role_id` 的一一映射，实现「一个角色一份记忆」。
+长期记忆共 9 张表，已按 `session_id` 隔离：`user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 新增的 `observations`（原始观察）和 `facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
+
+记忆生命周期（一期，双写阶段）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（二期规划）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2。配置开关 `use_observation_fact`（默认 false）控制双写。
 
 ---
 
@@ -335,19 +352,35 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（三层架构）
-│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 缺口决策）
-│   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行, temp=0.3）
-│   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）
+├── core/                    核心引擎（16 模块，三层架构）
+│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策）
+│   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
+│   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
+│   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
+│   ├── context_manager.py   上下文窗口管理（token 估算 + 压缩 + 摘要）
+│   ├── prompt_cache.py      Prompt 分层缓存（静态/慢变/动态块复用, #160）
 │   ├── personality.py       情绪引擎（四层）
+│   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
+│   ├── proactivity.py       主动行为（评分 + 频率限制）
+│   ├── cli_controller.py    CLI 状态机（run + 命令分发）
 │   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
+│   ├── monitor.py           LLM API 调用监控（环形缓冲，开发调试用）
 │   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）
-│   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）
-├── memory/                  记忆系统
+│   ├── logging_setup.py     日志配置（logs/YYYY-MM-DD.log + stderr）
+│   ├── async_utils.py       异步→同步桥接 run_async()（线程池安全）
+│   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）+ 执行 + 别名归一化
+├── memory/                  记忆系统（7 模块）
+│   ├── short_term.py        ConversationBuffer（deque, 线程安全）
+│   ├── long_term.py         LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
+│   ├── embeddings.py        本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache）
+│   ├── retrieval.py         三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
+│   ├── consolidation.py     记忆合并 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
+│   ├── fact_checker.py      矛盾检测 + 置信度衰减 + 用户纠正
+│   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
-├── storage/                 SQLite（WAL + 迁移）
+├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）
 ├── prompts/                 提示词模板
-├── models/                  数据模型
+├── models/                  数据模型（EmotionalState / Turn / UserFact / Observation / FactV2）
 ├── ui/                      CLI 界面
 └── web/                     Web 界面
     ├── server.py            FastAPI + WebSocket + Pydantic + 滑动窗口限流
@@ -367,7 +400,9 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 - [工具开发指南](tool-development.md)
 - [Prompt 工程参考](prompt-reference.md)
 - [部署手册](deployment.md)
-- [里程碑与 Issue](milestones-and-issues.md)
+- [已知问题](known-issues.md)
+- [系统性解决方案](systematic-solution.md)
+- [重构设计与进度](refactor/README.md)
 - [技术文档](technical.md)
 - [消息流转](message-flow.md)
 

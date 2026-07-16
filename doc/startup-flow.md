@@ -24,7 +24,7 @@ python web_main.py
                 │
                 ├── 4b. lifespan() 异步启动
                 │   ├── 日志重初始化
-                │   ├── session_manager.open() 打开数据库
+                │   ├── session_manager.open() 打开数据库（自动迁移 schema）
                 │   └── 后台 session 清理协程（5min 间隔）
                 │
                 └── 4c. Uvicorn 监听 0.0.0.0:8000 ── 等待请求
@@ -74,10 +74,11 @@ auto_start_embedding(logger)
 | 条件 | 行为 |
 |------|------|
 | `http://localhost:8080/v1/embeddings` 已有响应 | 跳过（跳转） |
-| `memory/Qwen3.5-0.8B-Q6_K.gguf` 模型文件存在 | `subprocess.Popen` 启动 `llama-server.exe` |
+| `memory/Qwen3.5-0.8B-Q6_K.gguf` 模型文件存在 | 先清理残留 llama-server 进程，再优先运行 `start_embedding_server.bat`；不存在则 `subprocess.Popen` 直接启动 `memory/llama-bin/llama-server.exe` |
 | 模型文件不存在 | 仅记录 info，**不阻塞启动** |
 
-嵌入服务约 1-2 秒启动完成（日志 `[embed] server ready`）。
+就绪等待在后台守护线程进行（每秒轮询，最多 90 秒），不阻塞主启动流程；
+完成后日志输出 `[embed] server ready`。CLI 与 Web 入口共用 `core/embedding_server.py`。
 不可用时自动降级为纯关键词搜索，不影响对话。
 
 ### Step 4a: FastAPI 模块加载（静态）
@@ -104,10 +105,10 @@ _ws_allowed_hosts = {"localhost", "127.0.0.1"} # 从 config 追加 Origin
 [0] _add_security_headers        ← 添 CSP/X-Frame-Options 头（响应路径）
     │
     ▼
-[1] RateLimitMiddleware          ← 滑动窗口限流
+[1] CORSMiddleware               ← 检查/设置 CORS 头
     │
     ▼
-[2] CORSMiddleware                ← 检查/设置 CORS 头
+[2] RateLimitMiddleware          ← 滑动窗口限流
     │
     ▼
 路由分发（/ → FileResponse, /api/* → JSON, /ws → WebSocket）
@@ -121,8 +122,13 @@ _ws_allowed_hosts = {"localhost", "127.0.0.1"} # 从 config 追加 Origin
 | `/api/chat` | POST | `chat_api()` | REST 聊天（非流式） |
 | `/api/status` | GET | `status_api()` | 关系指标 + 情绪历史 |
 | `/api/roles` | GET | `roles_api()` | 列出可选角色 |
-| `/api/chat/history` | GET | `history_api()` | 对话历史 |
+| `/api/chat/history` | GET | `chat_history_api()` | 对话历史 |
 | `/api/logs` | GET | `logs_api()` | SSE 实时日志流 |
+| `/api/sessions` | GET | `sessions_api()` | 列出某角色已有的 session |
+| `/api/monitor` | GET | `monitor_api()` | LLM 调用监控记录（JSON） |
+| `/api/monitor/clear` | GET | `monitor_clear()` | 清空监控缓冲 |
+| `/monitor` | GET | `monitor_page()` | 监控页面 |
+| `/favicon.ico` | GET | `favicon()` | 204，静默浏览器 404 |
 | `/ws` | WebSocket | `websocket_endpoint()` | 主聊天接口 |
 | `/static/*` | — | StaticFiles | 静态资源（app.js, style.css） |
 
@@ -139,7 +145,8 @@ async def lifespan(app):
 1. **日志重初始化** — uvicorn 可能重置了 root handler，重新 setup
 2. **`await session_manager.open()`**
    - 打开 SQLite 数据库（`data/ai_friend.db`，WAL 模式）
-   - 创建/验证表结构（版本化 schema）
+   - 自动迁移表结构（schema v2，共 9 张表，含 Layer 1 记忆新增的
+     `observations` / `facts_v2`；列级 ALTER 有白名单校验）
    - 创建索引
    - 构建共享的 `DeepSeekProvider`（HTTP 连接池复用）
    - 构建共享的 `EmbeddingEngine`（本地嵌入服务客户端）
@@ -181,7 +188,7 @@ ws = new WebSocket(proto + '//' + location.host + '/ws');
 ### 7. 服务端 WebSocket 端点
 
 ```python
-# server.py:412
+# web/server.py
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
 ```
@@ -229,7 +236,7 @@ CLIENT → 发送 init JSON        SERVER
                               ├── 启动 _proactive_loop 后台协程
                               │   （每 15 秒检查空闲/睡眠/主动）
                               │
-                              └── 发送 init_ok（含 session_id, emotion, name）
+                              └── 发送 init_ok（含 session_id, role_id, emotion, name）
     ◀── 收到 init_ok
     │
     ├── 设置 session_id cookie
@@ -256,7 +263,7 @@ CLIENT → 发送 init JSON        SERVER
 ### WebAgent 创建细节（Step 7e 内部）
 
 ```python
-# web/session.py:277
+# web/session.py
 session_manager.get_or_create(session_id, role_id)
 ```
 
@@ -279,7 +286,9 @@ get_or_create(sid, role_id)
       │
       ├── (b) 记忆系统初始化
       │   ├── LongTermMemory(repo)       — SQLite
-      │   └── ConversationBuffer(maxlen)  — 从 DB 恢复最近 30 轮
+      │   ├── ConversationBuffer(maxlen)  — 从 DB 恢复最近 30 轮
+      │   └── MemoryConsolidator         — use_observation_fact=True 时
+      │       内部装配 MemoryLifecycleManager（Observation → Fact 生命周期，默认关闭）
       │
       ├── (c) LLM Provider（共享实例）
       │   └── DeepSeekProvider(endpoint, api_key) — HTTP 连接池复用
@@ -293,25 +302,29 @@ get_or_create(sid, role_id)
       │                 music_play, notify（外部工具）
       │
       ├── (f) Retriever（三层检索器）
-      │   ├── Hot Memory → Query-Guided → On-Demand
+      │   ├── Hot Memory → Hybrid Search → On-Demand
       │   └── 混合评分（语义 0.6 + 关键词 0.4）
       │
-      ├── (g) InnerDriveAgent（Agent 1）
+      ├── (g) Agent 装配（SleepManager / ContextManager /
+      │   ProactivityManager / MessageHandler）
+      │   └── 睡眠状态恢复：data/.sleep_state.{session_id}
+      │
+      ├── (h) InnerDriveAgent（Agent 1，首次用到时惰性创建）
       │   ├── 使用 INNER_DRIVE_SCHEMA（JSON Schema 输出）
       │   └── 决策：needs_tools? → tool_requests / 跳过
       │
-      ├── (h) ToolAgent（Agent 2）
-      │   ├── temperature=0.3, 无人格/无情绪
+      ├── (i) ToolAgent（Agent 2，首次用到时惰性创建）
+      │   ├── 无人格/无情绪，纯工具调用（沿用共享 provider）
       │   └── ToolAttemptTracker: 3 retries/round, 3 rounds max
       │
-      └── (i) 缓存到 self._sessions[sid]
+      └── (j) 缓存到 self._sessions[sid]
 ```
 
 ---
 
 ## 后台协程 — `_proactive_loop`
 
-WebSocket init 后，服务端创建一个后台协程（`server.py:461`）：
+WebSocket init 后，服务端创建一个后台协程（`web/server.py`）：
 
 ```python
 task = asyncio.create_task(_proactive_loop(websocket, session_id))
@@ -320,16 +333,16 @@ task = asyncio.create_task(_proactive_loop(websocket, session_id))
 它的生命周期绑定 session（标签页关闭 → WS 断开 → 协程取消）：
 
 ```python
-# server.py:355
+# web/server.py
 async def _proactive_loop(websocket, session_id):
     while True:
         1. 检查睡眠/唤醒 → 发消息 + 梦境
         2. 睡着？→ sleep 30s
-        3. idle 时间 < 情绪阈值？→ sleep 15s
-        4. ProactivityManager 评分 → 命中？
+        3. idle < 30s 或冷却中？→ sleep 5s
+        4. ProactivityManager 评分（idle 低于情绪阈值时得 0 分）→ 命中？
         5. InnerDrive Agent 1 决策：
-           ├─ chat（≤ 2/hr）→ handle_proactive()
-           ├─ explore（≤ 1/hr）→ handle_explore()
+           ├─ chat（≤ 2/hr）→ process_proactive()
+           ├─ explore（≤ 1/hr）→ process_explore()
            └─ silent → 不操作
         6. sleep 15s → 回到 1
 ```
@@ -344,8 +357,8 @@ async def _proactive_loop(websocket, session_id):
 | 日志 | `setup_logging()` | 同左 |
 | 嵌入 | `auto_start_embedding()` | 同左 |
 | 框架 | 无 | `uvicorn.run("web.server:app")` |
-| 启动后 | `ConsoleInterface.run()` | FastAPI 监听 |
-| 输入 | stdin → `cli_controller.process()` | WebSocket |
+| 启动后 | `Agent.run()` → CliController 状态机 | FastAPI 监听 |
+| 输入 | stdin → CliController 状态机轮询 | WebSocket |
 | 输出 | 打字机效果 → stdout | 分段气泡 → WebSocket |
 | 主动 | Agent.run() 状态机轮询 | _proactive_loop 协程 |
 | Session | 单用户 | SessionManager |
@@ -357,7 +370,7 @@ async def _proactive_loop(websocket, session_id):
 | 文件 | 作用 |
 |------|------|
 | `web_main.py` | Web 入口，组装并启动 uvicorn |
-| `main.py` | CLI 入口，组装并启动 ConsoleInterface |
+| `main.py` | CLI 入口，组装并启动 Agent |
 | `config.py` | Config dataclass + 加载合并逻辑 |
 | `web/server.py` | FastAPI 应用定义、路由、lifespan |
 | `web/session.py` | SessionManager + WebAgent |

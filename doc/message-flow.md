@@ -8,6 +8,8 @@
 
 ## 三层流水线总览
 
+编排器：Web 路径由 `MessageHandler`（core/message_handler.py）统一编排三层流水线；CLI 路径由 `CliController` 状态机（core/cli_controller.py）以相同模式内联编排。
+
 ```
 用户输入
     │
@@ -15,18 +17,21 @@
 ┌──────────────────────────────────────────────┐
 │  Agent 1: InnerDriveAgent (core/inner_drive.py)│
 │  Perceive → 检索记忆 → 识别缺口 → 决策          │
+│  短输入(<20字且无工具词) → 跳过自身 LLM (预筛选) │
 │  内部工具: recall / remember (SQLite)          │
 │  无需外部工具? → 直接跳过 Agent 2 (闲聊优化)      │
 │  需外部工具? → 输出自然语言请求给 Agent 2        │
+│  输出 summary + context_summary(记忆/关系摘要)  │
 └──────────────────┬───────────────────────────┘
                    │
                    ▼ (非闲聊路径)
 ┌──────────────────────────────────────────────┐
 │  Agent 2: ToolAgent (core/tool_agent.py)       │
-│  temp=0.3, 精简 prompt, 无人格/情绪/记忆        │
+│  精简 prompt, 无人格/情绪/记忆                  │
 │  ToolAttemptTracker: 3 retries/round, 3 rounds │
 │  执行外部工具: web_fetch/web_search/read_file   │
-│             glob/grep/music_play/notify          │
+│       file_tree/glob/grep/music_play/notify    │
+│  成功 → Agent 1 review 是否还需工具(最多3轮)    │
 │  失败 → 回报 Agent 1 重新决策                    │
 │  结果作为 <tool_result> 注入 Agent 3 上下文       │
 └──────────────────┬───────────────────────────┘
@@ -35,7 +40,8 @@
 ┌──────────────────────────────────────────────┐
 │  Agent 3: Roleplay Agent (core/agent.py)       │
 │  temp=0.8, 完整人格 + 情绪 + 记忆              │
-│  接收 inner_drive_summary + tool_results       │
+│  接收 summary + context_summary + tool_results │
+│  (复用 Agent 1 记忆/关系摘要, 不重复检索)        │
 │  内部工具: recall / remember                    │
 │  ReAct 循环: THINK → ACT → THINK → ...        │
 └──────────────────┬───────────────────────────┘
@@ -44,7 +50,9 @@
               后处理: Emotion → Memory → Reflection
 ```
 
-## 状态机总览（Agent 3 内部）
+## 状态机总览（CLI 主循环，CliController）
+
+Web 路径不走此状态机，由 `MessageHandler` 内部的轻量 `MessageHandlerState`（ASSESSING / EXECUTING_TOOLS / GENERATING_RESPONSE 等）记录编排阶段。
 
 ```
 BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ REFLECT ──▶ IDLE
@@ -62,8 +70,8 @@ BOOT ──▶ IDLE ──▶ PERCEIVE ──▶ THINK ──▶ ACT ──▶ R
 | 阶段 | CLI | Web |
 |------|-----|-----|
 | 等待输入 | 守护线程读 stdin → Queue | WebSocket 协程等待 receive_text() |
-| 处理消息 | 状态机 _on_think → _on_act → _on_reflect | 直接调 process_message() → _react_loop() |
-| 输出 | 打字机效果逐字打印 | 全量获取 → 6 级分段 → 独立气泡推送 |
+| 处理消息 | 状态机 _on_think → _on_act → _on_reflect | process_message() → MessageHandler 编排三层 → _react_loop() |
+| 输出 | 打字机效果逐字打印 | 单条 segment 全量推送（分段暂禁用，见第 4 节） |
 | 主动对话 | IDLE 状态内轮询 | asyncio.create_task(_proactive_loop) |
 | 空闲检测 | time.sleep(0.1) 轮询 | await asyncio.sleep(5/15) 协程睡眠 |
 | 封装层 | 无（直接操作 Agent） | `WebAgent` 封装 `Agent` 私有接口（#45） |
@@ -138,7 +146,8 @@ SessionManager.get_or_create() → WebAgent
 │    │   醒来自动分享梦境                  │
 │    ├─ idle > 情绪阈值?                   │
 │    │   excited 60s / sad 900s           │
-│    │   └─ 40% explore / 60% chat       │
+│    │   └─ Agent 1 LLM 决策:             │
+│    │      chat / explore / silent       │
 │    │       探索 1/hr, 聊天 2/hr         │
 │    └─ 睡着? → skip                      │
 └──────────────────────────────────────────┘
@@ -165,10 +174,11 @@ _proactive_loop (15s tick)
     │    │
     │    └── 触发醒来 → 发梦境分享消息
     │        午醒: 13:10-16:00, 晨醒: 7:00-10:00
+    │        10:00-11:00 仍未醒 → 强制醒来兜底 (SL-011)
     │        arousal 高 → 醒得早, resentment 高 → 醒得晚
     │
     ├── ag._sleeping? → await sleep(30), continue
-    │   (睡着的AI: 所有消息自动回复 "zzz...💤", 探索暂停)
+    │   (睡着的AI: 消息自动回复随机睡语(4种), 照常入库 #185, 探索暂停)
     │
     ├── idle < 30s? → skip
     │
@@ -183,16 +193,16 @@ _proactive_loop (15s tick)
     │              │ assess_proactive(idle) → ProactiveIntent
     │              │
     │              ├── action="chat" → process_proactive(intent=intent)
-    │              │    │ _check_rate_limit("chat") → 2/hr
+    │              │    │ check_rate_limit("chat") → 2/hr
     │              │    │ prompt: is_proactive=True
     │              │    │ 主动搭话, 调侃, 分享日常
-    │              │    │ add_to_history=False (不发到短期记忆)
+    │              │    │ add_to_history=True (回复入短期记忆)
     │              │
     │              ├── action="explore" → process_explore(intent=intent)
-    │              │    │ _check_rate_limit("explore") → 1/hr
+    │              │    │ check_rate_limit("explore") → 1/hr
     │              │    │ prompt: explore_mode=True
-    │              │    │ AI 自主: web_search, web_fetch, music_list...
-    │              │    │ 有趣的? → 返回分享消息
+    │              │    │ AI 自主: web_search / web_fetch 等外部工具
+    │              │    │ 有趣的(>30字且非"搜索"开头)? → 返回分享消息
     │              │    │ 没趣的? → 返回 None (安静)
     │              │
     │              └── action="silent" → 不操作 (不消耗频率限制)
@@ -223,16 +233,17 @@ self._tool_call_history.append({
     ├──▶ ① ConversationBuffer.add_turn("user", "你好")
     │     短期记忆：deque 追加
     │
-    ├──▶ ② repo.insert_turn(turn_count, "user", ...)
+    ├──▶ ② repo.insert_turn_sync(turn_count, "user", ...)
     │     SQLite conversation_turns 表永久存储
     │
     ├──▶ ③ MemoryRetriever.retrieve_for_query("你好")
     │      │
-    │      ├── Layer 1: 取全部 active facts（SQLite）
-    │      ├── Layer 2: 关键词评分 → LLM 重排序
-    │      │   score = w₁×时效 + w₂×重要 + w₃×衰减 + w₄×关键词
+    │      ├── Layer 1 热记忆: active facts(≤50) + 最新
+    │      │   experiences(5) + reflections(3) + 关系指标
+    │      ├── Layer 2 混合检索: 语义×0.6 + 关键词×0.4
+    │      │   (无 embedding 时退化为纯关键词评分)
     │      │   候选>15条 → 极小LLM调用重排
-    │      └── Layer 3: 取最新 experiences + reflections
+    │      └── Layer 3 按需: AI 输出 [回忆: xxx] 时触发检索
     │
     └──▶ ④ 打包成 MemoryContext
            { facts, experiences, reflections, relationship }
@@ -251,7 +262,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 路径由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 路径由 `CliController._on_perceive/_on_think` 以相同模式内联执行。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 
@@ -259,14 +270,18 @@ self._tool_call_history.append({
 用户输入 + 记忆上下文
     │
     ▼
-InnerDriveAgent.perceive_and_decide()
+InnerDriveAgent.assess()
+    │ 预筛选: 短输入(<agent1_short_input_threshold=20字,
+    │   无工具关键词, 近期无成功工具调用) → 跳过 LLM,
+    │   仅检索记忆 → 直接进 Agent 3 (0 次 LLM 调用)
     │ build_inner_drive_prompt(): 当前时间 + 身份 + 记忆 + 工具列表
-    │ 内部使用 recall 检索 + remember 存储
+    │   (静态/慢变块走 PromptCache, TTL=prompt_cache_ttl_seconds=60, #160)
+    │ recall_query → 内部 recall 检索循环(最多5轮)
     ▼
-POST DeepSeek API  ── 模型自主推理决策
+POST DeepSeek API  ── JSON Schema 结构化决策 (#ID-001)
     │
-    ├── 闲聊/无需工具 → 输出 inner_drive_summary → 跳过 Agent 2 → 直接进入 Agent 3
-    │   (仅 1 次 LLM 调用)
+    ├── 闲聊/无需工具 → 输出 summary + context_summary
+    │   → 跳过 Agent 2 → 直接进入 Agent 3 (1 次 LLM 调用)
     │
     └── 需要外部工具 → 输出自然语言工具请求给 Agent 2
         ▼
@@ -279,60 +294,66 @@ POST DeepSeek API  ── 模型自主推理决策
 Agent 1 的自然语言请求
     │
     ▼
-ToolAgent.run_with_request(request, tool_registry)
-    │ _build_prompt(): 精简 prompt, 仅含工具列表 + 当前时间
+ToolAgent.run_with_request(request)
+    │ build_tool_agent_prompt(): 精简 prompt, 仅工具列表+规则
     │ ToolAttemptTracker: 每轮 3 次重试, 最多 3 轮 (9 总尝试)
-    │ temperature=0.3
     ▼
 POST DeepSeek API  ── 模型决策并执行工具
     │
-    ├── 执行成功 → 结果注入 Agent 3 上下文
+    ├── 执行成功 → Agent 1 review 结果是否足够
+    │   → 还需工具 → 下一轮 (最多 3 轮)
+    │   → 足够 → 结果注入 Agent 3 上下文
     │
-    └── 全部尝试失败 → 回报 Agent 1 重新决策
+    └── 全部尝试失败 → 回报 Agent 1 重新决策 (re_decide)
         ▼
 Agent 1 重新评估 → 调整策略或放弃外部工具
 ```
 
 #### Agent 3: Roleplay Agent（人格驱动回复）
 
-接收 inner_drive_summary + tool_results。可能执行多次 ReAct 循环：
+接收 Agent 1 的 summary + context_summary + Agent 2 的 tool_results。可能执行多次 ReAct 循环：
 
 ```
     ┌── 首次调用 ──────────────────────────────┐
-    │ ① build_system_prompt(inner_drive_summary, tool_results) 拼接 7 个区块    │
+    │ ① build_system_prompt(...) 按静态/慢变/动态分层拼接 (#160)    │
+    │    静态+慢变块走 PromptCache (TTL=60s)     │
     │                                          │
     │    Block 1 — 当前时间                     │
     │    ┌──────────────────────────────────┐   │
     │    │ 当前时间：2026-05-28 12:00       │   │
     │    └──────────────────────────────────┘   │
     │                                          │
-    │    Block 2 — 身份核心                     │
+    │    Block 2 — 身份核心 (静态, 缓存)         │
     │    ┌──────────────────────────────────┐   │
     │    │ 你是小星，一个有情感的AI朋友    │   │
     │    │ 你的特质：playfulness 95%...    │   │
     │    └──────────────────────────────────┘   │
     │                                          │
-    │    Block 3 — 情绪状态                     │
+    │    Block 3 — 情绪状态 (动态)               │
     │    ┌──────────────────────────────────┐   │
     │    │ 你感到 满足，心底有一丝喜悦      │   │
     │    │ 情绪积极，平静                   │   │
     │    └──────────────────────────────────┘   │
     │                                          │
-    │    Block 4 — 关系指标                     │
+    │    Block 4 — 关系指标 (慢变, TTL缓存)      │
     │    ┌──────────────────────────────────┐   │
     │    │ 信任: 0.3  熟悉度: 0.3           │   │
     │    │ 亲密: 0.3  趣味: 0.3             │   │
     │    └──────────────────────────────────┘   │
     │                                          │
-    │    Block 5 — 长期记忆                     │
+    │    Block 5 — 长期记忆 (慢变, TTL缓存)      │
     │    ┌──────────────────────────────────┐   │
     │    │ 关于用户: 名字=小陈 摄影=街拍   │   │
     │    │ 共同回忆: [温暖] 分享宠物趣事   │   │
-    │    │ 工具: recall / remember          │   │
     │    └──────────────────────────────────┘   │
+    │    ※ Agent 1 已生成 context_summary 时     │
+    │      Block 4+5 直接复用, 不再二次检索      │
     │                                          │
-    │    Block 6 — 对话示例                     │
-    │    Block 7 — 最近对话 + 指令              │
+    │    Block 6 — 对话示例 (仅前3轮注入,         │
+    │              conversation_examples_max_turns)│
+    │    Block 7 — 最近对话 + 指令 + 输出规则     │
+    │    (动态块按需插入: Agent 1 判断 / 工具记录 │
+    │     / 怨恨·破防状态 / recall·remember 工具)│
     │                                          │
     │ ② 构建 messages 数组（#130 跳过舞台指示）  │
     │    [system_prompt, 历史对话..., 当前输入]  │
@@ -346,7 +367,7 @@ Agent 1 重新评估 → 调整策略或放弃外部工具
     │                                          │
     │ ④ SSE 流式解析                            │
     │    CLI: on_token() → 打印到终端            │
-    │    Web: 全量获取 → 6 级分段 → 独立气泡     │
+    │    Web: 全量获取 → 单条 segment 推送       │
     │                                          │
     │ ⑤ parse_tool_calls()                     │
     │    检查 <tool_call> 标签                   │
@@ -368,11 +389,13 @@ ACT: execute_tool_calls(registry, calls)
 结果格式化为 <tool_result name="recall">
     │  \n找到 2 条：\n- 名字: 小陈\n- 摄影: 街拍\n
     ▼
-追加到 messages → THINK（下一轮，最多 10 次）
+追加到 messages → THINK（下一轮，最多 max_tool_iterations=5 次）
     │
     ▼
 无 tool_call → 结束迭代
 ```
+
+**Agent 3 意图回路（MessageHandler 路径）**：Agent 3 也可以不直接回复，而是输出 JSON 意图（如 play_music / search_web）→ Agent 1 `assess_agent3_intent` 审批 → 批准则 Agent 2 单轮执行 → Agent 3 生成最终回复（最多循环 2 次）；拒绝则返回过渡性回复。
 
 ---
 
@@ -384,54 +407,23 @@ ACT: execute_tool_calls(registry, calls)
 - ConversationBuffer.add_turn("assistant", ...)
 - SQLite conversation_turns 写入
 
-#### Web 模式 — 分段推送
+#### Web 模式 — 推送（分段当前禁用）
 
 ```
 response = agent.process_message(content)
     │
     ▼
-_split_segments(response)
-    │  6 级 fallback：
-    │    ① 标点（。！？.!?\n，含引号括号尾随）
-    │    ② 逗号（，,；;，40 字以上长段）
-    │    ③ 空格
-    │    ④ 语气词（啊吗呢了吧么呀哦嘛哇）
-    │    ⑤ 自然停顿（然后/但是/所以… + 了/过/到）
-    │    ⑥ 18 字符硬切（兜底）
-    │  合并 <4 字符的碎片
+_send_segments(): 整条回复作为单个 segment 发送
+    │  (server.py 留有 TODO: markdown 流式稳定后恢复分段)
     ▼
-["你好呀！", "今天怎么样？", "我这边天气不错。"]
+{"type": "segment", "content": 完整回复}
+{"type": "done", "emotion": "engaged", "turn": 5}
     │
     ▼
-for i, seg in enumerate(segments):
-    if i > 0:
-        await asyncio.sleep(_calc_delay(emotion, len(seg)))
-    await ws.send({"type": "segment", "content": seg})
-    │
-    ▼
-前端 JS: 每个 segment 创建独立 assistant 气泡
-    ▼
-await ws.send({"type": "done", "emotion": "engaged", "turn": 5})
+前端 JS: 单气泡渲染; REST 模式同样全量返回 response
 ```
 
-客户端 REST fallback 时 `splitSegments()` 使用相同 6 级策略，`setTimeout` 模拟分段延时。
-
-**延迟计算公式**：
-
-```
-delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
-```
-
-| 情绪 | 基础延时 |
-|------|----------|
-| excited / surprised | 0.7~0.8s |
-| joyful / anticipating | 0.9s |
-| trusting | 1.1s |
-| engaged | 1.3s |
-| content | 1.5s |
-| neutral | 1.7s |
-| melancholy | 2.2s |
-| sad | 2.5s |
+保留代码：`_split_segments()`（6 级 fallback）与 `_calc_delay()`（情绪基础延时 0.7~2.5s × 长度系数 × 随机 0.8~1.3）仍在 web/server.py 中，但生产路径已无调用方（仅 tests/test_segmentation.py 引用），待分段恢复时重用。
 
 ---
 
@@ -466,6 +458,10 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     │       │    → FactChecker 矛盾检测 (#6)     │
     │       │      同 key 不同 value → 衰减旧事实│
     │       │      语义相似 >0.65 → 矛盾处理   │
+    │       │    ※ use_observation_fact=true 时  │
+    │       │      双写 Layer 1 (ML-001):        │
+    │       │      整批文本→Observation,         │
+    │       │      fact→promote 为 FactV2        │
     │       │                                  │
     │       ├── ▶ LLM 总结体验                 │
     │       │    → SUMMARY|温暖|分享宠物趣事   │
@@ -513,15 +509,17 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
     ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Agent 1: InnerDriveAgent (core/inner_drive.py)                │
-│  ① 检索记忆 → 识别知识缺口 → 自主推理决策                       │
-│  ② 闲聊/无需工具 → 直接进入 Agent 3 (1 次 LLM 调用)             │
-│  ③ 需外部工具 → 输出自然语言请求给 Agent 2                      │
+│  ① 短输入(<20字无工具词) → 跳过 LLM 预筛选                      │
+│  ② 检索记忆 → 识别知识缺口 → 自主推理决策                       │
+│  ③ 闲聊/无需工具 → 直接进入 Agent 3 (1 次 LLM 调用)             │
+│  ④ 需外部工具 → 输出自然语言请求给 Agent 2                      │
+│  输出 summary + context_summary 供 Agent 3 复用                 │
 └──────────────────────────────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Agent 2: ToolAgent (core/tool_agent.py)                       │
-│  temp=0.3, 精简 prompt, ToolAttemptTracker                     │
+│  精简 prompt, ToolAttemptTracker                                 │
 │  ① 接收 Agent 1 自然语言请求 → POST API → 执行外部工具           │
 │  ② 成功 → 结果注入 Agent 3 上下文                               │
 │  ③ 失败 → 回报 Agent 1 重新决策                                 │
@@ -531,11 +529,11 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 ┌──────────────────────────────────────────────────────────────┐
 │  Agent 3: THINK / _react_loop (core/agent.py)                 │
 │  temp=0.8, 完整人格 + 情绪 + 记忆                              │
-│  接收 inner_drive_summary + tool_results                       │
-│  ① 组装 system prompt（含 Agent 2 工具结果）                   │
+│  接收 summary + context_summary + tool_results                 │
+│  ① 组装 system prompt（静态/慢变/动态分层, #160）               │
 │  ② 估算 token，动态塞对话到 80%                               │
 │  ③ POST DeepSeek API（max_tokens 随情绪调整）                  │
-│  ④ 解析 SS，检查 <tool_call>（仅 recall/remember）              │
+│  ④ 解析响应，检查 <tool_call>（仅 recall/remember）              │
 │  ⑤ 有 tool_call → 执行 → 结果喂回 → 继续 THINK               │
 └──────────────────────────────────────────────────────────────┘
     │
@@ -543,7 +541,7 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 ┌──────────────────────────────────────────────────────────────┐
 │  ACT（无 tool_call）                                          │
 │  CLI: 已在 THINK 流式打印，只做存储                             │
-│  Web: _split_segments (6 级) → _calc_delay → 独立气泡推送     │
+│  Web: _send_segments 单条 segment 全量推送(分段暂禁用)        │
 └──────────────────────────────────────────────────────────────┘
     │
     ▼
@@ -567,4 +565,5 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 | SQLite reflections | data/ai_friend.db | 永久 | 反思洞察 |
 | SQLite relationship_metrics | data/ai_friend.db | 永久 | 关系指标 |
 | SQLite conversation_turns | data/ai_friend.db | 永久 | 对话历史 |
+| SQLite observations / facts_v2 | data/ai_friend.db | 永久 | Layer 1 记忆生命周期（use_observation_fact=true 时双写，默认关） |
 | EmotionalState | 内存 + personalities/{role_id}.json | 进程 + 持久化 | 当前情绪 |

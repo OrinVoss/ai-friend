@@ -16,7 +16,6 @@
 
 ```json
 {
-  "id": "小星",
   "personality": {
     "name": "小星",
     "speaking_style": "幽默、嘴贫、爱开玩笑",
@@ -24,6 +23,8 @@
   }
 }
 ```
+
+顶层只有 `personality` 和 `emotional_state` 两个键。角色 ID 由文件名决定（`personalities/小星.json` → role_id 为 `小星`），JSON 内无需 `id` 字段。
 
 ---
 
@@ -52,8 +53,9 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 每个特质会实际影响情绪引擎的计算：
 
 - `empathy > 0.7` → 用户情绪输入放大 1.5 倍
-- `playfulness > 0.6` → arousal 衰减减慢
+- `playfulness > 0.6` → arousal 波动幅度 ×0.7，并少量提升 joy
 - `warmth > 0.7` → 每次交互 trust 额外 +0.1
+- `thoughtfulness > 0.6` → anticipation 小幅 +0.05
 - `humor` → 负面情绪减轻，正面倾向增加
 - `sass` → anger 增长减缓，joy 增长轻度提升
 
@@ -123,6 +125,7 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 - 每条包含 `user`（用户说的话）和 `replies`（AI 的若干种可能回复）。
 - 修改后重启生效，无需改动角色 JSON 文件。
 - 留空数组则系统 prompt 中不注入示例。
+- 示例只在会话的前几轮注入 system prompt（`conversation_examples_max_turns`，默认 3 轮），之后不再重复占用 token（#160）。
 
 ### interests — 兴趣领域
 
@@ -150,9 +153,9 @@ AI 的"出厂情绪设置"：
 - 大 → 情绪变化快，不记仇
 - 小 → 情绪持久，容易积累怨恨
 
-### first_run_greeting — 首次启动欢迎语
+### first_run_greeting — 启动欢迎语
 
-只在首次启动（数据库不存在时）输出一句。留空则不输出。
+CLI 每次启动时输出一句开场白（仅 CLI，Web 端不使用）。留空则回退为默认的「你好呀！我是 {name}，很高兴认识你~」。
 
 ---
 
@@ -223,8 +226,9 @@ AI 的"出厂情绪设置"：
 每个角色文件中的 `emotional_state` 部分是**运行时状态**，由情绪引擎自动更新：
 
 - 每次对话后自动更新
-- 包含 VAD 三维 + 8 维 Plutchik 情绪 + 怨恨值
-- 包含情绪事件记忆
+- 包含 valence / arousal 情绪坐标与 baseline / mood 双层慢变量（VAD 模型的 V、A 两维）
+- 包含 8 维 Plutchik 情绪（joy / trust / fear / surprise / sadness / anticipation / anger / disgust）+ 怨恨值 resentment
+- 包含情绪事件记忆（emotion_events，上限 20 条）、情绪历史 history 与破防计数 consecutive_negative
 
 手动修改会导致情绪状态突变或丢失上下文。如果要重置情绪，直接删除 `emotional_state` 键或将其设为 `{}`，系统会自动用 baseline 重建。
 
@@ -233,15 +237,14 @@ AI 的"出厂情绪设置"：
 ### Web 端切换角色
 
 1. 点击顶部「切换」按钮
-2. 选择角色
-3. 选择该角色下的已有 session，或点击「新建对话」
+2. 在角色列表中点选角色即可——每个角色只有一个 session，选中后自动重连并进入该角色的记忆
 
 ### 手动新增角色
 
 1. 复制 `personalities/default.json` 为 `personalities/{role_id}.json`
-2. 修改 `id`、`personality.name`、特质、风格、背景故事等
+2. 修改 `personality.name`、特质、风格、背景故事等（文件名即 role_id，JSON 内无需 `id` 字段）
 3. 可选：删除 `emotional_state` 让系统用 baseline 重建
-4. 重启 Web 服务后，新角色会出现在角色选择弹窗中
+4. 新角色会立即出现在角色选择弹窗中（角色列表实时读取 `personalities/` 目录，无需重启）
 
 ### 完全重置某个角色
 

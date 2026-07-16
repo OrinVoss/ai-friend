@@ -7,24 +7,30 @@
 ## 工具系统架构
 
 ```
+EXTERNAL_TOOL_NAMES         tools/traits.py
+  └── 8 个外部工具的规范名单，Agent 2 按它从全量注册表过滤（#258）
+
 Tool (base class)          tools/traits.py
   ├── name() → str
   ├── description() → str
   ├── parameters_schema() → dict    # JSON Schema
-  ├── execute(args) → ToolResult
-  └── spec() → ToolSpec
+  ├── execute(args) → ToolResult    # 同步方法
+  ├── spec() → ToolSpec
+  └── required_permissions: [str]   # 权限元数据，空列表 = 不限制（#183）
 
 ToolRegistry                tools/traits.py
   ├── register(tool)
   ├── get(name) → Tool
   ├── list_specs() → [ToolSpec]
   ├── format_for_prompt()  → str    # 注入 prompt
-  └── to_json_schema() → dict       # JSON mode 工具列表
+  ├── to_json_schema() → dict       # JSON mode 工具列表
+  └── check_permission(name, role)  # 已定义，但当前无调用方，权限层未生效
 
 ToolResult                  tools/traits.py
   ├── success: bool
   ├── output: str
-  └── static ok() / fail()
+  ├── static ok() / fail()
+  └── to_dict() → dict
 ```
 
 ### 三层分工
@@ -32,7 +38,7 @@ ToolResult                  tools/traits.py
 | Agent | 可用工具 | 职责 |
 |-------|----------|------|
 | Agent 1 InnerDrive | `recall`, `remember` | 自主推理、检索记忆、决策是否需要外部工具 |
-| Agent 2 ToolAgent | 全部 7 个外部工具 | 纯工具执行，temperature=0.3，无人格/情绪/记忆 |
+| Agent 2 ToolAgent | 全部 8 个外部工具 | 纯工具执行，temperature=0.3，无人格/情绪/记忆 |
 | Agent 3 Roleplay | `recall`, `remember` | 人格驱动回复，仅内部内存操作 |
 
 **核心原则**：Agent 3 的 system prompt 中不出现外部工具指令，从根源上消除模型虚构外部工具调用。
@@ -70,7 +76,7 @@ class WeatherTool(Tool):
             "required": ["city"],
         }
 
-    async def execute(self, args: dict[str, Any]) -> ToolResult:
+    def execute(self, args: dict[str, Any]) -> ToolResult:
         city = args.get("city", "")
         if not city:
             return ToolResult.fail("请指定城市名称")
@@ -91,7 +97,7 @@ registry = ToolRegistry()
 registry.register(WeatherTool())  # 和其他工具并列注册
 ...
 self.agent = Agent(...)
-self.agent._tool_registry = registry  # 交给 Agent 3 ReAct 使用
+self.agent._tool_registry = registry  # 全量工具箱，由 MessageHandler 按内/外拆分
 
 # CLI 模式 — main.py
 registry = ToolRegistry()
@@ -101,19 +107,22 @@ agent = Agent(...)
 agent._tool_registry = registry
 ```
 
-注意：Agent 1 和 Agent 3 只能使用 `recall` / `remember` 两个内部工具。新工具如果是**外部工具**（调用 API、读文件等），只需要在 Agent 2 的 registry 中注册；Web 端通过 `WebAgent` 封装后统一赋值给 `Agent._tool_registry`（#45）。
+注意：入口注册的是**全量**工具箱，`MessageHandler` 会自动拆分——Agent 1 / Agent 3 使用独立注册的 `recall` / `remember` 内部工具；Agent 2 按 `tools/traits.py` 的 `EXTERNAL_TOOL_NAMES` 名单从全量注册表过滤出外部工具。因此新工具如果是**外部工具**（调用 API、读文件等），还必须把 `name()` 加进 `EXTERNAL_TOOL_NAMES`，否则 Agent 2 看不到它。Web 端通过 `WebAgent` 封装后统一赋值给 `Agent._tool_registry`（#45）；目前 Web 端未注册 `FileTreeTool`，其余与 CLI 一致。
 
 ### 第 3 步（可选）：加参数别名
 
 `dispatcher.py` 的 `_normalize_args()` 支持参数别名映射。如果你的工具有常见别名，加到那里：
 
 ```python
-def _normalize_args(name: str, args: dict) -> dict:
-    ALIASES = {
-        "query": ["search", "keyword", "question"],
-        "content": ["text", "msg"],
-        "name": ["person", "who", "user", "target"],
-    }
+def _normalize_args(args: dict) -> dict:
+    aliases = [
+        (("query", "search", "keyword", "question"), "query"),
+        (("text", "msg", "content"), "content"),
+        (("person", "who", "user", "target"), "name"),
+        (("filepath", "filename", "file", "path"), "path"),
+        (("song_name", "track"), "song"),
+        (("directory", "dir", "folder"), "path"),
+    ]
     # 自动归一化...
 ```
 
@@ -181,6 +190,7 @@ def parameters_schema(self) -> dict:
 | `tools/web_tools.py` | `WebSearchTool` | 网络搜索（AnySearch） |
 | `tools/web_tools.py` | `WebFetchTool` | 网页内容提取 |
 | `tools/file_tools.py` | `ReadFileTool` | 读取本地文件 |
+| `tools/file_tools.py` | `FileTreeTool` | 目录结构树（仅 CLI 注册，Web 端未注册） |
 | `tools/search_tools.py` | `GlobTool` | 文件名模式匹配 |
 | `tools/search_tools.py` | `GrepTool` | 正则内容搜索 |
 | `tools/notify_tool.py` | `NotifyTool` | Windows toast 通知 |
@@ -205,6 +215,7 @@ Agent 1 InnerDrive
         ▼
     Agent 2 ToolAgent (temp=0.3)
         │ 接收自然语言请求
+        │ 三层解析：JSON 数组 → XML <tool_call> 正则 → 裸 JSON 兜底
         │ ToolAttemptTracker: 3 次重试/轮 × 3 轮
         │ 精简 prompt（无情绪/人格/记忆）
         │

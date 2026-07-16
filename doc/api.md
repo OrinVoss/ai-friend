@@ -26,6 +26,7 @@
 | 端点 | 类型 | 说明 |
 |------|------|------|
 | `/` | GET | 前端页面 (index.html) |
+| `/favicon.ico` | GET | 204 空响应（抑制浏览器 favicon 404，WS-029） |
 | `/ws` | WebSocket | 双向实时通信（主力通道） |
 | `/api/chat` | POST | REST 聊天（WebSocket 降级备用） |
 | `/api/status` | GET | 获取关系状态和统计 |
@@ -33,6 +34,9 @@
 | `/api/roles` | GET | 列出所有可用角色 |
 | `/api/sessions` | GET | 列出某角色下的历史 session |
 | `/api/logs` | GET | 实时服务日志（SSE） |
+| `/api/monitor` | GET | LLM 调用监控记录（JSON） |
+| `/api/monitor/clear` | GET | 清空监控缓冲 |
+| `/monitor` | GET | 监控页面 (monitor.html) |
 | `/static/*` | GET | 静态资源（CSS/JS） |
 
 **数据格式**: 全部使用 `JSON` 编码，`ensure_ascii=False`（支持中文直出）。
@@ -72,9 +76,8 @@ wss://<生产域名>/ws
   │     "content":"你好"}         │
   │                               ├── process_message("你好")
   │                               ├── {"type":"segment", ←─────────┤
-  │                               │         "content":"嗨！"}       │
-  │                               ├── {"type":"segment", ←─────────┤
-  │                               │         "content":"今天心情不错呀"} │
+  │                               │    "content":"嗨！今天心情不错呀"} │
+  │                               │    （当前单段完整回复，见第 4 节）  │
   │                               ├── {"type":"done", ←────────────┤
   │                               │         "content":"嗨！今天心情不错呀",
   │                               │         "emotion":"engaged",
@@ -103,10 +106,10 @@ wss://<生产域名>/ws
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `type` | string | ✓ | 固定 `"init"` |
-| `session_id` | string | — | 已有 session_id 传此值恢复会话；省略则服务端新生成 |
-| `role_id` | string | — | 要绑定的角色 ID（如 `小星`）；恢复已有 session 时此值会被忽略 |
+| `session_id` | string | — | 已有 session_id 传此值恢复会话；省略且未传 `role_id` 时落入 `"default"` |
+| `role_id` | string | — | 要绑定的角色 ID（如 `小星`）；一个角色一个 session，传了 `role_id` 时 session_id 直接取 `role_id` |
 
-- 连接建立后**必须先发 init**，否则后续 `message` 消息无可用 session
+- 连接建立后**应先发 init**；未 init 直接发 `message` 会落入 `"default"` 会话
 - `session_id` 与 `role_id` 均存储在 cookie 中，页面刷新后携带以恢复会话
 
 #### `message` — 发送聊天消息
@@ -131,7 +134,7 @@ wss://<生产域名>/ws
 }
 ```
 
-- 客户端每 **30 秒** 发送一次（见 `app.js` 的 `setInterval`）
+- 客户端每 **25 秒** 发送一次（见 `app.js` 的 `setInterval`）
 - 服务端回复 `pong`，无额外处理
 
 ### 2.3 服务端 → 客户端消息
@@ -157,7 +160,7 @@ wss://<生产域名>/ws
 | `name` | string | 角色名字，用于前端标题/头像 |
 
 前端收到后行为：
-- 保存 `session_id` 与 `role_id` 到 cookie（有效期 24h）
+- 保存 `session_id` 到 cookie（`role_id` 在选择角色时已存入；有效期 24h）
 - 调用 `showEmotion(data.emotion)` 更新 UI 情绪显示
 - 使用 `data.name` 更新顶部角色名
 
@@ -175,9 +178,8 @@ wss://<生产域名>/ws
 | `type` | string | 固定 `"segment"` |
 | `content` | string | 一个独立气泡的文本内容 |
 
-- **分段之间带延时发送**，模拟人类打字节奏
-- 每个 `segment` 在前端创建独立 assistant 气泡
-- 延时由[情绪调速](#5-情绪调速)公式计算
+- **当前分段推送暂停**：服务端把完整回复作为**单个** `segment` 发送（分段算法保留待恢复，见[第 4 节](#4-分段推送)）
+- 前端把 `segment` 内容累积进当前 assistant 气泡（markdown 源码），收到 `done` 后用 marked 渲染
 
 #### `done` — 回复结束
 
@@ -239,13 +241,13 @@ WebSocket onclose
     │
     ├── 设置状态 "已断开"
     ├── hideTyping()
-    └── setTimeout(connect, 3000)  ← 3 秒后自动重连
+    └── setTimeout(connect, reconnectDelay)  ← 2s 起始，指数退避至 30s 上限
         │
-        └── 重连后重新发送 init（携带 cookie 中的 session_id）
+        └── 重连后重新发送 init（携带 cookie 中的 session_id / role_id）
 ```
 
-- 断线后 **3 秒** 自动重连（JS 侧 `setTimeout`）
-- 重连后 session 保留（`SessionManager` 持有），会话不中断
+- 断线后自动重连：初始延时 **2 秒**，每次失败翻倍，上限 **30 秒**（JS 侧指数退避）
+- WS 断开时服务端会 `remove()` 内存会话；重连 init 时重建 WebAgent，从 DB 恢复最近 30 轮对话（`#98`）与人格文件，会话体验不中断
 - 多标签页：新标签页的 proactive 任务会 cancel 旧标签页的任务（`register_proactive` 逻辑）
 
 ---
@@ -293,7 +295,7 @@ WebSocket 不可用时的降级方案。请求/响应使用 Pydantic 模型校�
 - `422 Unprocessable Entity`：`message` 为空或类型错误（FastAPI/Pydantic 自动校验）。
 - `429 Too Many Requests`：触发速率限制（每 IP 30 次/分钟）。
 
-注意：REST 模式无分段推送，前端收到完整 `response` 后自行用 `splitSegments()` 分段 + `setTimeout` 模拟逐段显示。分段逻辑与 WebSocket 端一致（[见第 4 节](#4-分段推送)）。
+注意：REST 模式无分段推送，前端收到完整 `response` 后直接单气泡显示（markdown 经 marked 渲染）；早期的客户端分段 `splitSegments()` 已随服务端分段一并停用（[见第 4 节](#4-分段推送)）。
 
 ### 3.2 `GET /api/status` — 获取关系状态
 
@@ -318,7 +320,7 @@ WebSocket 不可用时的降级方案。请求/响应使用 Pydantic 模型校�
     "fun": 0.2
   },
   "relationship_history": [
-    { "timestamp": "2026-06-01T12:00:00", "trust": 0.3, "familiarity": 0.25, "intimacy": 0.1, "fun": 0.15 }
+    { "timestamp": "2026-06-01 12:00:00", "trust": 0.3, "familiarity": 0.25, "intimacy": 0.1, "fun": 0.15 }
   ]
 }
 ```
@@ -328,7 +330,7 @@ WebSocket 不可用时的降级方案。请求/响应使用 Pydantic 模型校�
 | `turn` | int | 总对话轮次 |
 | `emotion` | string | 当前情绪标签 |
 | `relationship` | object | 关系四维指标（trust/familiarity/intimacy/fun） |
-| `relationship_history` | array | 最近 7 天关系快照数组 |
+| `relationship_history` | array | 最近 7 天关系快照数组（timestamp 为北京时间） |
 
 ### 3.3 `GET /api/chat/history` — 获取最近对话
 
@@ -410,9 +412,45 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 }
 ```
 
+### 3.9 `GET /api/monitor` — LLM 调用监控记录
+
+返回 `core/monitor.py` 内存环形缓冲中的 LLM API 调用记录（默认最多保留 200 条，按时间倒序），开发调试用。`monitor_enabled=false` 时不再记录新调用。
+
+**Query Parameters**:
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `limit` | int | `0` | 只返回最近 N 条；`0` 表示全部 |
+
+**Response**: JSON 数组，单条记录字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `timestamp` | string | 调用时间（`HH:MM:SS`） |
+| `model` | string | 使用的模型 |
+| `duration_ms` | float | 调用耗时（毫秒） |
+| `max_tokens` / `temperature` | int / float | 该次调用的生成参数 |
+| `messages` | array | 完整请求 messages（含 system/user/assistant） |
+| `response` | string | 完整响应文本 |
+| `source` | string | 调用来源（`react` / `session` / `assess` / `tool_agent` / `dream` 等） |
+
+### 3.10 `GET /api/monitor/clear` — 清空监控缓冲
+
+**Response**: `{"status": "cleared"}`
+
+### 3.11 `GET /monitor` — 监控页面
+
+返回 `web/static/monitor.html`（配合 3.9 / 3.10 使用）。
+
+### 3.12 `GET /favicon.ico` — 站点图标
+
+返回 `204 No Content`（支持 GET/HEAD），避免浏览器请求 favicon 产生 404 噪音（`WS-029`）。
+
 ---
 
 ## 4. 分段推送
+
+> 当前状态：分段推送**暂停使用**——`_send_segments` 直接把完整回复作为单个 `segment` 发送（代码内 TODO：待 markdown 流式稳定后恢复）。`_split_segments` 与 `_calc_delay` 仍保留在 `web/server.py` 中，以下算法为保留实现。
 
 ### 4.1 服务端分段（`_split_segments`）
 
@@ -433,32 +471,24 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 ### 4.2 客户端分段（REST fallback）
 
-前端 `splitSegments()` 使用相同的分割策略（排除服务端第②步逗号分割）：
-
-```
-输入文本
-    ├── ① 句末标点分割
-    ├── ② 空格分割
-    ├── ③ 语气词分割
-    └── ④ 自然停顿 / 18 字符硬切（兜底）
-    └── 合并 <4 字符碎片
-```
+客户端分段已随服务端分段一并移除：`app.js` 中不再有 `splitSegments()`，REST 降级拿到完整 `response` 后直接单气泡显示（markdown 经 marked 渲染）。
 
 ### 4.3 分段数据流
 
 ```
 服务端生成完整回复
     │
-    ├── WebSocket: _split_segments() → 逐段 _calc_delay → send segment
+    ├── WebSocket: _send_segments() → 单个 segment（完整回复）→ done
+    │   （保留实现：_split_segments() → 逐段 _calc_delay → 逐段 send segment）
     │
-    └── REST: 返回完整 response → 前端 splitSegments() → setTimeout 逐段显示
+    └── REST: 返回完整 response → 前端单气泡渲染
 ```
 
 ---
 
 ## 5. 情绪调速
 
-分段之间的发送延时由情绪状态动态决定：
+分段之间的发送延时由情绪状态动态决定（当前随分段推送一并暂停，`_calc_delay` 保留在 `web/server.py` 中）：
 
 ```
 delay = base[emotion] × (1 + seg_len / 80) × random(0.8, 1.3)
@@ -527,7 +557,7 @@ _proactive_loop (15s tick, asyncio.create_task)
 | `neutral` | 360s |
 | `angry` | 480s |
 | `sad` | 900s |
-| +resentment | 额外 +300s |
+| +resentment | 额外最多 +300s（随 resentment 比例） |
 
 ### 6.3 频率限制
 
@@ -538,7 +568,7 @@ _proactive_loop (15s tick, asyncio.create_task)
 
 ### 6.4 消息类型
 
-主动行为生成的消息**不写入短期记忆**（`add_to_history=False`），避免污染长程对话上下文。
+主动行为（chat / explore）生成的消息**会写入短期记忆**并持久化到 `conversation_turns`（`#299` 修复"主动消息不持久化"）；睡眠/唤醒消息同样入历史（`metadata={"sleep": True}`，`#156`），页面刷新后可恢复显示。
 
 ---
 
@@ -584,7 +614,8 @@ class SessionManager:
             ├── connect() → WebSocket /ws
             ├── send {"type":"init", "role_id":"小星", "session_id":"小星"}  ← 从 cookie 读取
             │
-            ├── 服务端恢复已有 session（内存池）
+            ├── 服务端重建 WebAgent（旧 WS 断开时已 remove；
+            │   从 DB 恢复最近 30 轮 + personalities/小星.json 情绪状态）
             ├── 旧 proactive 任务被 cancel
             └── 注册新 proactive 任务
 ```
@@ -596,7 +627,7 @@ class SessionManager:
 | 独立 Personality | ✓ 每个 WebAgent 按 role_id 加载独立 personality 文件 |
 | 独立 EmotionalState | ✓ 同一角色的不同 session 也拥有独立情绪状态 |
 | 独立 ConversationBuffer | ✓ 每个 WebAgent 独立短期记忆 |
-| SQLite session_id 过滤 | ✓ user_facts / experiences / reflections / conversation_turns / relationship_metrics / relationship_snapshots 全部按 session_id 隔离 |
+| SQLite session_id 过滤 | ✓ user_facts / experiences / reflections / conversation_turns / relationship_metrics / relationship_snapshots / observations / facts_v2 均带 session_id 列并按其过滤；注意 user_facts 的唯一约束 `UNIQUE(category, fact_key)` 不含 session_id，多角色同 key 会互相覆盖（已知未修） |
 | session → role 映射 | ✓ `session_roles` 表持久化 `session_id → role_id` |
 | 共享 Provider/Embedding | ✓ SN-005/006：SessionManager 级别共享 HTTP 会话 |
 | 共享 EmbeddingCache | ✓ 只读 LRU 无竞争 |
@@ -621,9 +652,10 @@ session_manager.cleanup_old(max_sessions=50, ttl_seconds=86400)
 
 | 场景 | 服务端行为 | 客户端行为 |
 |------|-----------|-----------|
-| Origin 不合法 | `websocket.close(code=4003)` 拒绝连接 | `onclose` → 3s 重连（会再次被拒） |
+| Origin 不合法 | `websocket.close(code=4003)` 拒绝连接 | `onclose` → 自动重连（会再次被拒） |
+| 连接数超限（每 IP >5 或全局 >100） | `websocket.close(code=4004)` 拒绝连接 | 同上 |
 | 消息 >100KB | 回复 `{"type":"error","content":"消息过长"}` | 前端显示系统消息提示 |
-| WebSocket 异常断开 | log `info` 级别 | `onclose` → 3s 自动重连 |
+| WebSocket 异常断开 | log `info` 级别 | `onclose` → 自动重连（指数退避） |
 | WebSocket 异常后发送失败 | try-except 静默忽略 | 同上 |
 | 内部处理异常 | 回复 `{"type":"error"}`，catch 异常后继续 | 日志回显 |
 
@@ -645,12 +677,13 @@ ws.onerror = function() { setStatus('error'); };
 ws.onclose = function() {
     setStatus('disconnected');
     hideTyping();
-    setTimeout(connect, 3000);  // 自动重连
+    setTimeout(connect, reconnectDelay);                   // 自动重连
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);  // 指数退避，上限 30s
 };
 ```
 
 - 连接 error → 状态显示"连接异常"（黄灯）
-- 连接 close → 状态显示"已断开"（红灯）→ 3s 后自动重连
+- 连接 close → 状态显示"已断开"（红灯）→ 2s 后自动重连，失败逐次翻倍至 30s 上限
 - REST fallback 失败 → 静默恢复 UI（`catch` 中重置 `isProcessing` 状态）
 
 ---
@@ -660,15 +693,16 @@ ws.onclose = function() {
 ### 9.1 Origin 验证（`#158` / `#24`）
 
 ```python
-allowed = {"http://localhost:8000", "http://127.0.0.1:8000", "null"}
-if origin and origin not in allowed and not origin.startswith("http://localhost"):
-    await websocket.close(code=4003)
+allowed = {"localhost", "127.0.0.1"}  # + config.allowed_origins 的主机名
+if origin and origin != "null":
+    if urlparse(origin).hostname not in allowed:
+        await websocket.close(code=4003)
 ```
 
-- 默认仅允许 `localhost` 和 `127.0.0.1` 来源
-- 空 Origin（非浏览器客户端）视为合法（兼容性）
+- 默认仅允许 `localhost` 和 `127.0.0.1` 来源（按主机名匹配，忽略 scheme/端口）
+- 空 Origin 或 `"null"`（非浏览器/本地客户端）视为合法（兼容性）
 - 拒绝非 localhost 跨站 WebSocket 连接
-- 用户可在 `config.json` 中通过 `allowed_origins` 追加额外可信来源（见 [#24 CORS](#932-cors)）
+- 用户可在 `config.json` 中通过 `allowed_origins` 追加额外可信主机（便于内网穿透域名）
 
 ### 9.2 消息大小限制
 
@@ -690,6 +724,7 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 
 ### 9.4 WebSocket 连接限制
 
+- 每 IP 最多 5 条、全局最多 100 条 WebSocket 连接，超限 `close(code=4004)`（`#158`）
 - 多标签页共享同一 session 的后台 proactive 任务会自动 cancel 旧任务
 - 速率限制见 [9.3](#93-速率限制24--rl-001)
 
@@ -733,6 +768,7 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 | `web_host` | `"0.0.0.0"` | 监听地址 |
 | `web_port` | `8000` | 监听端口 |
 | `allowed_origins` | `[]` | 额外允许的 CORS Origin 列表（默认已含 localhost） |
+| `monitor_enabled` | `true` | 是否记录 LLM 调用到监控缓冲（`/api/monitor` 数据源，MN-003） |
 | `api_endpoint` | `"https://api.deepseek.com"` | LLM API 地址 |
 | `api_model` | `"deepseek-v4-flash"` | 使用的模型 |
 | `api_timeout` | `180` | API 请求超时（秒） |
@@ -759,4 +795,3 @@ if origin and origin not in allowed and not origin.startswith("http://localhost"
 - [消息流转](message-flow.md)
 - [配置参考](config-reference.md)
 - [部署手册](deployment.md)
-- [里程碑与 Issue](milestones-and-issues.md)

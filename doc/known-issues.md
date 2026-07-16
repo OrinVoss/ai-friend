@@ -65,10 +65,6 @@ path = (
 
 `dispatcher` 只负责解析和分发，不再修改参数名。
 
-### 相关文档
-
-- 完整事件报告：`doc/incident-dispatcher-alias-conflict.md`
-
 ---
 
 ## 2. 日志中文显示乱码
@@ -2100,6 +2096,101 @@ dv = user_sentiment * 0.3
 ```
 
 ---
+
+---
+
+## 7. user_facts 唯一约束缺少 session_id，跨 session 同 key 互相覆盖
+
+### 状态
+
+- 待处理（2026-07-16 修复 session 隔离时顺带发现）
+
+### 详情
+
+`user_facts` 建表时的唯一约束是 `UNIQUE(category, fact_key)`（`storage/database.py`），不含 `session_id`。`session_id` 列是后来通过 ALTER 迁移补上的，唯一约束没有跟着迁移；`upsert_fact` 的 `ON CONFLICT(category, fact_key)` 仍按旧约束命中。
+
+后果：两个 session 写入同一 `(category, fact_key)` 时，后写一方触发冲突，把另一个 session 的行原地覆盖/合并（`fact_value` 按 confidence 取舍、`confidence`/`importance` 取 MAX、`recall_count` 累加），事实跨 session 串味。对照新表 `facts_v2` 已是 `UNIQUE(session_id, category, fact_key)`。
+
+### 为什么不现在修
+
+- 修复需要重建 `user_facts` 表迁移唯一约束（SQLite 不支持 ALTER 约束），属 schema 变更
+- 计划等 `doc/refactor/systems/database.md` 的数据库自动备份落地后一起做
+- 当前部署 session 数少，实际冲突概率低
+
+### 建议修复方案
+
+参考 `relationship_metrics` 的复合主键迁移方式：RENAME 旧表 → 按 `UNIQUE(session_id, category, fact_key)` 建新表 → 迁移数据 → `upsert_fact` 的 `ON CONFLICT` 子句同步更新。
+
+### 相关文档
+
+- `changes/2026-07-16-fix-embedding-dim-session-isolation.md`
+- `doc/refactor/systems/database.md`
+
+---
+
+## 8. 按 id 更新事实的写方法仍无 session 校验
+
+### 状态
+
+- 部分修复（2026-07-16）：`get_similar_facts` 已加 `session_id` 过滤，`deactivate_fact` 已加 `WHERE id = ? AND session_id = ?` 校验（rowcount 为 0 时记 warning）
+- 待处理：其余按 id 写的方法
+
+### 详情
+
+2026-07-16 的 session 隔离修复堵住了危害最大的 `deactivate_fact`（此前可跨 session 软删其他角色的事实），但 `storage/repository.py` 中其余按 id 写的方法仍是裸 `WHERE id = ?`：
+
+- `update_fact_score` / `update_fact_confidence` / `increment_fact_recall`（user_facts）
+- `update_fact_v2_status` / `verify_fact_v2` / `decay_fact_v2`（facts_v2）
+
+id 是全局自增主键，调用方一旦传入其他 session 的 id 就会跨 session 改写，且不留下任何日志痕迹。
+
+### 为什么不现在修
+
+- 现有调用链传入的 id 均来自本 session 的查询结果，未发现实际触发跨 session 写入的路径
+- 属防御性加固，优先级低于真实数据冲突（见第 7 条）
+
+### 建议修复方案
+
+与 `deactivate_fact` 对齐：统一改为 `WHERE id = ? AND session_id = ?`，rowcount 为 0 时记 warning。
+
+### 相关文档
+
+- `changes/2026-07-16-fix-embedding-dim-session-isolation.md`
+- `doc/refactor/systems/database.md`（增强方案第 3 条）
+
+---
+
+## 9. experiences 的 embedding 列写入后从未读回（语义检索死路径）
+
+### 状态
+
+- 待处理（2026-07-16 排查语义检索维度问题时发现），归 Layer 1 二期决策
+
+### 详情
+
+`experiences` 表有 `embedding` / `embedding_version` 列，`insert_experience` 和 consolidation 的批量编码都会写入向量。但读路径断在两处：
+
+1. `models/memory.py` 的 `Experience` 没有 `embedding` 字段，`storage/repository.py` 的 `_row_to_experience` 也不读该列（对照 `_row_to_fact` 是读的）。
+2. `memory/retrieval.py` 的 `_search_experiences_semantic` 靠 `hasattr(exp, 'embedding')` 判断是否走向量分支，对 `Experience` 实例恒为 False，语义分支从未生效，静默退化为纯关键词检索。
+
+向量写了没人用，写入成本是纯浪费。注意 2026-07-16 修复的 `bytes_to_vec` 维度问题（RT-007）只救活了 fact 路径，对本死路径无影响。
+
+### 为什么不现在修
+
+- 关键词检索可用，体验退化但不报错
+- 修复要动模型、仓储、检索三层，且需处理存量 BLOB 的维度一致性（当前 `embedding_dim=1024`）
+- 接线还是停写是方向性决策，归 Layer 1 二期统一处理
+
+### 建议修复方案
+
+二选一：
+
+1. **接线**：`Experience` 增加 `embedding` 字段，`_row_to_experience` 读回（与 `UserFact` 对齐），`_search_experiences_semantic` 的 `hasattr` 判断随之生效，复用 `bytes_to_vec(dim=len(qvec))` 的维度校验。
+2. **停写**：删除 experiences 的 embedding 写入路径，明确经历只做关键词检索。
+
+### 相关文档
+
+- `changes/2026-07-16-fix-embedding-dim-session-isolation.md`
 
 ---
 

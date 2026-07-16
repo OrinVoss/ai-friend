@@ -2,7 +2,7 @@
 
 > 目标：把 `doc/known-issues.md` 中分散的 20+ 个问题收敛到一个统一的、分层的架构改造方案中，而不是继续逐个打补丁。
 > 
-> 本文件合并了 `doc/systematic-solution.md`（早期概要草案）与 `doc/martian-manhunter-icon-valkyrie.md`（详细六层架构蓝图）。
+> 本文件由早期概要草案与详细六层架构蓝图两份草稿合并而成。
 
 ---
 
@@ -74,8 +74,8 @@ Layer 6: Observability 记录 source/metrics/log
 | Layer 2 | Context & Prompt Budget | 大部分已完成 | `doc/refactor/layer2-prompt/` |
 | Layer 3 | Async Agent Runtime | 部分已完成 | `doc/refactor/layer4-agent/` |
 | Layer 4 | Tool Runtime | 部分已完成（Prompt 已精简） | `doc/refactor/layer5-tool/` |
-| Layer 5 | Provider Abstraction | 未开始 | - |
-| Layer 6 | Observability | 部分已完成（监控面板） | - |
+| Layer 5 | Provider Abstraction | 未开始 | `doc/refactor/systems/provider.md` |
+| Layer 6 | Observability | 部分已完成（监控面板） | `doc/refactor/systems/logging.md` |
 
 ### Layer 0: Identity & State —— 一个角色一份完整状态
 
@@ -93,6 +93,7 @@ class RoleSession:
 
 - `SessionManager` 不再允许 `一个角色多个 session`。
 - 所有 SQLite 表已经按 `session_id` 隔离，只需保证 `session_id = role_id`。
+  - 已知例外（2026-07-16 发现，待修）：`user_facts` 唯一约束 `UNIQUE(category, fact_key)` 不含 `session_id`，跨 session 同 key 会互相覆盖；`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` 仍无 session 校验；`experiences.embedding` 写入后从未读回（经历的语义检索是死路径）。
 - `personality.json` 旧文件废弃；`personalities/{role_id}.json` 成为唯一人格+情绪数据源。
 - 解决：角色切换混乱、睡眠状态错配、关系指标历史空白、多 session 竞态。
 
@@ -416,7 +417,7 @@ class BaseLLMProvider(ABC):
 - 使用 `httpx.AsyncClient` 替代同步 `requests`，彻底消除事件循环阻塞。
 - 路由策略：日常聊天 → 本地模型；反思/梦境/复杂推理 → 云端模型。
 
-**状态**：未开始。
+**状态**：未开始（现有同步 `LLMProvider` 抽象 + `DeepSeekProvider` 单后端，未做异步化与多后端路由）。
 
 ### Layer 6: Observability —— 每个请求可追溯
 
@@ -538,7 +539,7 @@ class BaseLLMProvider(ABC):
 
 ## 6. 验收标准
 
-1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持 390+ passed。
+1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 408 passed + 2 skipped，30 个测试文件）。
 2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 20%。
 3. **记忆质量**：连续对话 50 轮后，Fact confidence 衰减机制生效，无自相矛盾 Fact。
 4. **稳定性**：Web 端 30 分钟无人访问自动释放资源，shutdown 不丢数据。
@@ -570,6 +571,7 @@ class BaseLLMProvider(ABC):
 
 ## 9. 相关文档
 
-- `doc/refactor/`：各 Layer 详细计划与进度
+- `doc/refactor/`：各 Layer 详细计划与进度（入口 `self-system.md` 为六层方案总装图，`progress.md` 为最新进度）
+  - 注意：`doc/refactor/` 的层号是建设顺序，与本方案的运行时层号不同；其中 `layer3-retrieval/`（多阶段 Retrieval）对应本方案 Layer 1 二期之后的检索改造
 - `doc/known-issues.md`：原始问题列表
 - `changes/`：每次改动的变更记录

@@ -25,52 +25,57 @@ main.py / web_main.py
     │
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
-    ├── core/
-    │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
+    ├── core/（16 模块）
+    │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策（短输入可跳过 LLM）
     │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker + response_format JSON mode
     │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
     │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
+    │   ├── prompt_cache.py ───── Prompt 分层缓存（静态/慢变/动态块复用）(#160)
     │   ├── sleep_manager.py ──── 睡眠/唤醒系统（窗口判断+梦境）
     │   ├── proactivity.py ────── 主动行为引擎（评分+话题+限速）
     │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
     │   ├── message_handler.py ── 消息入口（process_* 三方法）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
     │   ├── provider.py ───────── LLMProvider 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
+    │   ├── monitor.py ────────── LLM API 调用监控（环形缓冲 200 条，开发调试用）
     │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
     │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
     │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
-    │   └── dispatcher.py ─────── tool_call 三层解析（JSON 数组 / XML / 裸 JSON）+ 工具调度
+    │   └── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 工具调度
     │
-    ├── memory/
+    ├── memory/（7 模块）
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
     │   ├── long_term.py ────── LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
-    │   ├── embeddings.py ───── EmbeddingEngine（llama-server API）+ EmbeddingCache（LRU）
+    │   ├── embeddings.py ───── EmbeddingEngine（llama-server API, 1024 维）+ EmbeddingCache（LRU）
+    │   ├── lifecycle.py ────── MemoryLifecycleManager：Observation→Fact 生命周期（observe/promote/verify/contradict/decay/gc）(ML-001)
     │   ├── fact_checker.py ──── FactChecker：矛盾检测 + 置信度衰减 + 用户纠正 (#6)
     │   ├── retrieval.py ────── 三层检索 + 混合评分（语义 0.6 + 关键词 0.4）+ LLM 重排序
-    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + FactChecker 集成 + 自动嵌入编码）
+    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2）
     │
     ├── tools/
     │   ├── traits.py ──────── Tool 基类（含 to_json_schema()）+ ToolRegistry
     │   ├── memory_tools.py ── recall / remember (Agent 1,3)
-    │   ├── file_tools.py ──── read_file（目录列举 + 多文件）
+    │   ├── file_tools.py ──── read_file（目录列举 + 多文件）+ file_tree（目录树）
     │   ├── search_tools.py ── glob + grep（白名单限制）
     │   ├── notify_tool.py ─── notify（PowerShell toast）
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（222 用例）
+    ├── tests/ ───────────────── 单元测试（410 用例，30 个测试文件）
     │
     ├── storage/
-    │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ Schema + WAL 模式
-    │   └── repository.py ─── 异步数据访问层（CRUD + 修剪）
+    │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ 9 表 Schema + WAL 模式
+    │   └── repository.py ─── 异步数据访问层（CRUD + 修剪 + session 隔离）
     │
     ├── prompts/
-    │   ├── system.py ─────── System prompt 动态组装（7 区块，含 JSON 格式工具指令）
+    │   ├── system.py ─────── System prompt 分层组装（静态/慢变/动态块 + PromptCache）(#160)
+    │   ├── instructions.py ── Agent 1/2/3 指令文案集中管理（#294）
+    │   ├── tools_description.py ─ 工具触发规则/意图选项（由 ToolRegistry 动态生成）
     │   └── templates.py ──── 抽取/总结/反思 prompt 模板
     │
     ├── models/
     │   ├── personality.py ── EmotionalState + PersonalityConfig
-    │   ├── memory.py ─────── UserFact + Experience + Reflection
+    │   ├── memory.py ─────── UserFact + Experience + Reflection + Observation + FactV2
     │   └── conversation.py ─ Turn + MemoryContext
     │
     ├── ui/
@@ -80,6 +85,8 @@ main.py / web_main.py
     ├── web/
     │   ├── server.py ─────── FastAPI + WebSocket + proactive_loop
     │   ├── session.py ────── SessionManager + WebAgent
+    │   ├── schemas.py ────── Pydantic 请求/响应模型
+    │   ├── rate_limit.py ─── 内存滑动窗口限流中间件
     │   └── static/ ───────── HTML/CSS/JS 前端
     │
     └── doc/ ──────────────── 文档目录
@@ -105,7 +112,7 @@ Web 模式： web_main.py → uvicorn
 ### 1.3 设计原则
 
 - **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行, temp=0.3，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
-- **单向依赖**：core → memory → storage，core → tools，不存在循环依赖
+- **单向依赖**：core → memory → storage，core → tools，层间无循环依赖（个别内部环靠 lazy import 维持）；main.py 与 web/session.py 双装配（各装一遍全栈）
 - **接口隔离**：provider 抽象 LLM 调用，storage 抽象持久化，各层可独立替换
 - **双路径**：CLI 用状态机驱动，Web 用事件驱动，共享核心逻辑（_react_loop）
 
@@ -151,10 +158,10 @@ Web 模式： web_main.py → uvicorn
 
 ### 2.2 ReAct 循环
 
-每次用户输入可能触发多轮 ReAct 迭代（最多 10 次）：
+每次用户输入可能触发多轮 ReAct 迭代（最多 `config.max_tool_iterations` 次，默认 5）：
 
 ```
-第 1 轮：THINK → LLM 返回 JSON 工具调用数组（或 XML 回退）
+第 1 轮：THINK → LLM 返回 JSON 工具调用（或 XML 回退）
         ACT → execute_tool_calls() → 结果喂回
 第 2 轮：THINK → LLM 基于工具结果继续
         ACT → 无 tool_call → 最终回复 → REFLECT
@@ -164,7 +171,7 @@ Web 模式： web_main.py → uvicorn
 
 Tier 1 — JSON mode 结构化输出：
 ```json
-[{"name": "recall", "arguments": {"query": "用户喜欢什么"}}]
+{"calls": [{"name": "recall", "arguments": {"query": "用户喜欢什么"}}]}
 ```
 
 Tier 2 — XML 标签兼容回退：
@@ -177,26 +184,31 @@ Tier 2 — XML 标签兼容回退：
 ### 2.3 process_message（Web 模式）
 
 ```python
-def process_message(self, user_input, on_token=None):
+def process_message(self, user_input, on_token=None):  # → MessageHandler.handle_message
     self.short_term.add_turn("user", user_input)
-    mem_ctx = self.retriever.retrieve_for_query(user_input)
-    sys_prompt = build_system_prompt(...)
-    messages = [{"role": "system", "content": sys_prompt}, ...]
-    return self._react_loop(messages, on_token)
+    drive_result = self._inner_drive.assess(user_input)  # Agent 1：检索记忆 + 决策（短输入跳过 LLM）
+    if not drive_result.needs_external_tools:
+        # drive_result.context_summary（记忆/关系摘要）直接传给 Agent 3，不再重复检索
+        return self._run_agent3(user_input, drive_result, on_token=on_token)
+    exec_result = self._run_agent2(user_input, drive_result)   # Agent 2 多轮工具执行
+    return self._run_agent3(user_input, drive_result,
+                            tool_records=exec_result.records_text, final_response=True)
 ```
 
 ### 2.4 动态 max_tokens
 
 ```python
 def _max_tokens_for_emotion(self) -> int:
+    base = self.config.max_tokens  # 默认 512
     mapping = {
-        "excited": 768, "joyful": 768, "surprised": 700,
-        "engaged": 512, "content": 512, "neutral": 512,
-        "anxious": 300, "afraid": 300,
-        "melancholy": 256, "sad": 256,
-        "frustrated": 256, "angry": 256,
+        "excited": 512, "joyful": 512, "surprised": 448,
+        "engaged": base, "content": base, "trusting": base,
+        "anticipating": base, "neutral": base,
+        "anxious": 128, "afraid": 128,
+        "melancholy": 128, "sad": 128,
+        "frustrated": 128, "angry": 128, "disgusted": 128,
     }
-    return mapping.get(self.personality.emotion.dominant_emotion, 512)
+    return mapping.get(self.personality.emotion.dominant_emotion, base)
 ```
 
 ### 2.5 主动发起计算
@@ -363,11 +375,16 @@ prompt 注入：
     │ deque, maxlen=500, 内存
     │ 每轮对话直接追加
     ▼
-长期记忆（SQLite 4 张表）
+长期记忆（SQLite 9 张表）
     ├── user_facts          用户事实（评分 + 置信度 + 重要性）
     ├── experiences         共享体验（情感色调 + 重要性）
     ├── reflections         反思洞察（类型 + 重要性）
-    └── conversation_turns  完整对话历史
+    ├── conversation_turns  完整对话历史
+    ├── relationship_metrics 关系指标（按 session 隔离）
+    ├── relationship_snapshots 关系指标历史快照
+    ├── session_roles       session_id → role_id 映射
+    ├── observations        原始观察（记忆生命周期 Layer 1，双写中）
+    └── facts_v2            经验证的事实（confidence/stability/freshness/importance）
 ```
 
 ### 4.2 三层检索
@@ -376,16 +393,20 @@ prompt 注入：
 用户输入
     │
     ├ Layer 1: Hot Memory ──────────────────────────┐
-    │  始终注入 prompt：Top 5 facts + 最新 3           │
+    │  每轮必取：活跃 facts 候选（≤50 条）+ 最新 5       │
     │  experiences + 当前关系状态 + 最新 3 reflections  │
     │                                                 │
     ├ Layer 2: Query-Guided ─────────────────────────┤
-    │  Step A — 评分过滤（纯 SQL）                     │
-    │    score = composite × 0.2 + importance × 0.3   │
-    │          + keyword × 0.2 - recall_penalty × 0.02│
+    │  Step A — 混合评分                               │
+    │    语义 cosine × 0.6 + 关键词评分 × 0.4           │
+    │    关键词分 = composite × 0.2 + importance × 0.3  │
+    │      + confidence × 0.15 + keyword × 0.2        │
+    │      − min(recall × 0.02, 0.3)                  │
+    │    嵌入不可用 → 纯关键词评分（降级）                │
     │                                                 │
-    │  Step B — LLM 重排序（候选 > 15 条时触发）        │
-    │    极小调用（10-20 tokens 输出）→ 选出 3-8 条     │
+    │  Step B — LLM 重排序（候选 > 15 条时触发）         │
+    │    极小调用（10-20 tokens 输出）→ 重排后截断至 15 条 │
+    │    最终注入前 10 条 facts                         │
     │                                                 │
     └ Layer 3: On-Demand ────────────────────────────┘
       LLM 调 <tool_call>{"name": "recall"} 主动回溯
@@ -398,55 +419,83 @@ prompt 注入：
 ```
 pending_turns
     │
+    ├ Step 0: 双写 Observation（ML-001，use_observation_fact=true 时）
+    │   → 整批对话文本直接存一条 Observation（无新增 LLM 调用）
+    │   → 本批提取的 fact 以其为来源 promote 为 FactV2
+    │
     ├ Step 1: LLM 抽取 facts（#127 只提取 user_fact）
     │   → FACT|category|key|value|confidence|importance|fact_type
     │   → 跳过 agent_fact / system_fact（AI 行为/系统属性不入库）
-    │   → upsert user_facts（UNIQUE(category, key)）
+    │   → upsert user_facts（UNIQUE(category, key)）；双写开启时同步 promote FactV2
+    │   → FactChecker 矛盾检测 (#6)：
+    │       同 (category, key) 不同 value → 直接矛盾
+    │       嵌入相似度 > 0.65 且 value 不同 → 语义矛盾
+    │       矛盾事实: confidence × 0.4
+    │       衰减后 < 0.2 → 软删除 (is_active=0)
     │
     ├ Step 2: LLM 总结 experience
     │   → SUMMARY|TONE|SIGNIFICANCE|IMPORTANCE|TAGS
     │   → insert experiences
     │
-    ├ Step 3: LLM 生成 reflection
-    │   → TYPE|CONTENT|SIGNIFICANCE
+    ├ Step 3: 分层反思（#5）
+    │   → L1 基础反思（每次）/ L2 行为模式（每 3 次）/ L3 深度洞察（每 10 次）
     │   → insert reflections
     │
     ├ Step 4: 更新 relationship
-        → familiarity += 0.02
-        → if sentiment > 0.3: trust += sentiment × 0.05
-        → if personal_sharing: intimacy += 0.03
-
-    └ Step 5: FactChecker 矛盾检测 (#6)
-        → 同 (category, key) 不同 value → 直接矛盾
-        → 嵌入相似度 > 0.65 且 value 不同 → 语义矛盾
-        → 矛盾事实: confidence × 0.4
-        → 衰减后 < 0.2 → 软删除 (is_active=0)
+    │   → familiarity += 0.02
+    │   → trust: trusting 情绪 +0.05 / sentiment > 0.3 → +sentiment × 0.05 / 负面情绪 −0.02
+    │   → intimacy: personal_sharing +0.03 / content·engaged·trusting +0.02
+    │   → playfulness: 积极情绪 +0.02 / 负面情绪 −0.02
+    │
+    ├ Step 5: 修剪（见 4.4）+ 每 5 次执行一次 lifecycle GC（双写开启时）
+    │
+    └ Step 6: _embed_new_items() 自动嵌入编码（见 4.6）
 ```
 
 ### 4.4 记忆生命周期
 
-```
-创建 → 评分衰减（composite × 0.99/天）
-  → score < 0.2 → 归档（is_active = 0）
-    → 归档 > 90 天 → 软删除
+**旧三表（user_facts / experiences / reflections）**：
 
-修剪（每次 consolidation 执行）：
-  user_facts     ≤ 200   按 composite_score ASC 归档
-  experiences    ≤ 100   按 composite_score ASC 归档
-  reflections    ≤ 50    按 significance ASC 删除
 ```
+修剪（每次 consolidation 执行，按 session 隔离）：
+  user_facts     ≤ 200   超出部分 composite_score × 0.1 降级（最低分优先）
+  experiences    ≤ 100   按 composite_score ASC 归档（is_archived=1）
+  reflections    ≤ 50    按 significance ASC 软删除（is_active=0）
+
+矛盾衰减（FactChecker，见 4.7）：
+  confidence × 0.4 → 衰减后 < 0.2 → 软删除（is_active=0, composite_score=0）
+```
+
+**Layer 1 新生命周期（ML-001，use_observation_fact=true 时双写）**：
+
+```
+Observation（原始观察，整批对话文本，低置信）
+    │ 重复证据 / 明确确认
+    ▼ promote
+FactV2（四维评分：confidence / stability / freshness / importance）
+    │
+    ├ verify     → verification_count += 1，刷新 last_verified_at
+    ├ contradict → status = "contradicted"
+    └ decay（GC 时）→ freshness/confidence × 0.99^天数
+         → freshness < 0.2 → status = "decayed"
+
+GC（每 5 次 consolidation 执行一次）：
+  decay + merge_duplicates（占位）+ 归档 > 30 天的 observations
+```
+
+由 `MemoryLifecycleManager`（memory/lifecycle.py）提供 observe / promote / verify / contradict / decay / gc；对应模型 Observation / FactV2（models/memory.py），测试 tests/test_memory_lifecycle.py（7 用例）。
 
 ### 4.5 上下文压缩
 
 ```
-模型上下文：180,000 tokens（DeepSeek v4）
-压缩阈值：80% = 144,000 tokens
+模型上下文：1,000,000 tokens（deepseek-v4-flash）
+压缩阈值：80% = 800,000 tokens
 触发：每次请求动态计算，超出时自动执行
 
 压缩过程：
-  1. 收集所有非 system 消息
-  2. LLM 生成对话摘要（100-150 字）
-  3. 摘要注入 system prompt
+  1. 收集所有非 system 消息（每条截断 500 字，整体保留最后 8000 字）
+  2. LLM 生成对话摘要（2000-2500 字，第三人称）
+  3. 摘要注入 system prompt（compressed_summary 区块）
   4. 清空 ConversationBuffer
 ```
 
@@ -457,7 +506,7 @@ pending_turns
 **EmbeddingEngine** — llama.cpp server 客户端：
 - 模型：Qwen3.5-0.8B-Q6_K.gguf（~640MB, GPU CUDA 加速）
 - 端点：`http://localhost:8080/v1/embeddings`（OpenAI 兼容 API）
-- 维度：512（L2 归一化后存为 SQLite BLOB）
+- 维度：1024（`config.embedding_dim`，L2 归一化后存为 SQLite BLOB）
 - 启动方式：`start_embedding_server.bat`（启动 llama-server）
 
 **EmbeddingCache** — LRU 缓存：
@@ -482,6 +531,10 @@ pending_turns
 
 每次 consolidation 完成后，`_embed_new_items()` 扫描 `user_facts`、`experiences`、`reflections` 三表中 `embedding IS NULL` 的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。
 
+**维度校验**（2026-07-16 修复）：
+
+`bytes_to_vec` 默认按 BLOB 长度推断维度（`dim=None`）；检索的两个调用点显式传 `dim=len(query_vec)` 校验，维度不匹配的旧向量记 warning、该条仅按关键词评分，不再静默置 0。
+
 **优雅降级**：
 - 嵌入服务不可用时（health_check 失败/网络错误），自动回退到纯关键词评分
 - 不影响记忆合并和基本检索功能
@@ -494,10 +547,10 @@ pending_turns
 **矛盾检测**：
 1. 同 (category, fact_key) 不同 fact_value → 直接矛盾
 2. 嵌入余弦相似度 > 0.65 且 value 不同 → 语义矛盾
-3. 嵌入引擎不可用时自动跳过语义检测
+3. 嵌入引擎不可用时回退关键词重叠（Jaccard ≥ 0.5）检测（FC-005）
 
 **置信度衰减**：
-- 被矛盾的事实：confidence × 0.4
+- 被矛盾的事实：confidence × 0.4（新事实置信度明显更低时 ×0.7 轻度衰减，FC-003）
 - 衰减后 < 0.2 → 软删除（is_active=0, composite_score=0）
 
 **检索过滤**：
@@ -543,10 +596,10 @@ LLM 输出格式（三层解析，优先级从高到低）：
 **Tier 1 — JSON calls 数组（结构化输出 / JSON mode）**：
 
 ```json
-[{"name": "recall", "arguments": {"query": "..."}}]
+{"calls": [{"name": "recall", "arguments": {"query": "..."}}]}
 ```
 
-Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM 直接返回结构化 JSON 数组。
+Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM 返回含 `calls` 数组的结构化 JSON 对象。
 
 **Tier 2 — XML 标签（兼容回退）**：
 
@@ -563,17 +616,17 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 ```
 
 解析流程：
-1. 尝试解析为 JSON 数组 `[{...}]`（JSON mode 输出）
-2. 剥离 `<think>...</think>` 块
+1. 剥离 `<think>...</think>` 块
+2. 尝试解析为含 `calls` 数组的 JSON 对象（JSON mode 输出）
 3. 正则提取 `<tool_call>...</tool_call>`
 4. JSON 解析，参数别名归一化（search → query, text → content）
 5. 回退：尝试将整个响应作为单个 JSON 对象解析
 
-### 5.4 内置工具（9 个，三层分工）
+### 5.4 内置工具（10 个，三层分工）
 
 三层架构从根本上解决模型虚构工具调用内容的问题：
 - **Agent 1 (InnerDriveAgent)**：自主推理决策，内部使用 recall/remember。识别知识缺口，输出自然语言工具请求给 Agent 2。
-- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。7 个外部工具。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
+- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。8 个外部工具（EXTERNAL_TOOL_NAMES；file_tree 暂未注册到 Web 端 session）。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
 - **Agent 3 (Roleplay Agent)**：temperature=0.8，完整人格。接收 inner_drive_summary + tool_results。仅 recall/remember 两个内部工具（均为本地 SQLite 操作）。外部工具指令已完全移出 prompt。
 
 | 工具 | 功能 | 参数 | 后端 | Agent |
@@ -581,6 +634,7 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 | web_fetch | 提取网页正文内容（自动去 HTML） | url | AnySearch extract | Agent 2 |
 | web_search | 网络搜索，支持中文 + freshness(day/week/month/year) | query, max_results, freshness | AnySearch API (JSON-RPC 2.0) | Agent 2 |
 | read_file | 读取本地文件（≤500KB，目录列举，多文件，行号） | path, limit, offset | 本地文件系统 | Agent 2 |
+| file_tree | 列出目录结构树（跳过 .git/__pycache__ 等，深度 ≤4） | path, depth | 本地遍历 | Agent 2 |
 | glob | glob 模式搜索文件（**/*.py 等） | pattern, path | 本地遍历 | Agent 2 |
 | grep | 正则搜索文件内容（上下文+过滤） | pattern, path, glob, context | 本地搜索 | Agent 2 |
 | music_play | 用默认播放器播放音乐文件（模糊搜索自动匹配） | song | os.startfile | Agent 2 |
@@ -736,7 +790,15 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 
 ### 6.1 System Prompt 组装
 
-7 个区块动态拼接：
+按变化频率分三层组装（#160 分层缓存，core/prompt_cache.py）：
+
+- **静态块**（身份、inner drive 指令、工具列表）：经 `PromptCache` 无 TTL 缓存，人格文件变更（mtime/size）自动失效
+- **慢变块**（关系指标、长期记忆）：短 TTL 缓存（`prompt_cache_ttl_seconds`，默认 60s）
+- **动态块**（当前时间、情绪状态、工具调用记录、最近对话、指令）：每次重建
+
+Agent 1 检索后通过 `drive_result.context_summary` 把记忆/关系摘要直接传给 Agent 3 复用，不再重复检索。对话示例仅在前 `conversation_examples_max_turns`（默认 3）轮注入。
+
+组装结果示例：
 
 ```
 === Block 1: 当前时间 ===
@@ -760,8 +822,8 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 - 名字: 小陈
 - 摄影喜好: 城市风景和街拍
 
-=== Block 6: 工具列表 ===
-可用工具：recall / remember / read_file / notify
+=== Block 6: 内部工具列表 ===
+可用工具：recall / remember
 <tool_call>{"name": "...", "arguments": {...}}</tool_call>
 
 === Block 7: 对话示例 + 指令 ===
@@ -792,10 +854,12 @@ self._proactive._last_chat_time: float     # 上次聊天时间戳 (ProactivityM
 |------|------|----------|
 | FACT_EXTRACTION | 从对话抽取用户事实 | text |
 | EXPERIENCE_SUMMARIZATION | 总结共享体验 | text |
-| REFLECTION | 生成反思洞察 | experiences, reflections, facts, relationship |
+| REFLECTION | L1 基础反思（每次 consolidation） | experiences, reflections, facts, relationship |
+| REFLECTION_L2 | L2 行为模式反思（每 3 次） | facts, experiences |
+| REFLECTION_L3 | L3 深度心理洞察（每 10 次） | facts, experiences, relationship, patterns |
 | EMOTION_ANALYSIS | 分析用户消息情感 | text |
 | MEMORY_RERANK | 记忆候选重排序 | query, candidates |
-| CONTEXT_COMPRESS | 对话摘要生成 | conversation |
+| CONTEXT_COMPRESS | 对话摘要生成（prompts/system.py） | conversation |
 
 ---
 
@@ -990,8 +1054,34 @@ tags: list[str]
 
 ```python
 content: str
-insight_type: str       # self_discovery/user_discovery/relationship_insight/pattern/prediction
+insight_type: str       # user_discovery（L1, LLM TYPE）/ l2_pattern / l3_deep_insight
 significance: float     # 0~1
+level: int              # 1/2/3（MM-006）
+```
+
+### 8.5 Observation（ML-001）
+
+```python
+content: str            # 原始观察文本（整批对话，非空）
+episode_turn_start/end: int
+source_turn: int
+created_by: str         # 默认 "consolidation"
+session_id: str
+embedding: bytes        # float32 × dim
+is_archived: bool       # > 30 天由 GC 归档
+```
+
+### 8.6 FactV2（ML-001）
+
+```python
+category / fact_key / fact_value: str   # UNIQUE(session_id, category, fact_key)
+confidence: float       # 0~1
+stability: float        # 0~1 稳定性
+freshness: float        # 0~1 新鲜度，decay 主指标
+importance: float       # 0~1
+status: str             # active / decayed / merged / obsolete / contradicted
+source_observation_ids: list[int]
+verification_count: int
 ```
 
 ---
@@ -1001,12 +1091,16 @@ significance: float     # 0~1
 ### 9.1 SQLite Schema
 
 ```sql
--- 5 张核心表
+-- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=2）
 user_facts          用户事实（UNIQUE category+fact_key）
 experiences         共享体验（tags 存 JSON）
 reflections         反思洞察（related_experience_ids 存 JSON）
-relationship_metrics 关系指标（key-value）
+relationship_metrics 关系指标（key-value，PK (session_id, dimension)）
 conversation_turns  完整对话历史
+relationship_snapshots 关系指标历史快照
+session_roles       session_id → role_id 映射
+observations        原始观察（Layer 1 记忆生命周期，ML-001）
+facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，ML-001）
 ```
 
 ### 9.2 WAL 模式
@@ -1060,7 +1154,7 @@ class Database:
 
 > 完整配置字段说明见 [配置参考](config-reference.md) 和 [人格定制指南](personality-guide.md)。
 
-优先级：环境变量（计划中） > config.json > Config dataclass
+优先级：环境变量（DEEPSEEK_API_KEY / DEEPSEEK_API_ENDPOINT / DEEPSEEK_API_MODEL / AI_FRIEND_* 系列） > config.json > Config dataclass（加载时校验并 clamp 越界值）
 
 ```json
 {
@@ -1070,6 +1164,7 @@ class Database:
   "thinking": "disabled",
   "max_tokens": 512,
   "temperature": 0.8,
+  "db_path": "data/ai_friend.db",
   "short_term_capacity": 500,
   "consolidation_interval": 5,
   "proactive_min_idle": 180.0,
@@ -1078,12 +1173,19 @@ class Database:
   "max_facts": 200,
   "max_experiences": 100,
   "max_reflections": 50,
+  "max_tool_iterations": 5,
   "web_host": "0.0.0.0",
   "web_port": 8000,
   "log_level": "INFO",
+  "monitor_enabled": true,
   "embedding_endpoint": "http://localhost:8080/v1/embeddings",
-  "embedding_dim": 512,
-  "embedding_cache_size": 1000
+  "embedding_dim": 1024,
+  "embedding_cache_size": 1000,
+  "prompt_cache_ttl_seconds": 60,
+  "agent1_short_input_threshold": 20,
+  "conversation_examples_max_turns": 3,
+  "use_observation_fact": false,
+  "allowed_origins": []
 }
 ```
 
@@ -1096,7 +1198,8 @@ class Database:
 ### 环境
 
 ```bash
-pip install requests tiktoken plyer fastapi uvicorn
+pip install -r requirements.txt
+# requests / tiktoken / plyer / fastapi / uvicorn / websockets==12.0 / numpy
 ```
 
 ### 启动
@@ -1125,7 +1228,7 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000 --workers 4
 使用 `tiktoken` 的 `cl100k_base` 编码（待替换为 DeepSeek 专用 tokenizer）。不可用时回退启发式：
 
 ```
-CJK 字符: ÷ 1.5
+CJK 字符: × 1.5
 ASCII 字母: ÷ 4
 数字: ÷ 3
 其他: ÷ 8

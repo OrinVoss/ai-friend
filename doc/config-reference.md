@@ -16,7 +16,7 @@
 | `api_key` | string | `""` | API Key，建议用环境变量 `DEEPSEEK_API_KEY` |
 | `api_model` | string | `"deepseek-v4-flash"` | 模型名称 |
 | `api_timeout` | int | `180` | API 请求超时（秒） |
-| `max_tokens` | int | `512` | 每次回复最大 token 数（按情绪动态调整 256~768） |
+| `max_tokens` | int | `512` | 每次回复最大 token 数基准值（按主导情绪动态调整，默认 128~512） |
 | `temperature` | float | `0.8` | 回复随机性（Agent 3 Roleplay 使用） |
 | `thinking` | string | `"disabled"` | 是否启用思维链，"enabled"/"disabled" |
 | `reasoning_effort` | string | `""` | 推理努力程度（值取决于模型支持） |
@@ -39,6 +39,7 @@
 | `max_experiences` | int | `100` | 最大共享体验数，超量修剪 |
 | `max_reflections` | int | `50` | 最大反思数，超量修剪 |
 | `db_path` | string | `"data/ai_friend.db"` | SQLite 数据库路径 |
+| `use_observation_fact` | bool | `false` | 记忆 Layer 1 生命周期开关：开启后合并时双写 Observation/FactV2（observe/promote/verify/contradict/decay/gc） |
 
 ### 主动行为
 
@@ -62,6 +63,8 @@
 | `personality_file` | string | `"personalities/default.json"` | 默认人格模板路径；新建角色时会复制此文件 |
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
+| `max_tool_iterations` | int | `5` | ReAct 循环最大工具调用轮次 |
+| `monitor_enabled` | bool | `true` | LLM 调用监控开关（Web `/monitor` 页），生产环境建议关闭以避免记录 prompt |
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
 | `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
 | `prompt_cache_ttl_seconds` | int | `60` | 慢变提示词块（关系、长期记忆）缓存 TTL（秒），`0` 表示立即过期 |
@@ -133,9 +136,11 @@
   "conversation_examples": [
     { "user": "今天去外滩拍照了", "replies": ["蛙趣！发出来看看", "听起来就很绝"] }
   ],
+  "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
   "agent1_short_input_threshold": 20,
-  "conversation_examples_max_turns": 3
+  "conversation_examples_max_turns": 3,
+  "use_observation_fact": false
 }
 ```
 
@@ -147,7 +152,7 @@
 
 - `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的默认模板。
 - 新增角色时，系统会复制该模板到 `personalities/{role_id}.json`。
-- 旧版根目录 `personality.json` 保留为备份，不再被系统读取。
+- 旧版根目录 `personality.json` 保留为备份，正常运行不再读取（仅在数据库一次性迁移时用于推断旧角色名）。
 
 ### 静态部分 — 人格定义（可编辑）
 
@@ -193,7 +198,6 @@
 
 ```json
 {
-  "id": "小星",
   "personality": {
     "name": "小星",
     "traits": {
