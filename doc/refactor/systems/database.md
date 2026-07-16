@@ -38,7 +38,7 @@
 
 > ⚠️ **部分修复（2026-07-16）**：`get_similar_facts()` 已加 `session_id` 过滤，`deactivate_fact()` 已加 session 校验 + 未命中 warning（`changes/2026-07-16-fix-embedding-dim-session-isolation.md`）。**剩余**：`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 写方法仍无 session 校验。
 >
-> 🔴 **新发现**：`user_facts` 唯一约束为 `UNIQUE(category, fact_key)`（`database.py:113`），不含 session_id——两个 session 写同一 key 会触发 `ON CONFLICT` 把另一个 session 的行原地覆盖。需迁移为 `UNIQUE(category, fact_key, session_id)`，属 schema 变更，排在 P0-3 备份（已完成）之后做。
+> ✅ **新发现已修复（2026-07-16，#UK-001）**：`user_facts` 唯一约束已迁移为 `UNIQUE(session_id, category, fact_key)`（schema v3，RENAME 旧表 → 新表 → 搬迁数据），`upsert_fact` 的 `ON CONFLICT` 同步加 session_id。生产库下次启动经 P0-3 通道先自动备份再迁移。见 `changes/2026-07-16-user-facts-session-unique.md`。
 
 `storage/repository.py:137-145` —— `get_similar_facts()` 的 WHERE 没有 `session_id` 过滤（同文件其他查询都有）。consolidation 的矛盾检测（`memory/consolidation.py:262-269`）拿它找「相似旧事实」，命中后 `resolve()` 经 `deactivate_fact()` 按 id 直接置 `is_active=0`（`repository.py:117-124`，同样无 session 校验）。
 

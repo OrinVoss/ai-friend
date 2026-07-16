@@ -34,7 +34,9 @@ class Database:
     # Current schema target; bump when adding migrations. initialize() stamps
     # it into schema_version, and open() uses it to decide whether a
     # pre-migration backup is needed (version behind => migrations will run).
-    CURRENT_SCHEMA_VERSION = 2
+    # v2: observations / facts_v2 (ML-001). v3: user_facts session-scoped
+    # UNIQUE(session_id, category, fact_key) (#UK-001).
+    CURRENT_SCHEMA_VERSION = 3
 
     def __init__(self, db_path: str, backup_enabled: bool = True, backup_keep: int = 5):
         self.db_path = db_path
@@ -124,7 +126,11 @@ class Database:
                     recall_count INTEGER DEFAULT 0,
                     is_active INTEGER DEFAULT 1,
                     composite_score REAL DEFAULT 1.0,
-                    UNIQUE(category, fact_key)
+                    fact_type TEXT DEFAULT 'user_fact',
+                    embedding BLOB,
+                    embedding_version INTEGER DEFAULT 0,
+                    session_id TEXT DEFAULT 'default',
+                    UNIQUE(session_id, category, fact_key)
                 );
 
                 CREATE TABLE IF NOT EXISTS experiences (
@@ -264,6 +270,54 @@ class Database:
                 if column not in columns:
                     await c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default_val}")
                     logger.info(f"Schema migration: added {table}.{column}")
+
+            # #UK-001: migrate user_facts UNIQUE constraint from global
+            # (category, fact_key) to session-scoped (session_id, category,
+            # fact_key). The old constraint made two sessions sharing a key
+            # overwrite each other's row via ON CONFLICT. SQLite cannot alter
+            # constraints, so the table is rebuilt; existing data cannot hold
+            # cross-session duplicates (the old constraint forbade them), so
+            # the copy is always safe.
+            await c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_facts'")
+            row = await c.fetchone()
+            facts_sql = row[0] if row else ""
+            if facts_sql and "UNIQUE(category, fact_key)" in facts_sql:
+                logger.warning("[db] migrating user_facts to UNIQUE(session_id, category, fact_key)")
+                await c.executescript("""
+                    ALTER TABLE user_facts RENAME TO _old_user_facts;
+                    CREATE TABLE user_facts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        category TEXT NOT NULL,
+                        fact_key TEXT NOT NULL,
+                        fact_value TEXT NOT NULL,
+                        confidence REAL DEFAULT 1.0,
+                        importance REAL DEFAULT 0.5,
+                        source_turn INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        recall_count INTEGER DEFAULT 0,
+                        is_active INTEGER DEFAULT 1,
+                        composite_score REAL DEFAULT 1.0,
+                        fact_type TEXT DEFAULT 'user_fact',
+                        embedding BLOB,
+                        embedding_version INTEGER DEFAULT 0,
+                        session_id TEXT DEFAULT 'default',
+                        UNIQUE(session_id, category, fact_key)
+                    );
+                    INSERT INTO user_facts (id, category, fact_key, fact_value,
+                                            confidence, importance, source_turn,
+                                            created_at, updated_at, recall_count,
+                                            is_active, composite_score, fact_type,
+                                            embedding, embedding_version, session_id)
+                        SELECT id, category, fact_key, fact_value,
+                               confidence, importance, source_turn,
+                               created_at, updated_at, recall_count,
+                               is_active, composite_score, fact_type,
+                               embedding, embedding_version,
+                               COALESCE(session_id, 'default')
+                        FROM _old_user_facts;
+                    DROP TABLE _old_user_facts;
+                """)
 
             # #RM-001: migrate relationship_metrics from the old single-column
             # primary key (dimension) to composite (session_id, dimension).

@@ -2103,7 +2103,7 @@ dv = user_sentiment * 0.3
 
 ### 状态
 
-- 待处理（2026-07-16 修复 session 隔离时顺带发现）
+- ✅ 已修复（2026-07-16，#UK-001）：表重建迁移为 `UNIQUE(session_id, category, fact_key)`（schema v3），`upsert_fact` 的 `ON CONFLICT` 同步加 session_id；迁移前自动备份（P0-3）已先行落地。见 `changes/2026-07-16-user-facts-session-unique.md`
 
 ### 详情
 

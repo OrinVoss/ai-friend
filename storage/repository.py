@@ -34,7 +34,7 @@ class Repository:
                     INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
                                            source_turn, embedding, embedding_version, session_id, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(category, fact_key) DO UPDATE SET
+                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
                         confidence = MAX(user_facts.confidence, excluded.confidence),
@@ -49,7 +49,7 @@ class Repository:
                     INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
                                            source_turn, session_id, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(category, fact_key) DO UPDATE SET
+                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
                         confidence = MAX(user_facts.confidence, excluded.confidence),
