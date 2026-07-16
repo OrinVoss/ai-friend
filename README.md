@@ -335,7 +335,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（410 用例，30 个测试文件）
+├── tests/                     单元测试（422 用例，33 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -359,6 +359,9 @@ ai-friend/
 │   ├── test_agent_proactive.py Agent 主动行为测试（8 用例）
 │   ├── test_rate_limit.py      限流测试（7 用例）
 │   ├── test_memory_lifecycle.py 记忆生命周期（Observation→Fact）测试（7 用例）
+│   ├── test_database_backup.py 数据库自动备份测试（6 用例）
+│   ├── test_user_facts_unique_migration.py 唯一约束迁移测试（3 用例）
+│   ├── test_session_factory.py 统一装配测试（5 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_session_manager.py 会话管理测试（6 用例）
 │   ├── test_memory_tools.py    记忆工具测试（6 用例）
@@ -368,11 +371,12 @@ ai-friend/
 │   ├── test_music_tool.py      音乐工具测试（4 用例）
 │   └── test_conversation_examples.py 对话示例测试（2 用例）
 │
-├── core/                      核心引擎（16 模块，三层架构）
+├── core/                      核心引擎（17 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
 │   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
 │   ├── agent.py                核心引擎：Agent 3 Roleplay + ReAct 循环
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
+│   ├── session_factory.py     CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
 │   ├── prompt_cache.py        Prompt 分层缓存（静态/慢变/动态块复用，#160）
 │   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）

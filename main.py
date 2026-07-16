@@ -6,24 +6,11 @@ import logging
 import sys
 
 from config import load_config
-from core.agent import Agent
 from core.embedding_server import auto_start_embedding
 from core.personality import Personality
-from core.provider import DeepSeekProvider
 from core.logging_setup import setup_logging
-from memory.short_term import ConversationBuffer
-from memory.long_term import LongTermMemory
-from memory.retrieval import MemoryRetriever
-from memory.consolidation import MemoryConsolidator
+from core.session_factory import assemble_session, build_embed_engine, build_provider
 from storage.database import Database
-from storage.repository import Repository
-from tools.traits import ToolRegistry
-from tools.memory_tools import RecallTool, RememberTool
-from tools.file_tools import ReadFileTool, FileTreeTool
-from tools.notify_tool import NotifyTool
-from tools.web_tools import WebSearchTool, WebFetchTool
-from tools.music_tool import MusicPlayTool
-from tools.search_tools import GlobTool, GrepTool
 from ui.cli import ConsoleInterface
 
 
@@ -39,82 +26,26 @@ async def main():
         db = Database(config.db_path, backup_enabled=config.db_backup_enabled,
                       backup_keep=config.db_backup_keep)
         await db.open()
-        repo = Repository(db)
 
         # Initialize personality
         personality = Personality.load(config.personality_file)
 
-        # Initialize memory systems
-        ltm = LongTermMemory(repo)
-        short_term = ConversationBuffer(maxlen=config.short_term_capacity)
-
-        # Initialize provider
-        provider = DeepSeekProvider(
-            endpoint=config.api_endpoint,
-            api_key=config.api_key,
-            model=config.api_model,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-            thinking=config.thinking,
-            reasoning_effort=config.reasoning_effort,
-            timeout=config.api_timeout,
-            monitor_enabled=getattr(config, "monitor_enabled", True),
-        )
-
-        # Wrap LLM for single-turn structured calls
-        def llm_generate(prompt: str, temperature: float = 0.2) -> str:
-            messages = [{"role": "user", "content": prompt}]
-            return provider.generate(messages, stream=False, source="consolidation")
-
-        # Wrap LLM for reranking (single-turn, returns short text)
-        def llm_rerank(prompt: str) -> str:
-            messages = [{"role": "user", "content": prompt}]
-            return provider.generate(messages, stream=False, source="rerank")
-
-        # Initialize local embedding engine (optional, graceful degradation)
-        from memory.embeddings import EmbeddingEngine
-        embed_engine = EmbeddingEngine(
-            endpoint=config.embedding_endpoint,
-            dim=config.embedding_dim,
-        )
-
-        # Initialize memory components
-        retriever = MemoryRetriever(ltm, llm_rerank_fn=llm_rerank,
-                                    embedding_engine=embed_engine)
-        consolidator = MemoryConsolidator(ltm, llm_generate,
-                                          embedding_engine=embed_engine,
-                                          config=config)
+        # Unified session assembly (unified-pipeline P0): provider and
+        # embedding engine are process-shared, the rest is per session.
+        provider = build_provider(config)
+        embed_engine = build_embed_engine(config)
 
         # Initialize UI — CL-001: pass typing_speed from config so the display
         # engine actually uses the user-configured value instead of the default 0.02.
         ui = ConsoleInterface(typing_speed=config.typing_speed)
 
-        # Initialize tools
-        tool_registry = ToolRegistry()
-        tool_registry.register(RecallTool(retriever, ltm))
-        tool_registry.register(RememberTool(ltm))
-        tool_registry.register(ReadFileTool())
-        tool_registry.register(FileTreeTool())
-        tool_registry.register(NotifyTool())
-        tool_registry.register(WebSearchTool())
-        tool_registry.register(WebFetchTool())
-        tool_registry.register(MusicPlayTool())
-        tool_registry.register(GlobTool())
-        tool_registry.register(GrepTool())
-        logger.info(f"Registered {len(tool_registry.list_specs())} tools")
-
-        # Initialize agent
-        agent = Agent(
-            personality=personality,
-            provider=provider,
-            ltm=ltm,
-            retriever=retriever,
-            consolidator=consolidator,
-            short_term=short_term,
-            ui=ui,
-            config=config,
+        bundle = assemble_session(
+            config, db, session_id="default", personality=personality,
+            provider=provider, embed_engine=embed_engine, ui=ui,
+            include_file_tree=True, enable_llm_rerank=True,
         )
-        agent._tool_registry = tool_registry
+        agent = bundle.agent
+        logger.info(f"Registered {len(bundle.tool_registry.list_specs())} tools")
 
         try:
             agent.run()

@@ -9,21 +9,10 @@ from typing import Optional
 from config import Config
 from core.async_utils import run_async
 from core.personality import Personality
-from core.provider import LLMProvider, DeepSeekProvider
-from core.agent import Agent
-from memory.short_term import ConversationBuffer
-from memory.long_term import LongTermMemory
-from memory.retrieval import MemoryRetriever
-from memory.consolidation import MemoryConsolidator
+from core.provider import LLMProvider
+from core.session_factory import assemble_session, build_embed_engine, build_provider
 from memory.embeddings import EmbeddingEngine
 from models.personality import PersonalityConfig
-from tools.traits import ToolRegistry
-from tools.memory_tools import RecallTool, RememberTool
-from tools.file_tools import ReadFileTool
-from tools.notify_tool import NotifyTool
-from tools.web_tools import WebSearchTool, WebFetchTool
-from tools.music_tool import MusicPlayTool
-from tools.search_tools import GlobTool, GrepTool
 from storage.database import Database
 from storage.repository import Repository
 
@@ -31,77 +20,49 @@ logger = logging.getLogger(__name__)
 
 
 class WebAgent:
-    def __init__(self, config: Config, db: Database, repo: Repository,
+    def __init__(self, config: Config, db: Database,
                  session_id: str = "default",
                  role_id: Optional[str] = None,
                  shared_provider: Optional[LLMProvider] = None,
                  shared_embed_engine: Optional[EmbeddingEngine] = None):
         self.config = config
         self.db = db
-        self.repo = repo
         self.session_id = session_id
-        repo.session_id = session_id  # #40
         self.role_id = role_id or "default"
         self.personality_path = self._ensure_personality_file(self.role_id)
         self.personality = Personality.load(self.personality_path)
-        self.ltm = LongTermMemory(repo)
-        self.short_term = ConversationBuffer(maxlen=config.short_term_capacity)
-        # Restore recent conversation from DB (fixes #98)
-        for t in repo.get_recent_turns_sync(30):
-            self.short_term.add_turn(t["role"], t["content"])
-        self._on_token_callback = None
 
-        # SN-005/006: reuse the SessionManager-shared Provider/EmbeddingEngine
-        # instead of constructing a fresh HTTP session per tab. Each tab still
-        # gets its own Agent/personality, but the underlying HTTP pool is shared.
+        # Unified assembly (unified-pipeline P0). Each session gets its own
+        # Repository — the previous shared repo with a mutated `session_id`
+        # raced when multiple roles were active at once (web.md P0).
+        # SN-005/006: provider/embed engine stay process-shared.
         if shared_provider is not None:
             self.provider = shared_provider
         else:
-            self.provider = DeepSeekProvider(
-                endpoint=config.api_endpoint, api_key=config.api_key,
-                model=config.api_model, temperature=config.temperature,
-                max_tokens=config.max_tokens,
-                thinking=config.thinking, reasoning_effort=config.reasoning_effort,
-                timeout=config.api_timeout,
-                monitor_enabled=getattr(config, "monitor_enabled", True),
-            )
-
-        def llm_gen(prompt, temperature=0.2):
-            return self.provider.generate([{"role": "user", "content": prompt}], stream=False, source="session")
-
+            self.provider = build_provider(config)
         if shared_embed_engine is not None:
             embed_engine = shared_embed_engine
         else:
-            embed_engine = EmbeddingEngine(
-                endpoint=config.embedding_endpoint,
-                dim=config.embedding_dim,
-            )
+            embed_engine = build_embed_engine(config)
 
-        self.retriever = MemoryRetriever(self.ltm, embedding_engine=embed_engine)
-        self.consolidator = MemoryConsolidator(self.ltm, llm_gen,
-                                                embedding_engine=embed_engine,
-                                                config=config)
-
-        registry = ToolRegistry()
-        registry.register(RecallTool(self.retriever, self.ltm))
-        registry.register(RememberTool(self.ltm))
-        registry.register(ReadFileTool())
-        registry.register(NotifyTool())
-        registry.register(WebSearchTool())
-        registry.register(WebFetchTool())
-        registry.register(MusicPlayTool())
-        registry.register(GlobTool())
-        registry.register(GrepTool())
-        self.tool_registry = registry
-
-        self.agent = Agent(
-            personality=self.personality, provider=self.provider,
-            ltm=self.ltm, retriever=self.retriever,
-            consolidator=self.consolidator, short_term=self.short_term,
-            config=config, session_id=self.session_id,
+        bundle = assemble_session(
+            config, db, session_id=session_id, personality=self.personality,
+            provider=self.provider, embed_engine=embed_engine,
         )
+        self.repo = bundle.repo
+        self.ltm = bundle.ltm
+        self.short_term = bundle.short_term
+        self.retriever = bundle.retriever
+        self.consolidator = bundle.consolidator
+        self.tool_registry = bundle.tool_registry
+        self.agent = bundle.agent
         self.agent.personality_path = self.personality_path
-        self.agent._tool_registry = registry
+        self._on_token_callback = None
+
+        # Restore recent conversation from DB (fixes #98)
+        for t in self.repo.get_recent_turns_sync(30):
+            self.short_term.add_turn(t["role"], t["content"])
+
         # Restore turn counter so page refreshes don't reset it (#RS-001)
         try:
             max_turn = run_async(self.repo.get_max_turn_number())
@@ -274,18 +235,8 @@ class SessionManager:
         await self.db.open()
         self.repo = Repository(self.db)
         # SN-005/006: build the shared clients once for all future sessions.
-        self._shared_provider = DeepSeekProvider(
-            endpoint=self.config.api_endpoint, api_key=self.config.api_key,
-            model=self.config.api_model, temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            thinking=self.config.thinking, reasoning_effort=self.config.reasoning_effort,
-            timeout=self.config.api_timeout,
-            monitor_enabled=getattr(self.config, "monitor_enabled", True),
-        )
-        self._shared_embed_engine = EmbeddingEngine(
-            endpoint=self.config.embedding_endpoint,
-            dim=self.config.embedding_dim,
-        )
+        self._shared_provider = build_provider(self.config)
+        self._shared_embed_engine = build_embed_engine(self.config)
 
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:
@@ -315,7 +266,7 @@ class SessionManager:
 
             logger.info(f"[session] create: {sid} role={role_id}")
             agent = WebAgent(
-                self.config, self.db, self.repo, session_id=sid, role_id=role_id,
+                self.config, self.db, session_id=sid, role_id=role_id,
                 shared_provider=self._shared_provider,
                 shared_embed_engine=self._shared_embed_engine,
             )

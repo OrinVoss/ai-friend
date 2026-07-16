@@ -352,13 +352,14 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（16 模块，三层架构）
+├── core/                    核心引擎（17 模块，三层架构）
 │   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策）
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
 │   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
 │   ├── context_manager.py   上下文窗口管理（token 估算 + 压缩 + 摘要）
 │   ├── prompt_cache.py      Prompt 分层缓存（静态/慢变/动态块复用, #160）
+│   ├── session_factory.py   CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
 │   ├── personality.py       情绪引擎（四层）
 │   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
 │   ├── proactivity.py       主动行为（评分 + 频率限制）
