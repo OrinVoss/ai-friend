@@ -8,6 +8,7 @@
 doc/refactor/
 ├── README.md                 # 本说明
 ├── self-system.md            # 【入口】自我系统：统一人格架构（六层方案的总装图）
+├── enhancement-overview.md   # 系统增强总览：每个子系统的增强方案与状态索引
 ├── progress.md               # 当前重构进度总览
 ├── layer1-memory/            # Layer 1: Memory 生命周期重构
 │   ├── README.md
@@ -23,6 +24,7 @@ doc/refactor/
 │   └── README.md
 ├── layer6-personality/       # Layer 6: Personality / Session / 记忆绑定
 │   └── README.md
+├── systems/                  # 基础设施与接口系统增强（日志/模型/数据库/人格/情绪/Web/CLI）
 └── decisions/                # 重要技术决策记录
 ```
 
