@@ -43,19 +43,23 @@
 短期记忆（ConversationBuffer）
     │ deque, 线程安全, 重启从 DB 恢复最近 30 轮
     ▼
-长期记忆（SQLite 6 表）
+长期记忆（SQLite 9 表）
     ├── user_facts          用户事实（评分 + 置信度 + 重要性）
     ├── experiences         共享体验（情感色调 + 重要性，软删除）
     ├── reflections         反思洞察（类型 + 重要性，软删除）
     ├── conversation_turns  完整对话历史
     ├── relationship_metrics 关系指标（按 session_id 隔离）
-    └── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
-    外加 session_roles 表记录 session_id → role_id 映射
+    ├── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
+    ├── session_roles       session_id → role_id 映射
+    ├── observations        原始观察（记忆生命周期 Layer 1，双写中）
+    └── facts_v2            经验证的事实（confidence/stability/freshness/importance）
 ```
+
+记忆生命周期（一期，双写阶段）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ Insight（二期规划）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc，配置开关 `use_observation_fact`（默认 false）控制双写。
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
 
-语义搜索基于本地 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, 512维向量），通过 llama.cpp server 提供 /v1/embeddings API。嵌入服务器不可用时自动降级为纯关键词检索，不影响正常使用。
+语义搜索基于本地 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, 1024维向量），通过 llama.cpp server 提供 /v1/embeddings API。嵌入服务器不可用时自动降级为纯关键词检索（日志可见），不影响正常使用。
 
 ### 工具系统（9 个，三层分工）
 
@@ -189,6 +193,9 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **Web 安全加固** — CORS 来源可配置、基于滑动窗口的速率限制、CSP/X-Frame-Options 安全头
 - **对话示例可配置** — `config.json` 的 `conversation_examples` 可自定义系统提示词中的对话风格示例
 - **共享 embedding 启动** — CLI/Web 双端统一调用 `core/embedding_server.py`，消除启动代码重复
+- **Prompt 分层缓存** — system prompt 拆为静态/慢变/动态块，静态块跨调用复用，减少重复 token 消耗（#160）
+- **记忆生命周期（双写中）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（`use_observation_fact` 开关）
+- **语义检索维度自适应** — 向量按 BLOB 实际维度解码，维度不匹配时日志告警而非静默降级
 
 ---
 
@@ -310,57 +317,69 @@ ai-friend/
 ├── CLAUDE.md                  AI 协作规则
 ├── data/                      SQLite 数据库（WAL 模式）
 ├── logs/                      运行日志（YYYY-MM-DD.log，含 API/情绪/睡眠/工具追踪）
-├── changes/                   修改记录（按日期，20+ 条）
+├── changes/                   修改记录（按日期，200+ 条）
 ├── doc/                       文档
 │   ├── architecture.md        架构总览 + 使用指南
 │   ├── technical.md           技术细节（全模块）
 │   ├── message-flow.md        消息流转流程
 │   ├── startup-flow.md        启动流程（从 web_main 到聊天就绪）
-├── milestones-and-issues.md 里程碑 + 190 issue
-│   ├── api.md                  WebSocket/REST API 文档
+│   ├── api.md                 WebSocket/REST API 文档
 │   ├── config-reference.md    配置参考
 │   ├── personality-guide.md   人格定制指南
 │   ├── tool-development.md    工具开发指南
 │   ├── prompt-reference.md    Prompt 工程参考
 │   ├── testing-guide.md       测试指南
 │   ├── deployment.md          部署手册
-│   ├── open-issues-修复报告-2026-07-12.md  近期修复报告
-│   ├── db-report.html         数据库诊断报告
-│   └── v05-plan/               v0.5 修复计划（4 周 178 issue）
+│   ├── known-issues.md        已知问题清单（按优先级）
+│   ├── systematic-solution.md 六层系统性解决方案
+│   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（312 collected）
+├── tests/                     单元测试（410 用例，30 个测试文件）
 │   ├── mocks.py                Mock 工厂
-│   ├── test_emotional_state.py EmotionalState 测试（38 用例）
-│   ├── test_personality_core.py 人格核心测试（12 用例）
-│   ├── test_inner_drive.py     InnerDrive 测试（28 用例）
-│   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
-│   ├── test_dispatcher.py      工具调度测试（21 用例）
-│   ├── test_provider.py        Provider 测试（10 用例）
+│   ├── test_emotional_state.py EmotionalState 测试（41 用例）
+│   ├── test_dispatcher.py      工具调度测试（37 用例）
+│   ├── test_inner_drive.py     InnerDrive 测试（32 用例）
+│   ├── test_fact_checker.py    矛盾检测测试（26 用例）
+│   ├── test_retrieval.py       检索评分 + 语义维度回归（22 用例）
+│   ├── test_message_handler.py 消息处理测试（21 用例）
+│   ├── test_repository.py      Repository 数据访问 + session 隔离（19 用例）
 │   ├── test_segmentation.py    分段推送测试（18 用例）
+│   ├── test_embeddings.py      嵌入引擎测试（16 用例）
+│   ├── test_web_agent.py       WebAgent 主动行为测试（15 用例）
+│   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
+│   ├── test_v02_issues.py      v0.2 综合测试（14 用例）
+│   ├── test_prompt_instructions.py Prompt 指令测试（12 用例）
+│   ├── test_personality_core.py 人格核心测试（12 用例）
 │   ├── test_context_manager.py 上下文管理测试（12 用例）
-│   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
+│   ├── test_consolidation.py   记忆合并 FactChecker 集成测试（12 用例）
+│   ├── test_provider.py        Provider 测试（10 用例）
+│   ├── test_notify_tool.py     通知工具测试（9 用例）
 │   ├── test_cli_controller.py  CLI 状态机测试（8 用例）
-│   ├── test_message_handler.py 消息处理测试（10 用例）
-│   ├── test_agent_proactive.py Agent 主动行为测试（6 用例）
-│   ├── test_repository.py    Repository 数据访问测试（10 用例）
-│   ├── test_retrieval.py      检索评分置信度测试（8 用例）
-│   ├── test_web_agent.py      WebAgent 主动行为测试（4 用例）
-│   ├── test_consolidation.py  记忆合并 FactChecker 集成测试（7 用例）
-│   ├── test_v02_issues.py     v0.2 综合测试（14 用例）
-│   ├── test_fact_checker.py   矛盾检测测试（16 用例）
-│   └── test_memory_tools.py   记忆工具测试（6 用例）
+│   ├── test_agent_proactive.py Agent 主动行为测试（8 用例）
+│   ├── test_rate_limit.py      限流测试（7 用例）
+│   ├── test_memory_lifecycle.py 记忆生命周期（Observation→Fact）测试（7 用例）
+│   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
+│   ├── test_session_manager.py 会话管理测试（6 用例）
+│   ├── test_memory_tools.py    记忆工具测试（6 用例）
+│   ├── test_prompt_cache.py    Prompt 缓存测试（5 用例）
+│   ├── test_file_tools.py      文件工具测试（5 用例）
+│   ├── test_provider_abc.py    Provider 抽象测试（4 用例）
+│   ├── test_music_tool.py      音乐工具测试（4 用例）
+│   └── test_conversation_examples.py 对话示例测试（2 用例）
 │
-├── core/                      核心引擎（8 模块，三层架构）
+├── core/                      核心引擎（16 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
 │   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
-│   ├── agent.py                核心引擎（223 行）：Agent 3 Roleplay + ReAct 循环
+│   ├── agent.py                核心引擎：Agent 3 Roleplay + ReAct 循环
+│   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
 │   ├── context_manager.py     上下文窗口管理：token 估算 + 压缩 + 摘要
+│   ├── prompt_cache.py        Prompt 分层缓存（静态/慢变/动态块复用，#160）
+│   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
 │   ├── sleep_manager.py       睡眠系统：窗口判断 + 梦境生成 + 状态持久化
 │   ├── proactivity.py         主动行为：评分 + 话题选择 + 频率限制
 │   ├── cli_controller.py      CLI 状态机（run + 7 个 _on_* + _handle_command）
-│   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）
-│   ├── personality.py          情绪引擎（四层：输入→调制→怨恨→记忆）
 │   ├── provider.py             LLMProvider(ABC) 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，trust_env=False）
+│   ├── monitor.py             LLM API 调用监控（环形缓冲，开发调试用）
 │   ├── embedding_server.py    共享 embedding server 启动（CLI/Web 共用）
 │   ├── logging_setup.py       日志配置（logs/YYYY-MM-DD.log + stderr）
 │   ├── async_utils.py         异步→同步桥接 run_async()（线程池安全）
@@ -369,10 +388,11 @@ ai-friend/
 ├── memory/                    记忆系统
 │   ├── short_term.py           ConversationBuffer（deque, 线程安全, get_all_reversed）
 │   ├── long_term.py            LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
-│   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 512维, LRU cache + 线程锁）
+│   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache + 线程锁）
+│   ├── lifecycle.py            MemoryLifecycleManager（Observation→Fact 生命周期：observe/promote/verify/contradict/decay/gc）
 │   ├── fact_checker.py         矛盾检测 + 置信度衰减 + 用户纠正（语义相似度→衰减→软删除）
 │   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
-│   └── consolidation.py        记忆合并（事实/体验/反思/分层反思L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码
+│   └── consolidation.py        记忆合并（事实/体验/反思/分层反思L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
 │   ├── traits.py               Tool 基类 + to_json_schema() + ToolResult + ToolRegistry
@@ -450,8 +470,9 @@ _proactive_loop (15s)
 - [Prompt 工程参考](doc/prompt-reference.md) — 提示词模板
 - [测试指南](doc/testing-guide.md) — 运行和编写测试
 - [部署手册](doc/deployment.md) — 生产环境部署
-- [里程碑与 Issue](doc/milestones-and-issues.md) — 189 issue，7 个里程碑（v0.1~v2.0）
-- [v0.5 修复计划](doc/v05-plan/README.md) — 178 Issue 一月修复计划（第 1-2 周 P0/P1 全部完成 ✅）
+- [已知问题](doc/known-issues.md) — 按优先级排列的问题清单
+- [系统性解决方案](doc/systematic-solution.md) — 六层统一解决方案
+- [重构设计与进度](doc/refactor/README.md) — self-system 总装图 + 各层方案 + 进度追踪
 
 ## License
 
