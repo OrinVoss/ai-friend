@@ -115,3 +115,4 @@ Phase 4
 - `emotion.md` — 情绪系统增强（统一入口、按时间衰减、影响面收口）
 - `web.md` — Web 系统增强（会话隔离、鉴权、异步化、前端修复）
 - `cli.md` — CLI 系统增强（管线收敛、终端体验）
+- `unified-pipeline.md` — CLI 与 Web 统一管线（一个引擎、两个前端、共享装配与 Runtime）
