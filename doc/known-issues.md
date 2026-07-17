@@ -2133,8 +2133,7 @@ dv = user_sentiment * 0.3
 
 ### 状态
 
-- 部分修复（2026-07-16）：`get_similar_facts` 已加 `session_id` 过滤，`deactivate_fact` 已加 `WHERE id = ? AND session_id = ?` 校验（rowcount 为 0 时记 warning）
-- 待处理：其余按 id 写的方法
+- ✅ 已修复（2026-07-16）：`get_similar_facts` / `deactivate_fact` / `update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / `update_fact_v2_status` / `verify_fact_v2` / `decay_fact_v2` 全部加 `AND session_id = ?` + 未命中 warning。见 `changes/2026-07-16-repo-session-guards-embedding-version.md`
 
 ### 详情
 
@@ -2165,7 +2164,7 @@ id 是全局自增主键，调用方一旦传入其他 session 的 id 就会跨 
 
 ### 状态
 
-- 待处理（2026-07-16 排查语义检索维度问题时发现），归 Layer 1 二期决策
+- ✅ 读侧已修复（2026-07-16）：`Experience` 模型补 `embedding` / `embedding_version` 字段，`_row_to_experience` 读回该列——`retrieval.py` 的语义分支随之激活，Memory Agent 的 experience 向量召回也走这条路径。写入侧是否保留归 Layer 1 二期决策（现已全部有消费方）。
 
 ### 详情
 

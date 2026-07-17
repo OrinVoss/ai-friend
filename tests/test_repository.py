@@ -144,6 +144,52 @@ class TestRepositoryFacts(unittest.TestCase):
         facts = asyncio.run(other.get_active_facts(limit=10))
         self.assertEqual(len(facts), 1)
 
+    def test_by_id_writes_other_session_noop(self):
+        """update_fact_score / increment_fact_recall / update_fact_confidence
+        with another session's id must not take effect."""
+        other = Repository(self.db)
+        other.session_id = "sess_other"
+        fid = asyncio.run(other.upsert_fact("preference", "颜色", "蓝", confidence=0.9))
+
+        asyncio.run(self.repo.update_fact_score(fid, 0.01))
+        asyncio.run(self.repo.increment_fact_recall(fid))
+        asyncio.run(self.repo.update_fact_confidence(fid, 0.1))
+
+        facts = asyncio.run(other.get_active_facts(limit=10))
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0].confidence, 0.9)          # unchanged
+        self.assertEqual(facts[0].recall_count, 0)          # unchanged
+        self.assertGreater(facts[0].composite_score, 0.5)   # unchanged
+
+    def test_facts_v2_writes_other_session_noop(self):
+        """update_fact_v2_status / verify_fact_v2 / decay_fact_v2 with another
+        session's id must not take effect."""
+        other = Repository(self.db)
+        other.session_id = "sess_other"
+        fid = asyncio.run(other.upsert_fact_v2(
+            "preference", "食物", "披萨", confidence=0.8, freshness=1.0))
+
+        asyncio.run(self.repo.update_fact_v2_status(fid, "contradicted"))
+        asyncio.run(self.repo.verify_fact_v2(fid))
+        asyncio.run(self.repo.decay_fact_v2(fid, 0.01))
+
+        fact = asyncio.run(other.get_fact_v2_by_id(fid))
+        self.assertEqual(fact.status, "active")             # unchanged
+        self.assertEqual(fact.verification_count, 1)        # only upsert's own
+        self.assertAlmostEqual(fact.confidence, 0.8)        # unchanged
+        self.assertAlmostEqual(fact.freshness, 1.0)         # unchanged
+
+    def test_embedding_version_stamped(self):
+        """Writes through upsert_fact must stamp the current EMBEDDING_VERSION."""
+        from models.memory import EMBEDDING_VERSION
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        blob = EmbeddingEngine.vec_to_bytes(np.ones(8, dtype=np.float32))
+        asyncio.run(self.repo.upsert_fact(
+            "preference", "颜色", "蓝", confidence=0.9, embedding=blob))
+        facts = asyncio.run(self.repo.get_active_facts(limit=10))
+        self.assertEqual(facts[0].embedding_version, EMBEDDING_VERSION)
+
 
 class TestRepositoryRelationship(unittest.TestCase):
     def setUp(self):

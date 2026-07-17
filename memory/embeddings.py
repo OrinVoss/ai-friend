@@ -210,3 +210,63 @@ class EmbeddingCache:
     def __len__(self) -> int:
         with self._lock:
             return len(self._cache)
+
+
+def verify_embedding_health(engine: "EmbeddingEngine",
+                            sample_embedding=None,
+                            max_wait: float = 30.0) -> bool:
+    """Startup self-check (database.md P0): prove the embedding pipeline works
+    end-to-end — server reachable, encode returns vectors, and (optionally) a
+    stored BLOB decodes against the current dimension.
+
+    The point is to fail loudly at startup instead of silently degrading to
+    keyword-only retrieval (the RT-007 lesson).
+
+    - `sample_embedding`: optional callable returning one stored BLOB (or None)
+    - waits up to `max_wait` for the server to come up (it starts async)
+    """
+    deadline = time.time() + max_wait
+    while True:
+        try:
+            if engine.health_check():
+                break
+        except Exception:
+            pass
+        if time.time() >= deadline:
+            logger.warning(f"[embed] self-check: server not reachable within {max_wait:.0f}s; "
+                           f"semantic retrieval will run keyword-only")
+            return False
+        time.sleep(3)
+
+    try:
+        qvec = engine.encode_single("自检测试")
+    except Exception as e:
+        logger.warning(f"[embed] self-check: encode failed: {e}")
+        return False
+
+    if sample_embedding is not None:
+        try:
+            blob = sample_embedding()
+            if blob is not None:
+                vec = EmbeddingEngine.bytes_to_vec(bytes(blob), dim=len(qvec))
+                float(np.dot(vec, qvec))
+        except Exception as e:
+            logger.warning(f"[embed] self-check: stored embedding decode failed: {e}")
+            return False
+
+    logger.info(f"[embed] self-check ok (dim={len(qvec)})")
+    return True
+
+
+def schedule_embedding_self_check(engine: "EmbeddingEngine",
+                                  sample_embedding=None,
+                                  delay: float = 2.0,
+                                  max_wait: float = 30.0) -> None:
+    """Fire-and-forget background self-check at startup (CLI/Web entries)."""
+    def _run():
+        if delay:
+            time.sleep(delay)
+        verify_embedding_health(engine, sample_embedding=sample_embedding,
+                                max_wait=max_wait)
+
+    threading.Thread(target=_run, daemon=True, name="embed-self-check").start()

@@ -208,5 +208,52 @@ class TestMemoryLifecycleIntegration(unittest.TestCase):
         self.assertEqual(args["observation_ids"], [1])
 
 
+class TestReembedStaleVersions(unittest.TestCase):
+    """_embed_new_items must pick up stale-version rows and re-stamp them
+    with the current EMBEDDING_VERSION (rolling rebuild)."""
+
+    def test_stale_row_reembedded(self):
+        import asyncio
+        import numpy as np
+        from memory.consolidation import MemoryConsolidator
+        from memory.embeddings import EmbeddingEngine
+        from memory.long_term import LongTermMemory
+        from models.memory import EMBEDDING_VERSION
+        from storage.database import Database
+        from storage.repository import Repository
+
+        db = Database(":memory:")
+        asyncio.run(db.open())
+        repo = Repository(db)
+        old_blob = EmbeddingEngine.vec_to_bytes(np.ones(8, dtype=np.float32))
+
+        async def _insert():
+            async with db.cursor() as c:
+                await c.execute(
+                    "INSERT INTO user_facts (category, fact_key, fact_value, confidence,"
+                    " embedding, embedding_version, session_id) VALUES (?,?,?,?,?,?,?)",
+                    ("preference", "颜色", "蓝", 0.9, old_blob,
+                     EMBEDDING_VERSION + 99, "default"))
+                await db.commit()
+        asyncio.run(_insert())
+
+        embed = MagicMock()
+        embed.health_check.return_value = True
+        embed.encode.return_value = np.array(
+            [np.ones(8, dtype=np.float32) / 3.0], dtype=np.float32)
+        ltm = LongTermMemory(repo)
+        consolidator = MemoryConsolidator(ltm, MagicMock(), embedding_engine=embed)
+        # Production calls this from sync context (no running loop); calling
+        # it from inside a coroutine would bridge through the executor.
+        consolidator._embed_new_items()
+
+        facts = asyncio.run(repo.get_active_facts(limit=10))
+        asyncio.run(db.close())
+
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0].embedding_version, EMBEDDING_VERSION)
+        embed.encode.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

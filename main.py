@@ -9,7 +9,9 @@ from config import load_config
 from core.embedding_server import auto_start_embedding
 from core.personality import Personality
 from core.logging_setup import setup_logging
-from core.session_factory import assemble_session, build_embed_engine, build_provider
+from core.session_factory import (assemble_session, build_embed_engine,
+                                  build_provider, make_embedding_sampler)
+from memory.embeddings import schedule_embedding_self_check
 from storage.database import Database
 from ui.cli import ConsoleInterface
 
@@ -46,6 +48,8 @@ async def main():
         )
         agent = bundle.agent
         logger.info(f"Registered {len(bundle.tool_registry.list_specs())} tools")
+        # Startup self-check: fail loudly if the embedding pipeline is broken
+        schedule_embedding_self_check(embed_engine, make_embedding_sampler(bundle.repo))
 
         try:
             agent.run()

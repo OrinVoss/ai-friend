@@ -73,6 +73,8 @@
 
 ### P1-4 `bulk_update_embeddings` 没有 commit
 
+> 🔴→✅ **更严重的同款问题已修复（2026-07-16）**：`_embed_new_items` 在持有外层 `db.cursor()` 的情况下调用 `bulk_update_embeddings`（后者要拿同一把连接锁）——**自死锁**，每批卡满 60s 超时后以空消息告警「batch encoding failed: 」，生产环境的批量重嵌入因此从未成功过。已改为「cursor 内读候选 → 释放 → 编码 → 批量写」，并有 `TestReembedStaleVersions` 钉住。无 commit 的问题仍待处理。
+
 `repository.py:233-241` —— 全部写方法都显式 `await self.db.commit()`，唯独它没有。批量 embedding（`consolidation.py:551-555` 每批最多 150 行、要调外部 embedding 服务）的持久化取决于「下一个碰巧 commit 的方法」；进程在此之间退出，这批向量白算。同事务连接上后续谁 rollback 还会把它一起带走。
 
 ### P2-1 迁移无版本门控，每次启动全量探测
@@ -93,19 +95,19 @@ schema_version 表存在且已 stamp（`database.py:353-357`），但迁移不�
 
 ### P0：正确性地基（纯 bug 修复 + 备份，无需灰度开关）
 
-**1. 让语义检索真正生效**（✅ 核心修复已完成 2026-07-16；启动自检未做）
+**1. 让语义检索真正生效**（✅ 核心修复已完成 2026-07-16；启动自检已完成 2026-07-16：`verify_embedding_health` + 两个入口后台线程自检，失败记 warning）
 
 - `bytes_to_vec` 不再写死维度：按 BLOB 长度推断（`len(data) // 4`），或调用方传入当前引擎维度——二选一，全项目统一
 - 加启动自检：open 后抽一条 BLOB 解码并与 `encode_single` 结果做点积，失败 `logger.warning`——把「静默 0 分」变成「启动一句话」
 - 依赖：无。确定性修复，不动 schema
 
-**2. 让 embedding_version 接线**
+**2. 让 embedding_version 接线**（✅ 已完成 2026-07-16：`EMBEDDING_VERSION` 单一常量（models/memory.py），retrieval 跳过版本不匹配行，重嵌入条件扩为 `OR embedding_version != ?`）
 
 - 定义单一常量（与 embedding 模型/维度绑定），替代散落在 `repository.py:44,160,218,238,321` 的字面量 `1`
 - retrieval 只解码 version 匹配的行；不匹配的行视同无向量，并入批量重嵌入（`consolidation.py:536-537` 的 `WHERE embedding IS NULL` 扩为 `OR embedding_version != ?`）
 - 换模型/换维度 = 常量 +1，旧向量自动滚动重建——这就是这个字段本来的使命
 
-**3. 补齐 session 隔离**（⚠️ 部分完成 2026-07-16：`get_similar_facts` + `deactivate_fact` 已堵；其余按 id 写方法待补，另见 P0-2 新发现的唯一约束问题）
+**3. 补齐 session 隔离**（✅ 已完成 2026-07-16：`get_similar_facts` + 全部按 id 写方法（`deactivate_fact` / `update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 三个）均已加 session 校验 + 未命中 warning）
 
 - `get_similar_facts()` 加 `session_id = ?`（self.session_id 现成）
 - 按 id 写的方法（`deactivate_fact` / `update_fact_confidence` / `update_fact_score` / `increment_fact_recall` / facts_v2 三个）加 `AND session_id = ?`，跨 session id 直接写不进去
@@ -190,7 +192,7 @@ schema_version 升级为迁移台账：每个迁移（ALTER 批次 / #RM-001 / #
 测试：
 
 1. 1024 维 `vec_to_bytes` → `bytes_to_vec` 不抛异常，`_hybrid_score` 对带向量候选给出 semantic > 0 的分 ✅（`tests/test_retrieval.py::TestBytesToVecDim` / `TestHybridScoreSemanticDim`，2026-07-16）
-2. embedding_version 不匹配的行不参与打分，且出现在重嵌入批次里
+2. embedding_version 不匹配的行不参与打分，且出现在重嵌入批次里 ✅（`tests/test_retrieval.py::test_stale_version_skipped`、`tests/test_consolidation.py::TestReembedStaleVersions`，2026-07-16）
 3. `get_similar_facts` 只返回本 session 行；用他 session 的 id 调 `deactivate_fact` 不生效 ✅（`tests/test_repository.py`，2026-07-16）
 4. 触发迁移的 open 先生成备份文件；第 6 份备份产生时最旧被删 ✅（`tests/test_database_backup.py`，2026-07-16）
 5. per-session prune：session A 刷 1200 条 turns，session B 的 100 条原样保留

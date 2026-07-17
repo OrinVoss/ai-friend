@@ -6,7 +6,7 @@ import numpy as np
 
 from models.conversation import MemoryContext
 from prompts.templates import safe_format
-from models.memory import UserFact
+from models.memory import UserFact, EMBEDDING_VERSION
 from memory.long_term import LongTermMemory
 
 logger = logging.getLogger(__name__)
@@ -142,16 +142,23 @@ class MemoryRetriever:
 
         scores = []
         unusable = 0
+        stale = 0
         for c in candidates:
             semantic = 0.0
             if hasattr(c, 'embedding') and c.embedding is not None:
-                try:
-                    vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding), dim=len(qvec))
-                    semantic = float(np.dot(vec, qvec))
-                except Exception as e:
-                    unusable += 1
-                    logger.debug(f"[retrieval] fact embedding unusable "
-                                 f"(id={getattr(c, 'id', '?')}): {e}")
+                # Only decode vectors written by the current embedding
+                # pipeline; stale-version rows are skipped and picked up by
+                # the consolidation re-embed batch (rolling rebuild).
+                if getattr(c, 'embedding_version', 0) != EMBEDDING_VERSION:
+                    stale += 1
+                else:
+                    try:
+                        vec = EmbeddingEngine.bytes_to_vec(bytes(c.embedding), dim=len(qvec))
+                        semantic = float(np.dot(vec, qvec))
+                    except Exception as e:
+                        unusable += 1
+                        logger.debug(f"[retrieval] fact embedding unusable "
+                                     f"(id={getattr(c, 'id', '?')}): {e}")
 
             keyword = self._keyword_score_single(c, keywords, query)
             final = semantic * SEMANTIC_WEIGHT + keyword * KEYWORD_WEIGHT
@@ -162,6 +169,8 @@ class MemoryRetriever:
                 f"[retrieval] {unusable}/{len(candidates)} fact embeddings unusable "
                 f"(query dim={len(qvec)}); those candidates scored by keyword only"
             )
+        if stale:
+            logger.debug(f"[retrieval] {stale} fact embeddings skipped: stale version")
 
         scores.sort(key=lambda x: x[1], reverse=True)
         return [c for c, _ in scores[:30]]
@@ -188,13 +197,16 @@ class MemoryRetriever:
         for exp in combined:
             sim = 0.0
             if hasattr(exp, 'embedding') and exp.embedding is not None:
-                try:
-                    vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding), dim=len(qvec))
-                    sim = float(np.dot(vec, qvec))
-                except Exception as e:
-                    unusable += 1
-                    logger.debug(f"[retrieval] experience embedding unusable "
-                                 f"(id={getattr(exp, 'id', '?')}): {e}")
+                if getattr(exp, 'embedding_version', 0) != EMBEDDING_VERSION:
+                    pass  # stale version — skipped, re-embedded by consolidation
+                else:
+                    try:
+                        vec = EmbeddingEngine.bytes_to_vec(bytes(exp.embedding), dim=len(qvec))
+                        sim = float(np.dot(vec, qvec))
+                    except Exception as e:
+                        unusable += 1
+                        logger.debug(f"[retrieval] experience embedding unusable "
+                                     f"(id={getattr(exp, 'id', '?')}): {e}")
             scored.append((exp, sim))
         if unusable:
             logger.warning(

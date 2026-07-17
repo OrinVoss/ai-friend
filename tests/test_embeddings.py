@@ -145,5 +145,46 @@ class TestEmbeddingSanity(unittest.TestCase):
         self.assertEqual(vecs.shape, (1, 1024))
 
 
+class TestEmbeddingSelfCheck(unittest.TestCase):
+    """Startup self-check: fail loudly when the embedding pipeline is broken."""
+
+    def _engine(self, healthy=True):
+        from memory.embeddings import EmbeddingEngine
+        engine = MagicMock()
+        engine.health_check.return_value = healthy
+        vec = np.ones(1024, dtype=np.float32)
+        vec /= np.linalg.norm(vec)
+        engine.encode_single.return_value = vec
+        return engine
+
+    def test_ok_when_server_and_encode_work(self):
+        from memory.embeddings import verify_embedding_health
+        self.assertTrue(verify_embedding_health(self._engine(), max_wait=0.1))
+
+    def test_fails_loudly_when_server_down(self):
+        from memory.embeddings import verify_embedding_health
+        engine = self._engine(healthy=False)
+        with self.assertLogs("memory.embeddings", level="WARNING") as cm:
+            ok = verify_embedding_health(engine, max_wait=0.01)
+        self.assertFalse(ok)
+        self.assertTrue(any("self-check" in m for m in cm.output))
+
+    def test_stored_blob_dim_mismatch_fails(self):
+        from memory.embeddings import verify_embedding_health, EmbeddingEngine
+        bad_blob = EmbeddingEngine.vec_to_bytes(np.ones(512, dtype=np.float32))
+        with self.assertLogs("memory.embeddings", level="WARNING") as cm:
+            ok = verify_embedding_health(
+                self._engine(), sample_embedding=lambda: bad_blob, max_wait=0.1)
+        self.assertFalse(ok)
+        self.assertTrue(any("decode failed" in m for m in cm.output))
+
+    def test_good_blob_passes(self):
+        from memory.embeddings import verify_embedding_health, EmbeddingEngine
+        engine = self._engine()
+        blob = EmbeddingEngine.vec_to_bytes(engine.encode_single.return_value)
+        self.assertTrue(verify_embedding_health(
+            engine, sample_embedding=lambda: blob, max_wait=0.1))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,8 +10,9 @@ from config import Config
 from core.async_utils import run_async
 from core.personality import Personality
 from core.provider import LLMProvider
-from core.session_factory import assemble_session, build_embed_engine, build_provider
-from memory.embeddings import EmbeddingEngine
+from core.session_factory import (assemble_session, build_embed_engine,
+                                  build_provider, make_embedding_sampler)
+from memory.embeddings import EmbeddingEngine, schedule_embedding_self_check
 from models.personality import PersonalityConfig
 from storage.database import Database
 from storage.repository import Repository
@@ -237,6 +238,9 @@ class SessionManager:
         # SN-005/006: build the shared clients once for all future sessions.
         self._shared_provider = build_provider(self.config)
         self._shared_embed_engine = build_embed_engine(self.config)
+        # Startup self-check: fail loudly if the embedding pipeline is broken
+        schedule_embedding_self_check(
+            self._shared_embed_engine, make_embedding_sampler(self.repo))
 
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:

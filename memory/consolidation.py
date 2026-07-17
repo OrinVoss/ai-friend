@@ -7,7 +7,7 @@ from typing import Optional
 from core.async_utils import _EXECUTOR, run_async
 from memory.fact_checker import FactChecker
 from memory.embeddings import EmbeddingEngine
-from models.memory import UserFact
+from models.memory import UserFact, EMBEDDING_VERSION
 from prompts.templates import safe_format
 
 from memory.long_term import LongTermMemory
@@ -524,39 +524,45 @@ class MemoryConsolidator:
 
         try:
             async def _do_embed():
-                async with self.ltm.repo.db.cursor() as c:
-                    all_updates = []
-                    for table, text_cols in [
-                        ("user_facts", ["category", "fact_key", "fact_value"]),
-                        ("experiences", ["summary", "emotional_tone", "tags"]),
-                        ("reflections", ["content"]),
-                    ]:
-                        col_list = ", ".join(text_cols)
+                all_updates = []
+                for table, text_cols in [
+                    ("user_facts", ["category", "fact_key", "fact_value"]),
+                    ("experiences", ["summary", "emotional_tone", "tags"]),
+                    ("reflections", ["content"]),
+                ]:
+                    col_list = ", ".join(text_cols)
+                    # Read candidates inside the cursor, then RELEASE it before
+                    # encoding and before bulk_update_embeddings — the bulk
+                    # call acquires the same connection lock, so holding the
+                    # cursor across it self-deadlocks (found 2026-07-16; the
+                    # old code timed out after 60s on every batch).
+                    async with self.ltm.repo.db.cursor() as c:
                         await c.execute(
                             f"SELECT id, {col_list} FROM {table} "
-                            "WHERE embedding IS NULL LIMIT 50"
+                            "WHERE (embedding IS NULL OR embedding_version != ?) LIMIT 50",
+                            (EMBEDDING_VERSION,),
                         )
                         rows = await c.fetchall()
-                        if rows:
-                            texts = []
-                            targets = []
-                            for row in rows:
-                                rid = row["id"]
-                                parts = [str(row[c] or "") for c in text_cols]
-                                texts.append(" ".join(parts))
-                                targets.append((table, rid))
-                            vecs = self._embed.encode(texts)
-                            for (tbl, rid), vec in zip(targets, vecs):
-                                all_updates.append((tbl, rid, EmbeddingEngine.vec_to_bytes(vec)))
-                    if all_updates:
-                        for tbl in ["user_facts", "experiences", "reflections"]:
-                            tbl_updates = [(rid, emb) for t, rid, emb in all_updates if t == tbl]
-                            if tbl_updates:
-                                await self.ltm.repo.bulk_update_embeddings(tbl, tbl_updates)
-                        logger.info(f"[embed] encoded {len(all_updates)} new items")
+                    if rows:
+                        texts = []
+                        targets = []
+                        for row in rows:
+                            rid = row["id"]
+                            parts = [str(row[c] or "") for c in text_cols]
+                            texts.append(" ".join(parts))
+                            targets.append((table, rid))
+                        vecs = self._embed.encode(texts)
+                        for (tbl, rid), vec in zip(targets, vecs):
+                            all_updates.append((tbl, rid, EmbeddingEngine.vec_to_bytes(vec)))
+                if all_updates:
+                    for tbl in ["user_facts", "experiences", "reflections"]:
+                        tbl_updates = [(rid, emb) for t, rid, emb in all_updates if t == tbl]
+                        if tbl_updates:
+                            await self.ltm.repo.bulk_update_embeddings(tbl, tbl_updates)
+                    logger.info(f"[embed] encoded {len(all_updates)} new items")
             run_async(_do_embed())
         except Exception as e:
-            logger.warning(f"[embed] batch encoding failed: {e}")
+            logger.warning(f"[embed] batch encoding failed: {type(e).__name__}: {e}")
 
     @staticmethod
     def _format_turns(turns: list) -> str:

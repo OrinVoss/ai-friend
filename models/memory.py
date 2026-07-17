@@ -17,6 +17,12 @@ InsightType = Literal[
 
 FactType = Literal["user_fact", "agent_fact", "system_fact"]
 
+# Version of the embedding pipeline (model + dimension) stamped on every
+# vector written to the DB. Bump when the embedding model or dimension
+# changes: retrieval skips stale-version rows and the consolidation batch
+# re-embeds them, so vectors roll-rebuild automatically.
+EMBEDDING_VERSION = 1
+
 
 @dataclass
 class UserFact:
@@ -63,6 +69,8 @@ class Experience:
     recall_count: int = 0
     is_archived: bool = False
     composite_score: float = 0.5
+    embedding: Optional[bytes] = None        # read back for vector recall
+    embedding_version: int = 0
 
 
 @dataclass

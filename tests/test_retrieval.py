@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from models.memory import UserFact
+from models.memory import UserFact, EMBEDDING_VERSION
 from memory.retrieval import MemoryRetriever
 
 
@@ -154,10 +154,12 @@ class TestHybridScoreSemanticDim(unittest.TestCase):
         retriever = self._retriever(qvec)
         aligned = UserFact(id=1, fact_key="k1", fact_value="v", category="preference",
                            confidence=0.9, importance=0.5, composite_score=0.5,
-                           embedding=EmbeddingEngine.vec_to_bytes(qvec))
+                           embedding=EmbeddingEngine.vec_to_bytes(qvec),
+                           embedding_version=EMBEDDING_VERSION)
         zero = UserFact(id=2, fact_key="k2", fact_value="v", category="preference",
                         confidence=0.9, importance=0.5, composite_score=0.5,
-                        embedding=EmbeddingEngine.vec_to_bytes(np.zeros(1024, dtype=np.float32)))
+                        embedding=EmbeddingEngine.vec_to_bytes(np.zeros(1024, dtype=np.float32)),
+                        embedding_version=EMBEDDING_VERSION)
         # aligned is listed second; only a working semantic path can put it first
         result = retriever._hybrid_score("查询", [zero, aligned], [], query_vec=qvec)
         self.assertEqual(result[0].id, 1)
@@ -169,11 +171,32 @@ class TestHybridScoreSemanticDim(unittest.TestCase):
         retriever = self._retriever(qvec)
         bad = UserFact(id=3, fact_key="k", fact_value="v", category="preference",
                        confidence=0.9, importance=0.5, composite_score=0.5,
-                       embedding=EmbeddingEngine.vec_to_bytes(np.ones(512, dtype=np.float32)))
+                       embedding=EmbeddingEngine.vec_to_bytes(np.ones(512, dtype=np.float32)),
+                       embedding_version=EMBEDDING_VERSION)
         with self.assertLogs("memory.retrieval", level="WARNING") as cm:
             result = retriever._hybrid_score("查询", [bad], [], query_vec=qvec)
         self.assertEqual(result, [bad])  # no crash, fact still returned
         self.assertTrue(any("unusable" in m for m in cm.output))
+
+    def test_stale_version_skipped(self):
+        """embedding_version != EMBEDDING_VERSION rows are treated as having
+        no vector (rolling rebuild), without unusable warnings."""
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        qvec = self._unit_vec(1024, seed=3)
+        retriever = self._retriever(qvec)
+        stale = UserFact(id=4, fact_key="k1", fact_value="v", category="preference",
+                         confidence=0.9, importance=0.5, composite_score=0.5,
+                         embedding=EmbeddingEngine.vec_to_bytes(qvec),
+                         embedding_version=EMBEDDING_VERSION + 99)
+        current = UserFact(id=5, fact_key="k2", fact_value="v", category="preference",
+                           confidence=0.9, importance=0.5, composite_score=0.5,
+                           embedding=EmbeddingEngine.vec_to_bytes(qvec),
+                           embedding_version=EMBEDDING_VERSION)
+        with self.assertNoLogs("memory.retrieval", level="WARNING"):
+            result = retriever._hybrid_score("查询", [stale, current], [], query_vec=qvec)
+        # stale aligned vector must NOT outrank the current-version one
+        self.assertEqual(result[0].id, 5)
 
 
 class TestLongTermImport(unittest.TestCase):

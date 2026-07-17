@@ -58,6 +58,23 @@ def build_embed_engine(config: Config) -> EmbeddingEngine:
     )
 
 
+def make_embedding_sampler(repo: Repository):
+    """Sampler for the startup embedding self-check: returns one stored
+    embedding BLOB, from any session (vectors are content-derived)."""
+    def _sample():
+        from core.async_utils import run_async
+
+        async def _q():
+            async with repo.db.cursor() as c:
+                await c.execute(
+                    "SELECT embedding FROM user_facts "
+                    "WHERE embedding IS NOT NULL LIMIT 1")
+                row = await c.fetchone()
+                return row["embedding"] if row else None
+        return run_async(_q())
+    return _sample
+
+
 @dataclass
 class SessionBundle:
     """Per-session objects produced by assemble_session()."""

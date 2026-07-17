@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from models.memory import UserFact, Experience, Reflection, Observation, FactV2
+from models.memory import UserFact, Experience, Reflection, Observation, FactV2, EMBEDDING_VERSION
 from storage.database import Database
 from core.async_utils import run_async
 
@@ -30,10 +30,10 @@ class Repository:
         logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f} type={fact_type}")
         async with self.db.cursor() as c:
             if embedding is not None:
-                await c.execute("""
+                await c.execute(f"""
                     INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
                                            source_turn, embedding, embedding_version, session_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, {EMBEDDING_VERSION}, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
                                          THEN excluded.fact_value ELSE user_facts.fact_value END,
@@ -41,7 +41,7 @@ class Repository:
                         importance = MAX(user_facts.importance, excluded.importance),
                         recall_count = user_facts.recall_count + 1,
                         embedding = excluded.embedding,
-                        embedding_version = 1,
+                        embedding_version = {EMBEDDING_VERSION},
                         updated_at = CURRENT_TIMESTAMP
                 """, (category, key, value, fact_type, confidence, importance, source_turn, embedding, self.session_id))
             else:
@@ -103,15 +103,21 @@ class Repository:
     async def update_fact_score(self, fact_id: int, score: float) -> None:
         logger.debug(f"[db] update_fact_score: id={fact_id} score={score:.2f}")
         async with self.db.cursor() as c:
-            await c.execute("UPDATE user_facts SET composite_score = ? WHERE id = ?",
-                            (score, fact_id))
+            await c.execute("UPDATE user_facts SET composite_score = ? WHERE id = ? AND session_id = ?",
+                            (score, fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] update_fact_score id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def increment_fact_recall(self, fact_id: int) -> None:
         logger.debug(f"[db] increment_fact_recall: id={fact_id}")
         async with self.db.cursor() as c:
-            await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ?",
-                            (fact_id,))
+            await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ? AND session_id = ?",
+                            (fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] increment_fact_recall id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def deactivate_fact(self, fact_id: int) -> None:
@@ -128,12 +134,16 @@ class Repository:
             await self.db.commit()
 
     async def update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
-        """Lower a fact's confidence (unlike upsert which only takes MAX)."""
+        """Lower a fact's confidence (unlike upsert which only takes MAX).
+        Session-scoped like every other by-id write in this class."""
         logger.info(f"[db] update_fact_confidence id={fact_id} confidence={new_confidence:.2f}")
         async with self.db.cursor() as c:
             await c.execute(
-                "UPDATE user_facts SET confidence = ?, composite_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (new_confidence, new_confidence * 0.7, fact_id))
+                "UPDATE user_facts SET confidence = ?, composite_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
+                (new_confidence, new_confidence * 0.7, fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] update_fact_confidence id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def get_similar_facts(self, category: str, key: str, limit: int = 5) -> list[UserFact]:
@@ -159,11 +169,11 @@ class Repository:
                                 embedding: Optional[bytes] = None) -> int:
         logger.info(f"[db] insert_exp: {summary[:60]} tone={tone} sig={significance:.2f} imp={importance:.2f}")
         async with self.db.cursor() as c:
-            await c.execute("""
+            await c.execute(f"""
                 INSERT INTO experiences (summary, emotional_tone, significance, importance, tags,
                                          turn_range_start, turn_range_end, embedding, embedding_version,
                                          session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, {EMBEDDING_VERSION}, ?)
             """, (summary, tone, significance, importance, json.dumps(tags, ensure_ascii=False),
                   turn_start, turn_end, embedding, self.session_id))
             await self.db.commit()
@@ -241,7 +251,7 @@ class Repository:
             return
         async with self.db.cursor() as c:
             await c.executemany(
-                f"UPDATE {table} SET embedding = ?, embedding_version = 1 WHERE id = ?",
+                f"UPDATE {table} SET embedding = ?, embedding_version = {EMBEDDING_VERSION} WHERE id = ?",
                 [(emb, rid) for rid, emb in updates],
             )
             logger.debug(f"[db] bulk_embed: updated {len(updates)} rows in {table}")
@@ -261,7 +271,7 @@ class Repository:
                                           created_by, session_id, embedding, embedding_version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (content, source_turn, episode_turn_start, episode_turn_end,
-                  created_by, self.session_id, embedding, 1 if embedding else 0))
+                  created_by, self.session_id, embedding, EMBEDDING_VERSION if embedding else 0))
             await self.db.commit()
             return c.lastrowid
 
@@ -307,12 +317,12 @@ class Repository:
         source_ids = json.dumps(source_observation_ids or [])
         async with self.db.cursor() as c:
             if embedding is not None:
-                await c.execute("""
+                await c.execute(f"""
                     INSERT INTO facts_v2 (category, fact_key, fact_value, confidence, stability,
                                           freshness, importance, source_observation_ids,
                                           verification_count, last_verified_at, created_by,
                                           session_id, embedding, embedding_version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, {EMBEDDING_VERSION})
                     ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
                         fact_value = CASE WHEN excluded.confidence >= facts_v2.confidence
                                           THEN excluded.fact_value ELSE facts_v2.fact_value END,
@@ -324,7 +334,7 @@ class Repository:
                         last_verified_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP,
                         embedding = excluded.embedding,
-                        embedding_version = 1
+                        embedding_version = {EMBEDDING_VERSION}
                 """, (category, key, value, confidence, stability, freshness, importance,
                       source_ids, created_by, self.session_id, embedding))
             else:
@@ -371,9 +381,12 @@ class Repository:
         logger.info(f"[db] update_fact_v2_status: id={fact_id} status={status}")
         async with self.db.cursor() as c:
             await c.execute(
-                "UPDATE facts_v2 SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (status, fact_id)
+                "UPDATE facts_v2 SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
+                (status, fact_id, self.session_id)
             )
+            if c.rowcount == 0:
+                logger.warning(f"[db] update_fact_v2_status id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def verify_fact_v2(self, fact_id: int) -> None:
@@ -384,8 +397,11 @@ class Repository:
                 SET verification_count = verification_count + 1,
                     last_verified_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (fact_id,))
+                WHERE id = ? AND session_id = ?
+            """, (fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] verify_fact_v2 id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def decay_fact_v2(self, fact_id: int, decay_factor: float) -> None:
@@ -396,8 +412,11 @@ class Repository:
                 SET freshness = MAX(0.0, freshness * ?),
                     confidence = MAX(0.0, confidence * ?),
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (decay_factor, decay_factor, fact_id))
+                WHERE id = ? AND session_id = ?
+            """, (decay_factor, decay_factor, fact_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] decay_fact_v2 id={fact_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
     async def search_facts_v2(self, query: str = "", limit: int = 30) -> list[FactV2]:
@@ -617,6 +636,8 @@ class Repository:
             turn_range_end=r["turn_range_end"],
             created_at=r["created_at"], recall_count=r["recall_count"],
             is_archived=bool(r["is_archived"]), composite_score=r["composite_score"],
+            embedding=r["embedding"] if "embedding" in r.keys() else None,
+            embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
         )
 
     def _row_to_reflection(self, r) -> Reflection:
