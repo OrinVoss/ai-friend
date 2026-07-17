@@ -99,16 +99,6 @@ INNER_DRIVE_SCHEMA = {
 class InnerDriveAgent:
     """Agent 1: Self-aware reasoning before any external tool execution."""
 
-    # Short-input keywords that strongly suggest an external action is needed.
-    TOOL_KEYWORDS = [
-        "http", "https", "www.", ".com", ".cn", ".net", ".org",
-        "搜索", "查", "找", "搜", "查一下", "查查", "google", "百度",
-        "放歌", "听歌", "音乐", "歌曲", "播放",
-        "通知", "提醒", "闹钟",
-        "文件", "路径", "读取", "读", "打开", "看", "目录", "文件夹",
-        "新闻", "天气", "时间", "日期",
-    ]
-
     def __init__(self, provider, personality, ltm, retriever, short_term,
                  tool_registry, max_iterations: int = 5,
                  max_tokens_assess: int = 1024,
@@ -119,7 +109,6 @@ class InnerDriveAgent:
                  session_id: str | None = None,
                  prompt_cache=None,
                  prompt_cache_ttl: float = 60.0,
-                 short_input_threshold: int = 20,
                  memory_agent=None):
         self._provider = provider
         self._personality = personality
@@ -136,7 +125,6 @@ class InnerDriveAgent:
         self._session_id = session_id
         self._prompt_cache = prompt_cache
         self._prompt_cache_ttl = prompt_cache_ttl
-        self._short_input_threshold = short_input_threshold
         # MA-001: when provided (use_memory_agent), memory comes from
         # memory_agent.answer() instead of retriever.retrieve_for_query()
         self._memory_agent = memory_agent
@@ -147,16 +135,6 @@ class InnerDriveAgent:
         from core.dispatcher import execute_tool_calls
 
         logger.info(f"[inner_drive] start len={len(user_input)}")
-
-        # Lightweight pre-filter: skip the LLM for trivial chat inputs.
-        if self._should_skip_llm(user_input):
-            logger.info("[inner_drive] short input, skip LLM")
-            return InnerDriveResult(
-                needs_external_tools=False,
-                reasoning="短输入，无工具关键词，跳过 LLM",
-                summary="",
-                context_summary=self._context_summary_for(user_input),
-            )
 
         # MA-001: with use_memory_agent, one MemoryAgent.answer() call feeds
         # both this prompt's memory block and the context_summary passed to
@@ -229,26 +207,6 @@ class InnerDriveAgent:
             summary="",
             context_summary=cs,
         )
-
-    def _should_skip_llm(self, user_input: str) -> bool:
-        """Return True for short chat inputs that clearly need no tools.
-
-        Guards against wasting an LLM call on "你好" or simple acknowledgements,
-        while still routing follow-ups after tool calls through the planner so
-        short song/file names are not misclassified.
-        """
-        if len(user_input) >= self._short_input_threshold:
-            return False
-        lower = user_input.lower()
-        if any(kw in user_input for kw in self.TOOL_KEYWORDS):
-            return False
-        if any(kw in lower for kw in ["http", "https", "www", ".com", ".cn"]):
-            return False
-        # If any recent tool call succeeded, the short input may be a follow-up.
-        recent = self._tool_call_history[-2:] if self._tool_call_history else []
-        if any(tc.get("success") for tc in recent):
-            return False
-        return True
 
     def _build_context_summary(self, mem_ctx) -> str:
         """Format memory/relationship blocks for Agent 3 reuse."""

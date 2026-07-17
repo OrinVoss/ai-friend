@@ -236,7 +236,6 @@ python -c "import os; print(f'{os.path.getsize(\"data/ai_friend.db\") / 1024:.0f
 | `AI_FRIEND_MAX_TOOL_ITERATIONS` | — | ReAct 工具循环上限覆盖 |
 | `AI_FRIEND_TYPING_SPEED` | — | 打字机速度覆盖 |
 | `AI_FRIEND_PROMPT_CACHE_TTL` | — | Prompt 缓存 TTL（秒）覆盖 |
-| `AI_FRIEND_AGENT1_SHORT_INPUT_THRESHOLD` | — | Agent 1 短输入阈值覆盖 |
 | `AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS` | — | 对话示例轮数上限覆盖 |
 
 ---

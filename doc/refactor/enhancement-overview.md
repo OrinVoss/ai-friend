@@ -14,7 +14,7 @@
 | **记忆** (L1) | 对话直接存结论，无验证、无遗忘、无来源 | Observation → Fact → Insight 三层生命周期，可验证/可衰减/可追溯 | `layer1-memory/plan.md` | ✅ 一期（双写运行） |
 | **记忆检索** | 相似度 TopK，给什么信什么 | Memory Agent：向量召回 + 交叉验证 + 置信度 + 证据链 | `memory-agent.md` 等 3 份 | 📐 设计完成 |
 | **睡眠** | 只有睡相，没有睡眠的功能 | 睡眠工作层流水线：整理→实质性核查→清理→内驱维护→提炼→做梦 | `sleep-cycle.md` | 📐 设计完成 |
-| **Prompt** (L2) | 每轮重复构建，token 浪费 | 分层缓存 + block 拆分 + 短输入跳过 + Agent 1→3 上下文复用 | `layer2-prompt/README.md` | ✅ 大部分（语义过滤待升级） |
+| **Prompt** (L2) | 每轮重复构建，token 浪费 | 分层缓存 + block 拆分 + Agent 1→3 上下文复用（短输入跳过已移除） | `layer2-prompt/README.md` | ✅ 完成 |
 | **检索架构** (L3) | 所有 Agent 共享同一份 Context | 多阶段检索 + 按 Agent 定制 Retrieval Profile | `layer3-retrieval/README.md` | 📐 设计完成 |
 | **Agent 运行时** (L4) | Handler 直接操作内部状态、魔法数字遍地 | 状态机 + ToolExecutionResult + 注册表隔离 + 常量提取 | `layer4-agent/README.md` | ✅ 部分完成 |
 | **主动性/独处** | 主动决策单次拍脑袋，没有内心世界 | Think Loop + 内驱状态（挂念清单）+ 独处活动内化 | `layer4-agent/` 3 份文档 | 📐 设计完成 |
@@ -39,7 +39,7 @@
 
 1. **状态唯一**：人格/情绪/内驱/记忆各一份，所有循环共享，不搞模块私有副本
 2. **万物有生命周期**：记忆（创建→验证→衰减→删除）、挂念（active→resolved/expired/decayed）——没有只增不减的存储
-3. **结构化输出替代关键词匹配**：JSON Schema 约束 LLM 输出（#ID-001 以来的一贯方向），向量模型替代关键词表（线索提取、短输入过滤）
+3. **结构化输出替代关键词匹配**：JSON Schema 约束 LLM 输出（#ID-001 以来的一贯方向），向量模型替代关键词表（线索提取等语义召回场景）
 4. **确定性组件 + LLM 最后一步**：Memory Agent 本体不调 LLM；检索/验证/打分确定性可测，语言理解交给本来就存在的 Agent 3
 5. **灰度可回退**：双写并行、配置开关（`use_observation_fact` / `use_memory_agent` / `proactive_think_loop`），任何增强都能一键退回
 6. **分期落地**：每期独立可上线，依赖关系显式标注，不憋大招

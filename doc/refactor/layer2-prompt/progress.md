@@ -18,9 +18,7 @@
   - `_build_memory_block`
   - `_build_tool_history_block`
   - `_build_inner_*_block` 等
-- [x] Agent 1 短输入跳过 LLM
-  - `InnerDriveAgent._should_skip_llm()`
-  - 配置 `agent1_short_input_threshold`
+- [x] ~~Agent 1 短输入跳过 LLM~~（`_should_skip_llm` 已于 2026-07-16 整体移除：API 成本低，关键词误判不值得；配置 `agent1_short_input_threshold` 同步删除）
 - [x] Agent 1 向 Agent 3 传递 `context_summary`
   - `InnerDriveResult.context_summary`
   - `_run_agent3()` 复用该摘要

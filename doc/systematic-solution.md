@@ -248,6 +248,8 @@ class PromptTemplate:
 
 #### 新增问题：Agent 1 短输入过滤过于粗糙
 
+> **已解决（2026-07-16）**：不是按下面的语义相似度方案改，而是**整体移除**了 `_should_skip_llm`——用户决策：LLM API 成本很低，为省一次调用承担双向误判不值得。所有输入一律走完整 Agent 1 推理，`TOOL_KEYWORDS` 与 `agent1_short_input_threshold` 配置同步删除。见 `changes/2026-07-16-remove-short-input-skip.md`。以下为历史分析存档。
+
 `core/inner_drive.py::_should_skip_llm()` 目前使用硬编码中文关键词列表判断短输入是否需要工具：
 
 ```python
@@ -294,14 +296,14 @@ TOOL_KEYWORDS = [
 **状态**：大部分已完成。
 - [x] 分层 Prompt Cache
 - [x] 静态/慢变/动态 block 分离
-- [x] Agent 1 短输入跳过（当前为关键词版）
+- [x] Agent 1 短输入跳过（当前为关键词版）（已于 2026-07-16 整体移除，见上）
 - [x] Agent 1 向 Agent 3 传递 context_summary
 - [x] 静态对话示例仅前 N 轮注入
 - [x] 指令集中化
 - [x] 工具规则从 ToolRegistry 动态生成
 - [x] 情绪摘要化
 - [x] Tool Agent Prompt 精简
-- [ ] 短输入过滤升级为语义相似度（见上）
+- [x] ~~短输入过滤升级为语义相似度~~（改为整体移除，2026-07-16）
 - [ ] 监控 Prompt Cache 实际命中率
 - [ ] `ContextBudget` / `ContextAllocator` 完整实现
 

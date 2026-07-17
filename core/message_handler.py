@@ -140,7 +140,6 @@ class MessageHandler:
                 session_id=getattr(a, "session_id", None),
                 prompt_cache=self._prompt_cache,
                 prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
-                short_input_threshold=getattr(cfg, "agent1_short_input_threshold", 20),
                 memory_agent=memory_agent,
             )
 

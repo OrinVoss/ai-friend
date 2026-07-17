@@ -71,7 +71,6 @@
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
 | `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
 | `prompt_cache_ttl_seconds` | int | `60` | 慢变提示词块（关系、长期记忆）缓存 TTL（秒），`0` 表示立即过期 |
-| `agent1_short_input_threshold` | int | `20` | Agent 1 短输入快速返回阈值（字符数），输入长度小于该值且不含工具关键词时跳过 LLM |
 | `conversation_examples_max_turns` | int | `3` | 系统提示中对话示例仅在会话前 N 轮注入，`0` 表示始终不注入 |
 
 `conversation_examples` 每项格式：
@@ -108,7 +107,6 @@
 | `AI_FRIEND_EMBEDDING_DIM` | `embedding_dim` | `set AI_FRIEND_EMBEDDING_DIM=1024` |
 | `AI_FRIEND_SHORT_TERM_CAPACITY` | `short_term_capacity` | `set AI_FRIEND_SHORT_TERM_CAPACITY=500` |
 | `AI_FRIEND_PROMPT_CACHE_TTL` | `prompt_cache_ttl_seconds` | `set AI_FRIEND_PROMPT_CACHE_TTL=60` |
-| `AI_FRIEND_AGENT1_SHORT_INPUT_THRESHOLD` | `agent1_short_input_threshold` | `set AI_FRIEND_AGENT1_SHORT_INPUT_THRESHOLD=20` |
 | `AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS` | `conversation_examples_max_turns` | `set AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS=3` |
 
 优先级：**环境变量 > config.json > 代码默认值**
@@ -141,7 +139,6 @@
   ],
   "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
-  "agent1_short_input_threshold": 20,
   "conversation_examples_max_turns": 3,
   "use_observation_fact": false
 }

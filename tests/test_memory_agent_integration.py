@@ -89,14 +89,16 @@ class TestMemoryAgentIntegration(unittest.TestCase):
         retriever.retrieve_for_query.assert_called_once()
         self.assertIsNotNone(result.context_summary)
 
-    def test_short_input_path_uses_memory_agent(self):
+    def test_short_input_also_uses_memory_agent(self):
+        """Short inputs go through full reasoning too (skip removed), and
+        memory still comes from MemoryAgent when enabled."""
         ma = MagicMock()
         ma.answer = AsyncMock(return_value=_ma_answer())
         drive, provider, retriever = _make_drive(memory_agent=ma)
 
         result = drive.assess("你好")
 
-        provider.generate.assert_not_called()  # 短输入跳过 LLM
+        provider.generate.assert_called()  # 短输入跳过机制已删除
         self.assertIn("披萨", result.context_summary)
         retriever.retrieve_for_query.assert_not_called()
 

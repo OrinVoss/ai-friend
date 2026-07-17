@@ -1127,6 +1127,10 @@ Agent 1 和 Agent 3 都重复构建完整的人格/情绪/记忆上下文。Agen
 
 验证：全量单元测试 376 passed（`tests --ignore=tests/real_api`）。
 
+#### 后续（2026-07-16）
+
+第 4 项的短输入跳过机制**已整体移除**：关键词匹配误判双向存在（「我想听周杰伦」漏判、「今天去医院检查了」误伤），而 LLM API 成本很低，为省一次调用承担误判不值得。`agent1_short_input_threshold` 配置项同步删除，所有输入一律走完整 Agent 1 推理。见 `changes/2026-07-16-remove-short-input-skip.md`。
+
 ---
 
 ### 4.156 #156 [v0.2][v0.4] Bug：web_tools.py Session 未复用 + 嵌套重试最多 81 次 API 调用 + Agent 2 失败最多 9 次 API 调用

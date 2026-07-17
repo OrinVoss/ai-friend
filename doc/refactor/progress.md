@@ -85,17 +85,15 @@ Phase 3（按需）：
 **已完成**：
 - [x] 分层 Prompt Cache（`core/prompt_cache.py`）
 - [x] `prompts/system.py` 拆分为独立 block
-- [x] Agent 1 短输入跳过 LLM
+- [x] ~~Agent 1 短输入跳过 LLM~~（已于 2026-07-16 整体移除：API 成本低，关键词误判不值得）
 - [x] Agent 1 向 Agent 3 传递 `context_summary`
 - [x] 静态对话示例仅前 N 轮注入
 - [x] 指令集中化（`prompts/instructions.py`）
 - [x] 工具规则从 ToolRegistry 动态生成（`prompts/tools_description.py`）
 - [x] 情绪摘要化（`EmotionalState.to_prompt_summary()`）
 - [x] Tool Agent Prompt 精简
-- [x] 短输入过滤优化方案已写入文档
 
 **待完成**：
-- [ ] 短输入过滤升级为语义相似度（方案已设计，代码未改）
 - [ ] 监控 Prompt Cache 命中率与 token 节省
 - [ ] 进一步压缩 Agent 3 Prompt
 

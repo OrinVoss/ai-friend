@@ -176,10 +176,6 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 `InnerDriveResult` 新增 `context_summary` 字段。Agent 1 完成判断后，会把已格式化的关系/记忆摘要写入该字段。Agent 3 构建 prompt 时，如果 `context_summary` 非空，直接使用它作为慢变块，不再调用 `retriever.retrieve_for_query()`，避免同一请求内两次检索长期记忆。
 
-### 短输入快速返回
-
-Agent 1 对极短闲聊输入（长度 < `agent1_short_input_threshold`，不含工具关键词，且最近 2 轮无成功工具调用）直接返回 `needs_external_tools=false`，跳过 LLM 调用。
-
 ### 静态对话示例限制
 
 `conversation_examples_max_turns` 控制系统提示中的对话示例仅在会话前 N 轮注入，之后自动省略，减少长期运行时的 token 开销。

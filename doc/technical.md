@@ -26,7 +26,7 @@ main.py / web_main.py
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
     ├── core/（16 模块）
-    │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策（短输入可跳过 LLM）
+    │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
     │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker + response_format JSON mode
     │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
     │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
@@ -186,7 +186,7 @@ Tier 2 — XML 标签兼容回退：
 ```python
 def process_message(self, user_input, on_token=None):  # → MessageHandler.handle_message
     self.short_term.add_turn("user", user_input)
-    drive_result = self._inner_drive.assess(user_input)  # Agent 1：检索记忆 + 决策（短输入跳过 LLM）
+    drive_result = self._inner_drive.assess(user_input)  # Agent 1：检索记忆 + 决策
     if not drive_result.needs_external_tools:
         # drive_result.context_summary（记忆/关系摘要）直接传给 Agent 3，不再重复检索
         return self._run_agent3(user_input, drive_result, on_token=on_token)
@@ -1182,7 +1182,6 @@ class Database:
   "embedding_dim": 1024,
   "embedding_cache_size": 1000,
   "prompt_cache_ttl_seconds": 60,
-  "agent1_short_input_threshold": 20,
   "conversation_examples_max_turns": 3,
   "use_observation_fact": false,
   "allowed_origins": []

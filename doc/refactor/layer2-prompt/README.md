@@ -10,7 +10,7 @@
 
 - [x] 分层 Prompt Cache（`core/prompt_cache.py`）
 - [x] `prompts/system.py` 拆分为独立 block 并接入缓存
-- [x] Agent 1 短输入直接跳过 LLM（`agent1_short_input_threshold`）
+- [x] ~~Agent 1 短输入直接跳过 LLM~~（已于 2026-07-16 整体移除：API 成本低，关键词误判不值得）
 - [x] Agent 1 把格式化后的记忆/关系摘要传给 Agent 3，避免重复检索
 - [x] 静态对话示例仅前 N 轮注入（`conversation_examples_max_turns`）
 - [x] 指令文本集中管理（`prompts/instructions.py`）

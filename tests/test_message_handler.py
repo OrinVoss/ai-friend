@@ -42,13 +42,16 @@ class TestMessageHandler(unittest.TestCase):
         self.agent.personality.emotion.emotion_events = []
         self.agent.personality.emotion.record_emotion_event = MagicMock()
         self.agent.personality.config.traits = []
+        self.agent.personality.emotion.to_prompt_summary.return_value = {
+            "dominant_emotion": "neutral", "valence": 0.4, "arousal": 0.5,
+        }
         self.agent.provider.generate.return_value = "NO_TOOLS"
         self.agent._react_loop.return_value = "Hello!"
         self.agent._pick_proactive_topic.return_value = "聊聊天气"
         # Give the mocked config concrete values for the new prompt-cache fields.
         self.agent.config.prompt_cache_ttl_seconds = 60
-        self.agent.config.agent1_short_input_threshold = 20
         self.agent.config.conversation_examples_max_turns = 3
+        self.agent.config.use_memory_agent = False
 
         self.handler = MessageHandler(self.agent)
 

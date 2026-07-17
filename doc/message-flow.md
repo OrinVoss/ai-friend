@@ -17,7 +17,6 @@
 ┌──────────────────────────────────────────────┐
 │  Agent 1: InnerDriveAgent (core/inner_drive.py)│
 │  Perceive → 检索记忆 → 识别缺口 → 决策          │
-│  短输入(<20字且无工具词) → 跳过自身 LLM (预筛选) │
 │  内部工具: recall / remember (SQLite)          │
 │  无需外部工具? → 直接跳过 Agent 2 (闲聊优化)      │
 │  需外部工具? → 输出自然语言请求给 Agent 2        │
@@ -62,7 +61,7 @@
               ┌───────────────────────────────────────┼────────────────────────┐
               ▼                                       ▼                        ▼
         Agent 1 assess                          Agent 2 多轮工具           Agent 3 生成
-        (可跳过: 短输入)                        (3轮×3重试+review)         (含意图审批回路)
+        (全量推理)                             (3轮×3重试+review)         (含意图审批回路)
                                                       │
                                                       ▼
                                               事件: on_token / on_message_done
@@ -278,9 +277,6 @@ self._tool_call_history.append({
     │
     ▼
 InnerDriveAgent.assess()
-    │ 预筛选: 短输入(<agent1_short_input_threshold=20字,
-    │   无工具关键词, 近期无成功工具调用) → 跳过 LLM,
-    │   仅检索记忆 → 直接进 Agent 3 (0 次 LLM 调用)
     │ build_inner_drive_prompt(): 当前时间 + 身份 + 记忆 + 工具列表
     │   (静态/慢变块走 PromptCache, TTL=prompt_cache_ttl_seconds=60, #160)
     │ recall_query → 内部 recall 检索循环(最多5轮)
@@ -516,10 +512,9 @@ _send_segments(): 整条回复作为单个 segment 发送
     ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  Agent 1: InnerDriveAgent (core/inner_drive.py)                │
-│  ① 短输入(<20字无工具词) → 跳过 LLM 预筛选                      │
-│  ② 检索记忆 → 识别知识缺口 → 自主推理决策                       │
-│  ③ 闲聊/无需工具 → 直接进入 Agent 3 (1 次 LLM 调用)             │
-│  ④ 需外部工具 → 输出自然语言请求给 Agent 2                      │
+│  ① 检索记忆 → 识别知识缺口 → 自主推理决策                       │
+│  ② 闲聊/无需工具 → 直接进入 Agent 3 (1 次 LLM 调用)             │
+│  ③ 需外部工具 → 输出自然语言请求给 Agent 2                      │
 │  输出 summary + context_summary 供 Agent 3 复用                 │
 └──────────────────────────────────────────────────────────────┘
     │

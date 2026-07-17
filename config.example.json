@@ -11,7 +11,6 @@
   "allowed_read_paths": ["D:\\音乐", "D:\\桌面", "D:\\文档", "."],
   "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
-  "agent1_short_input_threshold": 20,
   "conversation_examples_max_turns": 3,
   "use_observation_fact": false,
   "use_memory_agent": false,

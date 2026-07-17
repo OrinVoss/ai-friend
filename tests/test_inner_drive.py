@@ -160,25 +160,14 @@ class TestAssess(unittest.TestCase):
             tool_registry=mock_tool_registry(),
         )
 
-    def test_assess_chat_short_input_skips_llm(self):
-        """Short chat input should bypass Agent 1 LLM."""
+    def test_assess_chat_short_input_goes_through_llm(self):
+        """Short chat input goes through full Agent 1 reasoning like any other
+        input (the short-input skip was removed 2026-07-16 — the API is cheap
+        and keyword misclassification wasn't worth the saved call)."""
         result = self.agent.assess("你好")
+        self.provider.generate.assert_called()
         self.assertFalse(result.needs_external_tools)
-        self.provider.generate.assert_not_called()
         self.assertIn("关系", result.context_summary)
-
-    def test_assess_short_input_with_recent_tool_does_not_skip(self):
-        """A short follow-up after a tool call should still go through Agent 1."""
-        self.agent._tool_call_history = [{"name": "music_play", "success": True, "output": "ok"}]
-        result = self.agent.assess("Teeth")
-        self.provider.generate.assert_called()
-
-    def test_assess_url_short_input_does_not_skip(self):
-        """A short input containing a URL must not be skipped."""
-        self.provider.generate.return_value = _fetch_json("https://x.com")
-        result = self.agent.assess("看 https://x.com")
-        self.provider.generate.assert_called()
-        self.assertTrue(result.needs_external_tools)
 
     def test_context_summary_populated(self):
         """Assess should return a non-empty memory/relationship summary."""
