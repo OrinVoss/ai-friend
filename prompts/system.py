@@ -171,7 +171,7 @@ def _build_inner_tools_block(tools) -> str:
 def build_inner_drive_prompt(
     personality: PersonalityConfig,
     emotion: EmotionalState,
-    memory_context: MemoryContext,
+    memory_context: MemoryContext | None,
     conversation_history: str,
     emotion_summary: dict | None = None,
     tools=None,
@@ -180,6 +180,7 @@ def build_inner_drive_prompt(
     prompt_cache: "PromptCache | None" = None,
     personality_file: str | None = None,
     prompt_cache_ttl: float = 60.0,
+    memory_context_summary: str = "",
 ) -> str:
     """Agent 1: Inner drive reasoning prompt -- assess what the AI needs to do.
 
@@ -187,6 +188,10 @@ def build_inner_drive_prompt(
       - static : identity, inner-drive instructions, available tools
       - slow   : relationship, long-term memory (cached with TTL)
       - dynamic: current time, emotion state, tool history, conversation
+
+    When `memory_context_summary` is provided (e.g. from MemoryAgent), the
+    two slow blocks are replaced by the pre-formatted summary and
+    `memory_context` may be None.
     """
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -204,21 +209,24 @@ def build_inner_drive_prompt(
 
     blocks.append(_build_inner_emotion_block(emotion_summary=emotion_summary, emotion=emotion))
 
-    blocks.append(
-        _cache(
-            prompt_cache, session_id, pfile, SLOW_RELATIONSHIP,
-            lambda: _build_inner_relationship_block(memory_context.relationship),
-            ttl=prompt_cache_ttl,
+    if memory_context_summary:
+        blocks.append(memory_context_summary)
+    else:
+        blocks.append(
+            _cache(
+                prompt_cache, session_id, pfile, SLOW_RELATIONSHIP,
+                lambda: _build_inner_relationship_block(memory_context.relationship),
+                ttl=prompt_cache_ttl,
+            )
         )
-    )
 
-    blocks.append(
-        _cache(
-            prompt_cache, session_id, pfile, SLOW_MEMORY,
-            lambda: _build_inner_memory_block(memory_context),
-            ttl=prompt_cache_ttl,
+        blocks.append(
+            _cache(
+                prompt_cache, session_id, pfile, SLOW_MEMORY,
+                lambda: _build_inner_memory_block(memory_context),
+                ttl=prompt_cache_ttl,
+            )
         )
-    )
 
     blocks.append(
         _cache(

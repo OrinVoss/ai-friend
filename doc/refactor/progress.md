@@ -64,7 +64,7 @@ Phase 1.5（Memory Agent P1，2026-07-16 完成）：
 
 Phase 2：
 - [ ] Memory Agent 完整交叉验证（矛盾传播、LLM 线索提取）
-- [ ] Memory Agent 接入 InnerDrive（`use_memory_agent` 灰度开关）
+- [x] Memory Agent 接入 InnerDrive（`use_memory_agent` 灰度开关，默认 false，2026-07-16）
 - [ ] Retrieval 切换到 `facts_v2` + `insights_v2`
 - [ ] 完整 GC：merge / decay / obsolete / archive
 - [ ] 旧数据迁移 + 删除旧表

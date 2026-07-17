@@ -79,6 +79,9 @@ class Config:
     conversation_examples_max_turns: int = 3
     # ML-001: Layer 1 Memory lifecycle switch
     use_observation_fact: bool = False
+    # MA-001: Memory Agent gray switch — InnerDrive uses memory_agent.answer()
+    # for memory instead of retriever.retrieve_for_query() (memory-agent.md 7.1)
+    use_memory_agent: bool = False
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5

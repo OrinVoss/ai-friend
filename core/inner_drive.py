@@ -119,7 +119,8 @@ class InnerDriveAgent:
                  session_id: str | None = None,
                  prompt_cache=None,
                  prompt_cache_ttl: float = 60.0,
-                 short_input_threshold: int = 20):
+                 short_input_threshold: int = 20,
+                 memory_agent=None):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
@@ -136,6 +137,9 @@ class InnerDriveAgent:
         self._prompt_cache = prompt_cache
         self._prompt_cache_ttl = prompt_cache_ttl
         self._short_input_threshold = short_input_threshold
+        # MA-001: when provided (use_memory_agent), memory comes from
+        # memory_agent.answer() instead of retriever.retrieve_for_query()
+        self._memory_agent = memory_agent
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
@@ -146,16 +150,24 @@ class InnerDriveAgent:
 
         # Lightweight pre-filter: skip the LLM for trivial chat inputs.
         if self._should_skip_llm(user_input):
-            mem_ctx = self._retriever.retrieve_for_query(user_input)
             logger.info("[inner_drive] short input, skip LLM")
             return InnerDriveResult(
                 needs_external_tools=False,
                 reasoning="短输入，无工具关键词，跳过 LLM",
                 summary="",
-                context_summary=self._build_context_summary(mem_ctx),
+                context_summary=self._context_summary_for(user_input),
             )
 
-        mem_ctx = self._retriever.retrieve_for_query(user_input)
+        # MA-001: with use_memory_agent, one MemoryAgent.answer() call feeds
+        # both this prompt's memory block and the context_summary passed to
+        # Agent 3 (memory-agent.md 7.1). Otherwise the classic retriever path.
+        use_ma = self._memory_agent is not None
+        mem_ctx = None
+        cs = self._context_summary_for(user_input) if use_ma else ""
+        if not use_ma:
+            mem_ctx = self._retriever.retrieve_for_query(user_input)
+            cs = self._build_context_summary(mem_ctx)
+
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
         emotion_summary = self._personality.emotion.to_prompt_summary()
         sys_prompt = build_inner_drive_prompt(
@@ -169,6 +181,7 @@ class InnerDriveAgent:
             session_id=self._session_id,
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
+            memory_context_summary=cs if use_ma else "",
         )
 
         messages = [
@@ -188,7 +201,7 @@ class InnerDriveAgent:
                     needs_external_tools=False,
                     reasoning="解析失败，默认不需要外部工具",
                     summary="",
-                    context_summary=self._build_context_summary(mem_ctx),
+                    context_summary=cs,
                 )
 
             # If recall_query is set, execute internal recall and loop
@@ -206,7 +219,7 @@ class InnerDriveAgent:
                 f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
                 f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
             )
-            result.context_summary = self._build_context_summary(mem_ctx)
+            result.context_summary = cs
             return result
 
         logger.warning("[inner_drive] max iterations, defaulting to no tools")
@@ -214,7 +227,7 @@ class InnerDriveAgent:
             needs_external_tools=False,
             reasoning="达到最大迭代次数，默认不需要外部工具",
             summary="",
-            context_summary=self._build_context_summary(mem_ctx),
+            context_summary=cs,
         )
 
     def _should_skip_llm(self, user_input: str) -> bool:
@@ -245,6 +258,35 @@ class InnerDriveAgent:
             _build_memory_block(mem_ctx),
         ]
         return "\n\n".join(p for p in parts if p)
+
+    def _context_summary_for(self, user_input: str) -> str:
+        """context_summary via MemoryAgent when enabled; falls back to the
+        classic retriever path on failure or empty result."""
+        if self._memory_agent is not None:
+            try:
+                from core.async_utils import run_async
+                ma = run_async(self._memory_agent.answer(user_input))
+                formatted = self._format_memory_answer(ma)
+                if formatted:
+                    return formatted
+            except Exception as e:
+                logger.warning(f"[inner_drive] memory agent failed, retriever fallback: {e}")
+        return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+
+    @staticmethod
+    def _format_memory_answer(ma) -> str:
+        """Format a MemoryAnswer for prompt injection: answer text plus
+        explicit confidence/contradiction markers so Agent 1/3 treat
+        uncertain memory as uncertain (memory-agent.md 7.1)."""
+        if ma is None or not ma.answer:
+            return ""
+        parts = [f"=== 记忆检索（置信度 {ma.confidence:.0%}）===", ma.answer]
+        if ma.contradictions:
+            parts.append("⚠️ 矛盾记忆：" + "；".join(ma.contradictions[:3])
+                         + "（如需引用请先向用户确认）")
+        if ma.needs_more_evidence or ma.confidence < 0.4:
+            parts.append("（以上记忆证据不足，当作待确认信息，不要当作确定事实）")
+        return "\n".join(parts)
 
     def assess_proactive(self, idle_duration: float) -> ProactiveIntent:
         """Decide whether and how to proactively engage the user.

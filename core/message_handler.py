@@ -100,6 +100,7 @@ class MessageHandler:
         self._agent = agent
         self._tool_agent = None  # lazy init
         self._inner_drive = None  # lazy init
+        self._memory_agent = None  # lazy init (MA-001, use_memory_agent only)
         self._prompt_cache = PromptCache()
         self._state = MessageHandlerState.IDLE
 
@@ -123,6 +124,10 @@ class MessageHandler:
             # #203: create isolated registry for Agent 1 (recall/remember only)
             isolated = self._make_internal_registry()
             cfg = a.config
+            # MA-001: inject MemoryAgent only when the gray switch is on
+            memory_agent = None
+            if getattr(cfg, "use_memory_agent", False):
+                memory_agent = self._ensure_memory_agent()
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,
                 personality=a.personality,
@@ -135,7 +140,21 @@ class MessageHandler:
                 prompt_cache=self._prompt_cache,
                 prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
                 short_input_threshold=getattr(cfg, "agent1_short_input_threshold", 20),
+                memory_agent=memory_agent,
             )
+
+    def _ensure_memory_agent(self):
+        """Lazily build the MemoryAgent for InnerDrive injection (MA-001)."""
+        if self._memory_agent is None:
+            from memory.memory_agent import MemoryAgent
+            from memory.lifecycle import MemoryLifecycleManager
+            a = self.a
+            embed = getattr(a.consolidator, "_embed", None)
+            lifecycle = MemoryLifecycleManager(
+                a.ltm, config=a.config, embedding_engine=embed)
+            self._memory_agent = MemoryAgent(
+                a.ltm, lifecycle, a.retriever, embedding_engine=embed)
+        return self._memory_agent
 
     def ensure_inner_drive(self):
         """Ensure inner drive is initialized and return it."""

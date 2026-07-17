@@ -14,6 +14,7 @@
   "agent1_short_input_threshold": 20,
   "conversation_examples_max_turns": 3,
   "use_observation_fact": false,
+  "use_memory_agent": false,
   "db_backup_enabled": true,
   "db_backup_keep": 5
 }

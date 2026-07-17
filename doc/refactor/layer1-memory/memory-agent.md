@@ -249,7 +249,7 @@ if user_says_correction:
 ### 7.1 集成注意事项
 
 - **Agent 3 Prompt 需要理解置信度**：`MemoryAnswer` 带 `confidence` 和 `contradictions`，Agent 3 的 Prompt 模板要显式处理——低置信度记忆标为「待确认」，矛盾信息显式展示，而不是当作确定事实
-- **`InnerDriveAgent.assess()` 改造**：用 `memory_agent.answer()` 替代 `retriever.get_context()`，把 `answer` 字段写入 `context_summary` 传给 Agent 3。具体替换点：
+- **`InnerDriveAgent.assess()` 改造**（✅ 已实现 2026-07-16，`use_memory_agent` 开关默认 false）：用 `memory_agent.answer()` 替代 `retriever.retrieve_for_query()`，把 `answer` 字段写入 `context_summary` 传给 Agent 3。具体替换点：
 
   ```python
   # 现状（core/inner_drive.py）
@@ -260,9 +260,9 @@ if user_says_correction:
   memory_context = memory_answer.answer  # 带置信度和证据链
   ```
 
-  注意这一个替换点**同时升级两个消费方**：Agent 1 自己的决策依据，和经 `context_summary` 传给 Agent 3 的记忆摘要（#160 的复用链路），不需要改 Agent 3 的调用侧。
+  注意这一个替换点**同时升级两个消费方**：Agent 1 自己的决策依据（prompt 的记忆块经 `build_inner_drive_prompt(memory_context_summary=...)` 注入），和经 `context_summary` 传给 Agent 3 的记忆摘要（#160 的复用链路），不需要改 Agent 3 的调用侧。MemoryAgent 失败时自动回退到 retriever 旧路径。
 
-  灰度策略：加配置开关 `use_memory_agent`（默认 false），与 `use_observation_fact` 同款模式——新旧路径并存，实测对比召回质量后再切默认。
+  灰度策略：配置开关 `use_memory_agent`（默认 false），与 `use_observation_fact` 同款模式——新旧路径并存，实测对比召回质量后再切默认。
 - **复用 `FactChecker` 时的性能**：`_cross_verify()` 调用 `is_contradiction()` 时应复用已有 embedding，不产生新的 embedding 计算；批量矛盾检测做缓存，避免 O(n²) 次调用
 - **Observation 不可变性**：`Repository` 只提供 `observations` 的 INSERT/SELECT，不提供 UPDATE 接口（vough 封存）
 
