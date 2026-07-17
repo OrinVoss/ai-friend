@@ -128,6 +128,7 @@ class MessageHandler:
             memory_agent = None
             if getattr(cfg, "use_memory_agent", False):
                 memory_agent = self._ensure_memory_agent()
+                logger.info("[msg] inner drive: memory agent enabled (use_memory_agent)")
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,
                 personality=a.personality,

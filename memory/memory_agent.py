@@ -195,7 +195,13 @@ class MemoryAgent:
         clues = await self._extract_clues(query)
         evidences = await self._retrieve_parallel(clues, max_evidence)
         verified, contradictions, consistency = await self._cross_verify(evidences)
-        return self._reconstruct(query, verified, contradictions, consistency)
+        result = self._reconstruct(query, verified, contradictions, consistency)
+        logger.info(
+            f"[memory_agent] answer: query={query[:40]!r} "
+            f"evidences={len(result.evidences)} confidence={result.confidence} "
+            f"contradictions={len(result.contradictions)}"
+        )
+        return result
 
     async def verify_fact(self, fact_id: int) -> MemoryAnswer:
         """Proactively verify whether a FactV2 still holds."""
@@ -222,8 +228,13 @@ class MemoryAgent:
                 contradictions.append(
                     f"{fact.fact_key}: '{fact.fact_value}' vs '{conflict.fact_value}'")
 
-        return self._reconstruct_fact_verification(
+        result = self._reconstruct_fact_verification(
             fact, verified, contradictions, consistency)
+        logger.info(
+            f"[memory_agent] verify_fact: id={fact_id} "
+            f"confidence={result.confidence} verdict={result.answer[:40]}"
+        )
+        return result
 
     async def correct_fact(self, old_fact_id: int, new_value: str,
                            source_turn: int) -> FactV2:
@@ -231,6 +242,7 @@ class MemoryAgent:
         old Fact contradicted, promote the new value as a fresh Fact."""
         old_fact = await self.ltm.repo.get_fact_v2_by_id(old_fact_id)
         old_value = old_fact.fact_value if old_fact else "unknown"
+        logger.info(f"[memory_agent] correct_fact: id={old_fact_id} '{old_value}' → '{new_value}'")
         obs = await self.lifecycle.observe(
             content=f"用户纠正：{old_value} → {new_value}",
             source_turn=source_turn,
@@ -271,6 +283,11 @@ class MemoryAgent:
         clues.query_embedding = await self._encode_bytes(query)
         clues.time_ranges = parse_time_ranges(query)
         clues.intent = await self._classify_intent(clues.query_embedding)
+        logger.debug(
+            f"[memory_agent] clues: intent={clues.intent} "
+            f"time_ranges={clues.time_ranges} "
+            f"embed={'ok' if clues.query_embedding else 'none'}"
+        )
         return clues
 
     async def _encode_bytes(self, text: str) -> Optional[bytes]:
@@ -364,15 +381,24 @@ class MemoryAgent:
 
         # Time post-filter (narrows by created date; recall itself is vector)
         if clues.time_ranges:
+            before = len(evidences)
             evidences = [
                 e for e in evidences
                 if e.source_type == "relationship"
                 or any(start <= e.timestamp[:10] <= end
                        for start, end in clues.time_ranges)
             ]
+            logger.debug(f"[memory_agent] time filter: {before} -> {len(evidences)}")
 
         evidences.sort(key=lambda e: (e.similarity, e.confidence), reverse=True)
-        return evidences[:max_evidence]
+        kept = evidences[:max_evidence]
+        top_sim = f"{kept[0].similarity:.2f}" if kept else "-"
+        logger.debug(
+            f"[memory_agent] retrieve: facts={len(facts)} obs={len(observations)} "
+            f"exp={len(experiences)} rel={bool(relationship)} "
+            f"kept={len(kept)} top_sim={top_sim}"
+        )
+        return kept
 
     @staticmethod
     def _sim(qvec: Optional[np.ndarray], blob, version: int) -> float:

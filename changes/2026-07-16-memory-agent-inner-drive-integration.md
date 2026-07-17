@@ -27,3 +27,13 @@
 
 - 新增 7 用例全部通过
 - 全量：`python -m pytest tests --ignore=tests/real_api -q` → **466 passed, 2 skipped**（基线 459）
+
+## 日志（同日补充）
+
+灰度验证依赖可观测性，Memory Agent 主流程已补齐日志：
+
+- `[memory_agent] answer: query=… evidences=N confidence=X contradictions=N`（INFO，每次回答一行）
+- `[memory_agent] verify_fact / correct_fact`（INFO）
+- `[memory_agent] clues / retrieve / time filter`（DEBUG：意图、时间范围、各来源数量、top 相似度）
+- `[msg] inner drive: memory agent enabled`（INFO，装配时一次性）
+- `[inner_drive] context via memory agent / memory agent failed`（DEBUG / WARNING，判断是否走了新路径）

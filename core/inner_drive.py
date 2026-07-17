@@ -268,7 +268,10 @@ class InnerDriveAgent:
                 ma = run_async(self._memory_agent.answer(user_input))
                 formatted = self._format_memory_answer(ma)
                 if formatted:
+                    logger.debug(f"[inner_drive] context via memory agent "
+                                 f"(confidence={ma.confidence})")
                     return formatted
+                logger.debug("[inner_drive] memory agent empty, retriever fallback")
             except Exception as e:
                 logger.warning(f"[inner_drive] memory agent failed, retriever fallback: {e}")
         return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
