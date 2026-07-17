@@ -75,7 +75,17 @@ def _is_llama_running() -> bool:
         return False
 
 
-def _start_llama_server(project: str, server_log_path: str) -> subprocess.Popen | None:
+def _port_from_endpoint(endpoint: str) -> int:
+    """H-04: 从 embedding_endpoint 解析端口，解析失败一律 8080 兜底。"""
+    from urllib.parse import urlparse
+    try:
+        return urlparse(endpoint).port or 8080
+    except Exception:
+        return 8080
+
+
+def _start_llama_server(project: str, server_log_path: str,
+                        endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> subprocess.Popen | None:
     """Launch the llama-server subprocess and return the Popen handle."""
     try:
         server_log = open(server_log_path, "a", encoding="utf-8")
@@ -88,10 +98,11 @@ def _start_llama_server(project: str, server_log_path: str) -> subprocess.Popen 
                 stderr=subprocess.STDOUT,
             )
         # Fallback: relative paths from project directory
+        # H-04: 端口跟随 embedding_endpoint，避免自定义端口时启动与连接不一致
         return subprocess.Popen(
             [os.path.join("memory", "llama-bin", "llama-server.exe"),
              "-m", os.path.join("memory", "Qwen3.5-0.8B-Q6_K.gguf"),
-             "--embeddings", "--port", "8080",
+             "--embeddings", "--port", str(_port_from_endpoint(endpoint)),
              "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
              "--threads", "4", "--host", "127.0.0.1"],
             cwd=project,
@@ -166,7 +177,7 @@ def auto_start_embedding(logger_ref: logging.Logger | None = None,
     server_log_path = os.path.join(log_dir, "embedding_server.log")
 
     log.info("[embed] starting embedding server in background...")
-    proc = _start_llama_server(project, server_log_path)
+    proc = _start_llama_server(project, server_log_path, endpoint)
     if proc is None:
         log.warning("[embed] failed to start embedding server")
         return

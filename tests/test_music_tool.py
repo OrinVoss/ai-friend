@@ -1,5 +1,6 @@
 """Tests for tools/music_tool.py"""
 import os
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -62,6 +63,39 @@ class TestMusicTools(unittest.TestCase):
             mock_start.assert_called_once()
             args, _ = mock_start.call_args
             self.assertTrue(args[0].endswith("a.mp3"))
+
+    def test_scan_limit_counts_only_audio(self):
+        # #271: files_scanned 只对音频计数，非音频文件不消耗扫描额度
+        for i in range(3):
+            open(os.path.join(self.music_dir, f"note{i}.txt"), "w").close()
+        with patch("tools.music_tool.MUSIC_DIR", self.music_dir), \
+             patch("tools.music_tool.MUSIC_SCAN_LIMIT", 1):
+            tool = MusicPlayTool()
+            songs = tool._collect_songs(self.music_dir)
+        # 2 个音频 + 3 个文本，限额 1：恰收集到先扫到的 1 个音频；
+        # 若文本也计数，3 个 txt 会提前触发截断导致漏掉音频（结果数随遍历顺序漂移）
+        self.assertEqual(len(songs), 1)
+        self.assertTrue(songs[0].endswith((".mp3", ".flac")))
+
+    def test_sibling_prefix_dir_rejected(self):
+        # #271: "D:\音乐2" 这类同前缀兄弟目录不得绕过白名单
+        sibling = self.music_dir + "2"
+        os.makedirs(sibling, exist_ok=True)
+        self.addCleanup(shutil.rmtree, sibling, True)
+        open(os.path.join(sibling, "evil.mp3"), "w").close()
+        with patch("tools.music_tool.MUSIC_DIR", self.music_dir):
+            tool = MusicListTool()
+            result = tool.execute({"path": f"..{os.sep}{os.path.basename(sibling)}"})
+        self.assertFalse(result.success)
+        self.assertIn("超出音乐目录", result.output)
+
+    def test_music_list_subdir_allowed(self):
+        # 边界检查的另一半：目录内子路径仍应放行
+        with patch("tools.music_tool.MUSIC_DIR", self.music_dir):
+            tool = MusicListTool()
+            result = tool.execute({"path": "sub"})
+        self.assertTrue(result.success, result.output)
+        self.assertIn("b.flac", result.output)
 
 
 if __name__ == "__main__":

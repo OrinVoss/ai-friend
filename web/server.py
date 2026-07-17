@@ -62,7 +62,8 @@ async def lifespan(app: FastAPI):
         # Re-setup file logging — uvicorn resets root handlers on startup
         try:
             from core.logging_setup import setup_logging as _re_setup
-            _re_setup(getattr(load_config(), 'log_level', 'INFO'))
+            # L-10/L-12: 复用模块级 config（:26 已 load 一次），不再重复 load_config
+            _re_setup(getattr(config, 'log_level', 'INFO'))
         except Exception:
             pass
         logger.info("Server starting...")

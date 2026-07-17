@@ -18,11 +18,14 @@ from ui.cli import ConsoleInterface
 
 async def main():
     try:
+        # M-19: 先以 INFO 初始化日志再加载配置，避免丢失 load_config 的启动日志
+        setup_logging("INFO")
         config = load_config()
         setup_logging(config.log_level)
         logger = logging.getLogger(__name__)
         logger.info(f"Starting AI Friend CLI: model={config.api_model} personality={config.personality_file} log_level={config.log_level}")
-        auto_start_embedding(logger)
+        # H-04: 传入配置的 embedding endpoint，自动启动端口与引擎连接端口保持一致
+        auto_start_embedding(logger, config.embedding_endpoint)
 
         # Initialize storage
         db = Database(config.db_path, backup_enabled=config.db_backup_enabled,

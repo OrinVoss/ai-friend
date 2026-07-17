@@ -3,7 +3,6 @@ import fnmatch
 import logging
 import os
 import re
-import signal
 import time
 from typing import Any
 
@@ -38,18 +37,11 @@ def _cache_set(key: str, val: str) -> None:
         logger.debug(f"[tool] search cache evicted oldest key={oldest[0]}")
     _SEARCH_CACHE[key] = (time.time(), val)
 
-# #150: regex timeout to prevent ReDoS
-GREP_TIMEOUT = 5  # seconds per file match
-
 # SR-009: named constants instead of magic numbers
+# #270: 清掉从未使用的 GREP_TIMEOUT/GREP_RESULTS_LIMIT/MAX_RESULTS_DISPLAY 等死常量
 GLOB_MAX_RESULTS = 200
 GREP_MAX_MATCHES_PER_FILE = 20
-GREP_RESULTS_LIMIT = 50
 WALK_FILE_LIMIT = 10_000
-MAX_RESULTS_DISPLAY = 50
-MAX_HEADER_LINES = 200
-SORTED_DIRS_MAX = 30
-SORTED_FILES_MAX = 50
 
 
 def _resolve_search_path(search_path: str) -> str | None:
@@ -306,7 +298,7 @@ class GrepTool(Tool):
                         break
 
             if len(results) > self.MAX_RESULTS * 3:
-                results.append(f"\n...(结果过多，已截断)")
+                results.append("\n...(结果过多，已截断)")
                 break
 
         if not results:

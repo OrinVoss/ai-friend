@@ -1,8 +1,6 @@
 """Music player tool: browse and play music from a directory."""
 import logging
 import os
-import subprocess
-from pathlib import Path
 from typing import Any
 
 from tools.traits import Tool, ToolResult
@@ -11,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 MUSIC_DIR = r"D:\音乐"
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".aac", ".ogg", ".wma", ".m4a"}
+# MU-002: 音频扫描上限（#271: 只对音频文件计数，非音频不再消耗额度）
+MUSIC_SCAN_LIMIT = 10_000
 
 
 def _is_audio(filepath: str) -> bool:
@@ -49,10 +49,13 @@ class MusicListTool(Tool):
         logger.info(f"[tool] music_list path={subpath or '.'} search={search or 'none'}")
 
         target = os.path.join(MUSIC_DIR, subpath) if subpath else MUSIC_DIR
-        target = os.path.abspath(target)
+        # #271: realpath + os.sep 边界检查（仿 file_tools._path_in_allowed），
+        # 防止 "D:\音乐2" 这类同前缀目录绕过白名单
+        target = os.path.realpath(target)
 
         # Security: must be under MUSIC_DIR
-        if not target.startswith(os.path.abspath(MUSIC_DIR)):
+        music_root = os.path.realpath(MUSIC_DIR)
+        if target != music_root and not target.startswith(music_root + os.sep):
             return ToolResult.fail("路径超出音乐目录范围")
 
         if not os.path.exists(target):
@@ -162,11 +165,11 @@ class MusicPlayTool(Tool):
         files_scanned = 0
         for root, _, fnames in os.walk(directory):
             for f in fnames:
-                files_scanned += 1
-                if files_scanned > 10_000:
-                    logger.warning("[music] file scan limit (10_000) reached")
-                    return songs
                 if _is_audio(f):
+                    files_scanned += 1  # #271: 只对音频计数
+                    if files_scanned > MUSIC_SCAN_LIMIT:
+                        logger.warning(f"[music] file scan limit ({MUSIC_SCAN_LIMIT}) reached")
+                        return songs
                     songs.append(os.path.join(root, f))
         return songs
 
@@ -176,12 +179,13 @@ class MusicPlayTool(Tool):
         files_scanned = 0
         for root, _, fnames in os.walk(MUSIC_DIR):
             for f in fnames:
-                files_scanned += 1
-                if files_scanned > 10_000:  # MU-002: guard against unbounded walk
-                    logger.warning("[music] file scan limit (10_000) reached")
-                    return matches
-                if _is_audio(f) and song.lower() in f.lower():
-                    matches.append(os.path.join(root, f))
+                if _is_audio(f):
+                    files_scanned += 1  # #271: 只对音频计数（MU-002: guard against unbounded walk）
+                    if files_scanned > MUSIC_SCAN_LIMIT:
+                        logger.warning(f"[music] file scan limit ({MUSIC_SCAN_LIMIT}) reached")
+                        return matches
+                    if song.lower() in f.lower():
+                        matches.append(os.path.join(root, f))
         return matches
 
     def _play(self, filepath: str, display_name: str) -> ToolResult:

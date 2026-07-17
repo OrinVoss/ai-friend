@@ -196,6 +196,21 @@ class TestOpenIdempotent(unittest.TestCase):
         asyncio.run(run())
 
 
+class TestShutdownSingleSave(unittest.TestCase):
+    """L-08: shutdown 每 session 只保存一次 personality（由 close 内部保存）。"""
+
+    def test_shutdown_closes_without_double_save(self):
+        cfg = Config()
+        manager = SessionManager(cfg)
+        agent = MagicMock()
+        manager._sessions["s1"] = agent
+        asyncio.run(manager.shutdown())
+        # 不再单独调 save_personality，只 close 一次（close 内保存 personality）
+        agent.save_personality.assert_not_called()
+        agent.close.assert_called_once()
+        self.assertEqual(manager._sessions, {})
+
+
 class TestSavePersonalityDebounced(unittest.TestCase):
     """#44/#276: personality 防抖落盘与线程安全。"""
 

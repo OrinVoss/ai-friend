@@ -81,7 +81,6 @@ class Agent:
         self._consecutive_negative = self.personality.emotion.consecutive_negative
         self._prompt_shown: bool = False
         self._react_iteration: int = 0
-        self._react_messages: list[dict] | None = None
         self._max_tool_iterations: int = getattr(config, 'max_tool_iterations', 5)
         self._degrade_threshold: int = getattr(config, 'degrade_threshold', 3)   # #255: consecutive tool failures before degrading
         self._max_fake_actions: int = getattr(config, 'max_fake_actions', 3)     # #255: max fake action corrections
@@ -173,7 +172,6 @@ class Agent:
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
                     tool_registry=None, skip_post_process: bool = False) -> str:
-        from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
         registry = tool_registry if tool_registry is not None else self._tool_registry
         # H-07: 每条消息重置降级计数——否则上一条消息消耗的失败额度会让
         # 本条消息 1 次失败就触发降级
@@ -307,7 +305,6 @@ class Agent:
         self._cli.run()
 
     def _reset_react(self) -> None:
-        self._react_messages = None
         self._react_iteration = 0
         self._tool_calls_pending = []
 

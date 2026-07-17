@@ -1,7 +1,7 @@
 let ws = null;
 let sessionId = getCookie('session_id') || '';
 let roleId = getCookie('role_id') || '';
-let aiName = '星';
+let aiName = 'AI'; // L-06: 窗口期默认值，init_ok 后由 data.name 覆盖
 let roleName = '';
 let isProcessing = false;
 let lastMessageTime = 0;

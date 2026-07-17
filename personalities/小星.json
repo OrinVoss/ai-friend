@@ -452,6 +452,7 @@
       "trusting"
     ],
     "consecutive_negative": 1,
+    "turns_without_anger": 0,
     "dominant_emotion": "trusting"
   }
 }

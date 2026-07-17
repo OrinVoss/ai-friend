@@ -113,13 +113,25 @@ class ToolRegistry:
         """Generate JSON Schema for structured tool call output.
 
         Returns schema compatible with DeepSeek response_format={"type": "json_object"}.
-        Includes tool-specific properties to guide model output format. (#273)
+        Each tool contributes one calls-item variant: its name as a single-value
+        enum plus its own parameters_schema() as the arguments schema. (#273)
         """
-        tool_names = []
+        variants = []
         for spec in self.list_specs():
             if names is not None and spec.name not in names:
                 continue
-            tool_names.append(spec.name)
+            variants.append({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [spec.name],
+                        "description": "要调用的工具名称",
+                    },
+                    "arguments": spec.parameters,
+                },
+                "required": ["name", "arguments"],
+            })
 
         return {
             "type": "json_object",
@@ -128,22 +140,10 @@ class ToolRegistry:
                 "properties": {
                     "calls": {
                         "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "enum": tool_names if tool_names else ["web_fetch"],
-                                    "description": "要调用的工具名称",
-                                },
-                                "arguments": {
-                                    "type": "object",
-                                    "description": "工具参数，根据具体工具而定",
-                                },
-                            },
-                            "required": ["name", "arguments"],
-                        },
+                        # #273: 无工具时回退为泛 object（不再硬编码 web_fetch）
+                        "items": {"oneOf": variants} if variants else {"type": "object"},
                     },
                 },
+                "required": ["calls"],
             },
         }

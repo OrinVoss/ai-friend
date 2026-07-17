@@ -1,4 +1,6 @@
 # ── Fact Extraction ──
+import logging
+
 FACT_EXTRACTION_PROMPT = """从这段对话中提取**关于用户**的事实信息。
 每个事实输出一行，格式：
 FACT|分类|关键词|值|置信度|重要性|fact_type
@@ -10,7 +12,7 @@ FACT|分类|关键词|值|置信度|重要性|fact_type
   0.3~0.6 = 短期（如本周计划、当前项目）
   0.6~0.8 = 长期（如爱好、偏好、习惯）
   0.8~1.0 = 永久（如名字、身份、核心价值观）
-fact_type: user_fact（当前仅支持用户事实）
+fact_type: user_fact / agent_fact / system_fact（事实主体类型，默认 user_fact）
 
 === 重要：只提取用户说的关于自己的信息 ===
 以下内容**不算用户事实，不要提取**：
@@ -73,7 +75,7 @@ RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
 {facts}
 
 你的情绪状态：{current_emotion}
-关系动态：trust={relationship[trust]:.2f} familiarity={relationship[familiarity]:.2f} intimacy={relationship[intimacy]:.2f}
+关系动态：trust={rel_trust:.2f} familiarity={rel_familiarity:.2f} intimacy={rel_intimacy:.2f}
 
 写一条有实际内容的反思。不要"用户是个好人"这种废话。
 
@@ -167,6 +169,5 @@ def safe_format(template: str, **kwargs) -> str:
     try:
         return template.format(**kwargs)
     except (KeyError, IndexError, ValueError) as e:
-        import logging
         logging.getLogger(__name__).warning(f"safe_format failed: {e}")
         return template

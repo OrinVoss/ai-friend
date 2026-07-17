@@ -76,6 +76,28 @@ class TestPromptCache(unittest.TestCase):
         cache.clear()
         self.assertEqual(len(cache._store), 0)
 
+    def test_fifo_eviction_at_capacity(self):
+        # L-02: 容量上限 MAX_ENTRIES，写入第 201 条后最早的 key 被 FIFO 淘汰
+        cache = PromptCache()
+        for i in range(PromptCache.MAX_ENTRIES):
+            cache.get_or_build("sid", "v1", f"comp{i}", lambda: "x")
+        self.assertEqual(len(cache._store), PromptCache.MAX_ENTRIES)
+        self.assertIn(("sid", "v1", "comp0"), cache._store)
+        cache.get_or_build("sid", "v2", "comp_new", lambda: "x")
+        self.assertEqual(len(cache._store), PromptCache.MAX_ENTRIES)
+        self.assertNotIn(("sid", "v1", "comp0"), cache._store)
+        self.assertIn(("sid", "v2", "comp_new"), cache._store)
+
+    def test_hit_does_not_refresh_fifo_position(self):
+        # L-02: 是纯 FIFO 而非 LRU——命中不刷新插入顺序
+        cache = PromptCache()
+        for i in range(PromptCache.MAX_ENTRIES):
+            cache.get_or_build("sid", "v1", f"comp{i}", lambda: "x")
+        # 命中最早的 key，不改变其淘汰顺位
+        cache.get_or_build("sid", "v1", "comp0", lambda: "y")
+        cache.get_or_build("sid", "v2", "comp_new", lambda: "x")
+        self.assertNotIn(("sid", "v1", "comp0"), cache._store)
+
 
 if __name__ == "__main__":
     unittest.main()

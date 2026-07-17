@@ -1,6 +1,7 @@
 """In-memory sliding-window rate limiter for the Web API."""
 
 import logging
+import threading
 import time
 from collections import deque
 from typing import Callable
@@ -24,7 +25,8 @@ class RateLimiter:
     def __init__(self):
         # key -> deque of timestamps
         self._windows: dict[str, deque[float]] = {}
-        self._lock = False
+        # L-11: 真锁替换布尔占位 — is_allowed 的窗口读写需要原子化
+        self._lock = threading.Lock()
 
     def _key(self, client_ip: str, path: str) -> str:
         return f"{client_ip}:{path}"
@@ -33,23 +35,24 @@ class RateLimiter:
                    max_requests: int, window_seconds: int) -> bool:
         key = self._key(client_ip, path)
         now = time.time()
-        window = self._windows.setdefault(key, deque())
+        with self._lock:
+            window = self._windows.setdefault(key, deque())
 
-        # Drop timestamps outside the window
-        evicted = 0
-        while window and window[0] < now - window_seconds:
-            window.popleft()
-            evicted += 1
-        if evicted:
-            logger.debug(f"[rate_limit] evicted {evicted} expired timestamps for {key}")
+            # Drop timestamps outside the window
+            evicted = 0
+            while window and window[0] < now - window_seconds:
+                window.popleft()
+                evicted += 1
+            if evicted:
+                logger.debug(f"[rate_limit] evicted {evicted} expired timestamps for {key}")
 
-        if len(window) >= max_requests:
-            logger.warning(f"[rate_limit] blocked {client_ip} on {path} window={len(window)}/{max_requests}")
-            return False
+            if len(window) >= max_requests:
+                logger.warning(f"[rate_limit] blocked {client_ip} on {path} window={len(window)}/{max_requests}")
+                return False
 
-        window.append(now)
-        logger.debug(f"[rate_limit] allowed {client_ip}:{path} window={len(window)}/{max_requests}")
-        return True
+            window.append(now)
+            logger.debug(f"[rate_limit] allowed {client_ip}:{path} window={len(window)}/{max_requests}")
+            return True
 
     def check(self, client_ip: str, path: str) -> bool:
         """Check request against configured limits. Always allowed if no limit set."""

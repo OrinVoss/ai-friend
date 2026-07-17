@@ -63,15 +63,10 @@ class TestToolAgent(unittest.TestCase):
         self.registry = mock_tool_registry()
         self.agent = ToolAgent(provider=self.provider, tool_registry=self.registry)
 
-    def test_init_filtered_registry(self):
-        # Only external tools should be in the agent's registry
-        specs = self.agent._registry.list_specs()
-        names = [s.name for s in specs]
-        for n in names:
-            self.assertIn(n, ["web_fetch", "web_search", "read_file", "file_tree",
-                              "glob", "grep", "music_play", "notify"])
-        self.assertNotIn("recall", names)
-        self.assertNotIn("remember", names)
+    def test_init_uses_injected_registry(self):
+        # 注册表由调用方装配（message_handler._make_external_registry 已过滤为
+        # 仅外部工具），ToolAgent 不再自行过滤，直接使用注入的 registry
+        self.assertIs(self.agent._registry, self.registry)
 
     def test_run_empty_input_returns_empty(self):
         result = self.agent.run("hello")

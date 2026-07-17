@@ -8,7 +8,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from tools.traits import ToolRegistry, EXTERNAL_TOOL_NAMES
+from tools.traits import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +66,10 @@ class ToolAgent:
 
     def __init__(self, provider, tool_registry: ToolRegistry, max_iterations: int = 5):
         self._provider = provider
-        self._full_registry = tool_registry
-        self._registry = ToolRegistry()
-        for name in EXTERNAL_TOOL_NAMES:
-            tool = tool_registry.get(name)
-            if tool:
-                self._registry.register(tool)
+        # 注册表由调用方装配好后注入 — 唯一装配路径是
+        # message_handler._make_external_registry()（已只含外部工具），
+        # 此处不再重复过滤 EXTERNAL_TOOL_NAMES。
+        self._registry = tool_registry
         self._max_iterations = max_iterations
 
     def run(self, user_input: str) -> ToolAgentResult:

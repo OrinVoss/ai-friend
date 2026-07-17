@@ -452,6 +452,7 @@
       "excited"
     ],
     "consecutive_negative": 0,
+    "turns_without_anger": 0,
     "dominant_emotion": "excited"
   }
 }

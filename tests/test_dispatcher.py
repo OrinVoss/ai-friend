@@ -249,22 +249,53 @@ class TestJSONSchema(unittest.TestCase):
         self.reg = ToolRegistry()
 
         class FakeTool(Tool):
-            def __init__(self, name): self._name = name
+            def __init__(self, name, params=None):
+                self._name = name
+                self._params = params or {"type": "object"}
             def name(self): return self._name
             def description(self): return f"Fake {self._name}"
-            def parameters_schema(self): return {"type": "object"}
+            def parameters_schema(self): return self._params
             async def execute(self, args): return ToolResult.ok("ok")
 
-        self.reg.register(FakeTool("web_search"))
+        self.search_params = {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+        self.reg.register(FakeTool("web_search", self.search_params))
         self.reg.register(FakeTool("web_fetch"))
+
+    def _calls_schema(self, schema):
+        return schema["schema"]["properties"]["calls"]
 
     def test_schema_structure(self):
         schema = self.reg.to_json_schema(names=["web_search", "web_fetch"])
         self.assertEqual(schema["type"], "json_object")
+        # #273: 顶层必须要求 calls 键
+        self.assertEqual(schema["schema"]["required"], ["calls"])
 
     def test_schema_filters_names(self):
         schema = self.reg.to_json_schema(names=["web_search"])
-        self.assertEqual(schema["type"], "json_object")
+        variants = self._calls_schema(schema)["items"]["oneOf"]
+        self.assertEqual(len(variants), 1)
+        self.assertEqual(variants[0]["properties"]["name"]["enum"], ["web_search"])
+
+    def test_per_tool_arguments_injected(self):
+        # #273: 每个工具一个 variant，arguments 注入该工具自己的 parameters_schema()
+        schema = self.reg.to_json_schema()
+        variants = self._calls_schema(schema)["items"]["oneOf"]
+        by_name = {v["properties"]["name"]["enum"][0]: v for v in variants}
+        self.assertEqual(set(by_name), {"web_search", "web_fetch"})
+        self.assertEqual(by_name["web_search"]["properties"]["arguments"], self.search_params)
+        self.assertEqual(by_name["web_fetch"]["properties"]["arguments"], {"type": "object"})
+        for v in variants:
+            self.assertEqual(v["required"], ["name", "arguments"])
+
+    def test_no_dead_fallback_when_empty(self):
+        # #273: 无匹配工具时不得回退成硬编码的 web_fetch 枚举
+        schema = self.reg.to_json_schema(names=[])
+        self.assertEqual(self._calls_schema(schema)["items"], {"type": "object"})
+        self.assertNotIn("web_fetch", str(schema))
 
 
 if __name__ == "__main__":

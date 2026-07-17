@@ -90,6 +90,9 @@ class EmotionalState:
 
     # Break defense state: persisted across restarts
     consecutive_negative: int = 0
+    # PS-012 forgiveness counter — L-07: 改为 dataclass 字段随 to_dict/from_dict
+    # 持久化，重启不再清零（旧文件缺字段时取默认值 0）
+    turns_without_anger: int = 0
 
     @property
     def dominant_emotion(self) -> str:
@@ -219,12 +222,12 @@ class EmotionalState:
         # PS-012: forgiveness counter — FORGIVENESS_THRESHOLD consecutive turns without anger halves resentment
         if self.anger > 0.6:
             self.resentment = min(1.0, self.resentment + self.anger * ANGER_RESENTMENT_RATE)
-            self._turns_without_anger = 0
+            self.turns_without_anger = 0
         else:
-            self._turns_without_anger = getattr(self, '_turns_without_anger', 0) + 1
-            if self._turns_without_anger >= FORGIVENESS_THRESHOLD and self.resentment > 0.01:
+            self.turns_without_anger += 1
+            if self.turns_without_anger >= FORGIVENESS_THRESHOLD and self.resentment > 0.01:
                 self.resentment *= FORGIVENESS_HALVING
-                self._turns_without_anger = 0
+                self.turns_without_anger = 0
                 logger.info("[emotion] resentment halved by forgiveness (10 turns without anger)")
 
         # Cross-dimension modulation: emotions influence each other

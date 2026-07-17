@@ -12,6 +12,7 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,12 @@ class PromptCache:
     edits to the character invalidate stale static blocks automatically.
     """
 
+    # L-02: 容量上限 + FIFO 淘汰——人格文件每次保存都会产生新 key
+    # （personality_version 含 mtime），旧 key 必须被淘汰而不是无限堆积。
+    MAX_ENTRIES = 200
+
     def __init__(self) -> None:
-        self._store: dict[tuple[str, str, str], tuple[str, float, float | None]] = {}
+        self._store: OrderedDict[tuple[str, str, str], tuple[str, float, float | None]] = OrderedDict()
         self._lock = threading.Lock()
 
     @staticmethod
@@ -84,6 +89,8 @@ class PromptCache:
 
         with self._lock:
             self._store[key] = (value, now, ttl)
+            while len(self._store) > self.MAX_ENTRIES:
+                self._store.popitem(last=False)  # L-02: FIFO 淘汰最旧 key
 
         logger.debug(
             f"[prompt_cache] build: {component_name} "

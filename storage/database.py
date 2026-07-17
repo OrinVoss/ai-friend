@@ -441,18 +441,35 @@ class Database:
             logger.info("[db] indexes created/verified")
         await self.commit()
 
-    async def prune_old_turns(self, keep_max: int = 1000) -> int:
-        """Delete oldest conversation turns beyond keep_max per session. (#178)"""
+    async def prune_old_turns(self, keep_max: int = 1000,
+                              session_id: str | None = None) -> int:
+        """Delete oldest conversation turns beyond keep_max per session. (#178)
+
+        M-03: 实现与 docstring 对齐 — 每个 session 各保留最新 keep_max 条，
+        活跃角色不再挤掉其他角色的记录；传入 session_id 时只修剪该 session。
+        （当前零调用方，session_id 为新增可选参数，旧调用方式仍兼容。）
+        """
         async with self.cursor() as c:
-            await c.execute("""
-                DELETE FROM conversation_turns WHERE id IN (
-                    SELECT id FROM conversation_turns
-                    WHERE id NOT IN (
+            if session_id is not None:
+                await c.execute("""
+                    DELETE FROM conversation_turns
+                    WHERE session_id = ? AND id NOT IN (
                         SELECT id FROM conversation_turns
+                        WHERE session_id = ?
                         ORDER BY id DESC LIMIT ?
                     )
-                )
-            """, (keep_max,))
+                """, (session_id, session_id, keep_max))
+            else:
+                await c.execute("""
+                    DELETE FROM conversation_turns WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (
+                                PARTITION BY session_id ORDER BY id DESC
+                            ) AS rn
+                            FROM conversation_turns
+                        ) WHERE rn > ?
+                    )
+                """, (keep_max,))
             deleted = c.rowcount
             if deleted:
                 await self.commit()

@@ -168,7 +168,7 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         "AI_FRIEND_EMBEDDING_ENDPOINT": "embedding_endpoint",
         "AI_FRIEND_EMBEDDING_DIM": "embedding_dim",
         "AI_FRIEND_SHORT_TERM_CAPACITY": "short_term_capacity",
-        "AI_FRIEND_LOG_LEVEL": "log_level",
+        "AI_FRIEND_PERSONALITY_FILE": "personality_file",  # L-05
         "AI_FRIEND_PROMPT_CACHE_TTL": "prompt_cache_ttl_seconds",
         "AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS": "conversation_examples_max_turns",
     }

@@ -27,7 +27,6 @@ class TestCliController(unittest.TestCase):
         self.agent.ltm.repo.insert_turn = MagicMock()
         self.agent._pick_proactive_topic.return_value = "test topic"
         self.agent._max_tokens_for_emotion.return_value = 512
-        self.agent._react_messages = None
         self.agent._react_iteration = 0
         self.agent._max_tool_iterations = 10
         self.agent._tool_registry = MagicMock()
@@ -84,12 +83,11 @@ class TestCliController(unittest.TestCase):
     def test_reset_react_on_agent(self):
         from core.agent import Agent, AgentState
         # Use the real _reset_react from Agent
+        # L-03: _react_messages 死代码已删除，不再参与重置
         agent = MagicMock(spec=Agent)
-        agent._react_messages = [{"role": "user", "content": "test"}]
         agent._react_iteration = 3
         agent._tool_calls_pending = [{"name": "test"}]
         Agent._reset_react(agent)
-        self.assertIsNone(agent._react_messages)
         self.assertEqual(agent._react_iteration, 0)
         self.assertEqual(agent._tool_calls_pending, [])
 

@@ -253,8 +253,10 @@ class Repository:
     async def update_experience_score(self, exp_id: int, score: float) -> None:
         logger.debug(f"[db] update_experience_score: id={exp_id} score={score:.2f}")
         async with self.db.cursor() as c:
-            await c.execute("UPDATE experiences SET composite_score = ? WHERE id = ?",
-                            (score, exp_id))
+            # M-01: 按 id 更新也要带 session 过滤，避免串改其他会话的行
+            await c.execute(
+                "UPDATE experiences SET composite_score = ? WHERE id = ? AND session_id = ?",
+                (score, exp_id, self.session_id))
             await self.db.commit()
 
     # ── Reflections ──
@@ -339,9 +341,10 @@ class Repository:
     async def archive_observation(self, obs_id: int) -> None:
         logger.info(f"[db] archive_observation: id={obs_id}")
         async with self.db.cursor() as c:
+            # M-02: 按 id 归档也要带 session 过滤，避免串改其他会话的行
             await c.execute(
-                "UPDATE observations SET is_archived = 1 WHERE id = ?",
-                (obs_id,)
+                "UPDATE observations SET is_archived = 1 WHERE id = ? AND session_id = ?",
+                (obs_id, self.session_id)
             )
             await self.db.commit()
 

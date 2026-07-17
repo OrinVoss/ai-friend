@@ -419,12 +419,16 @@ class MemoryConsolidator:
                 f"- {f.fact_key}: {f.fact_value}" for f in facts
             ) or "暂无"
 
-            prompt = safe_format(REFLECTION_PROMPT, 
+            prompt = safe_format(REFLECTION_PROMPT,
                 experiences=exp_text,
                 reflections=ref_text,
                 facts=fact_text,
                 current_emotion=personality.emotion.dominant_emotion,
-                relationship=relationship,
+                # #282: 先取数值再传入——模板里的 dict 下标缺键会让 safe_format
+                # 整体失败，LLM 将看到未格式化的模板原文
+                rel_trust=relationship.get("trust", 0.3),
+                rel_familiarity=relationship.get("familiarity", 0.3),
+                rel_intimacy=relationship.get("intimacy", 0.3),
             )
             result = self._call_llm(prompt, temperature=0.4)
 

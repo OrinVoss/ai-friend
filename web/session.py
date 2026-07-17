@@ -413,12 +413,9 @@ class SessionManager:
         for task in self._pending_remove.values():
             task.cancel()
         self._pending_remove.clear()
-        for sid, agent in list(self._sessions.items()):
-            try:
-                agent.save_personality()
-            except Exception as e:
-                logger.warning(f"Failed to save personality for {sid}: {e}")
-        # SN-013: also close each WebAgent so per-session resources release.
+        # SN-013: close 每个 WebAgent 释放 per-session 资源。
+        # L-08: 不再先跑一轮 save_personality — close() 内部已保存，
+        # 旧实现每 session 会把同一 personality 文件连写两次。
         for sid, agent in list(self._sessions.items()):
             try:
                 agent.close()

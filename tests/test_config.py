@@ -41,6 +41,21 @@ class TestNewConfigFields(unittest.TestCase):
         self.assertEqual(cfg.max_fake_actions, 3)
 
 
+class TestPersonalityFileEnv(unittest.TestCase):
+    def test_env_override_personality_file(self):
+        # L-05: AI_FRIEND_PERSONALITY_FILE 覆盖 personality_file
+        with patch.dict(os.environ, {"AI_FRIEND_PERSONALITY_FILE": "personalities/custom.json"}, clear=False):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+            cfg = load_config(path=_MISSING)
+        self.assertEqual(cfg.personality_file, "personalities/custom.json")
+
+    def test_default_personality_file_without_env(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AI_FRIEND_PERSONALITY_FILE", None)
+            cfg = load_config(path=_MISSING)
+        self.assertEqual(cfg.personality_file, "personalities/default.json")
+
+
 def _make_agent(cfg):
     """真实 Agent，外部依赖全部 mock（同 test_tool_failures_reset 的模式）。"""
     from core.agent import Agent

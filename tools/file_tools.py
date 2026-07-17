@@ -157,7 +157,7 @@ class ReadFileTool(Tool):
             return ToolResult.fail(f"文件太大 ({size/1024:.0f}KB > {MAX_FILE_SIZE/1024:.0f}KB)")
 
         if _is_binary(resolved):
-            return ToolResult.fail(f"二进制文件，无法读取文本内容")
+            return ToolResult.fail("二进制文件，无法读取文本内容")
 
         try:
             # FL-007: stream only the needed slice instead of readlines() loading
@@ -262,7 +262,6 @@ class FileTreeTool(Tool):
     def _build_tree(self, root: str, max_depth: int) -> tuple[list[str], int]:
         nodes = 0
         lines = []
-        prefix_stack = [""]
 
         def walk(current: str, depth: int, prefix: str, is_last: bool):
             nonlocal nodes

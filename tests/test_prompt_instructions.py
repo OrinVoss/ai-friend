@@ -12,6 +12,7 @@ from prompts.system import (
     _build_emotion_block,
     _build_inner_drive_instructions_block,
     _build_instructions_block,
+    _build_internal_tools_block,
     _build_output_rules_block,
     build_inner_drive_prompt,
     build_system_prompt,
@@ -206,6 +207,50 @@ class TestEmotionPromptSummary(unittest.TestCase):
         block = _build_emotion_block(emotion)
         self.assertIn("=== 你现在啥状态 ===", block)
         self.assertIn(emotion.to_prompt_summary()["mood"], block)
+
+
+class TestInternalToolsBlock(unittest.TestCase):
+    """#281: _build_internal_tools_block 的工具清单与示例都从 registry 派生。"""
+
+    def _make_registry(self, names, params=None):
+        registry = ToolRegistry()
+        for name in names:
+            tool = MagicMock()
+            tool.name.return_value = name
+            tool.description.return_value = f"Mock {name}"
+            p = (params or {}).get(name, {})
+            tool.parameters_schema.return_value = p
+            tool.spec.return_value = ToolSpec(name=name, description=f"Mock {name}", parameters=p)
+            registry.register(tool)
+        return registry
+
+    def test_block_derives_names_from_registry(self):
+        registry = self._make_registry(["recall", "remember"])
+        block = _build_internal_tools_block(registry)
+        self.assertIn("recall", block)
+        self.assertIn("remember", block)
+
+    def test_block_changes_with_registry(self):
+        # 注册不同工具名时输出随之变化，不再硬编码 recall/remember
+        registry = self._make_registry(["dream_log"])
+        block = _build_internal_tools_block(registry)
+        self.assertIn("dream_log", block)
+        self.assertNotIn("recall", block)
+
+    def test_example_derived_from_first_tool_schema(self):
+        params = {"recall": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "q"}},
+            "required": ["query"],
+        }}
+        registry = self._make_registry(["recall"], params)
+        block = _build_internal_tools_block(registry)
+        self.assertIn('"name": "recall"', block)
+        self.assertIn('"query"', block)
+
+    def test_empty_registry_returns_empty(self):
+        self.assertEqual(_build_internal_tools_block(ToolRegistry()), "")
+        self.assertEqual(_build_internal_tools_block(None), "")
 
 
 if __name__ == "__main__":

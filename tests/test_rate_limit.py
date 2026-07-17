@@ -36,6 +36,30 @@ class TestRateLimiter(unittest.TestCase):
         for _ in range(100):
             self.assertTrue(rl.check("1.2.3.4", "/unknown"))
 
+    def test_lock_is_real_lock(self):
+        # L-11: 布尔占位换成真锁
+        import threading
+        rl = RateLimiter()
+        self.assertIsInstance(rl._lock, type(threading.Lock()))
+
+    def test_concurrent_exact_allowance(self):
+        # L-11: 并发冲击下放行总数不得超上限（锁保证窗口读写原子）
+        import threading
+        rl = RateLimiter()
+        allowed = []
+
+        def hammer():
+            for _ in range(10):
+                if rl.is_allowed("1.2.3.4", "/api/chat", 10, 60):
+                    allowed.append(1)
+
+        threads = [threading.Thread(target=hammer) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sum(allowed), 10)
+
 
 class TestGetClientIp(unittest.TestCase):
     def test_forwarded_for(self):

@@ -456,5 +456,68 @@ class TestStoreFactsBulk(unittest.TestCase):
         spy.assert_not_awaited()
 
 
+class TestSessionFilteredWrites(unittest.TestCase):
+    """M-01/M-02: 按 id 的 UPDATE 必须带 session 过滤。"""
+
+    def _spy_repo(self):
+        from unittest.mock import AsyncMock, MagicMock
+        db = MagicMock()
+        db.commit = AsyncMock()
+        cursor = MagicMock()
+        cursor.execute = AsyncMock()
+        db.cursor.return_value.__aenter__.return_value = cursor
+        repo = Repository(db)
+        repo.session_id = "sess-x"
+        return repo, cursor
+
+    def test_update_experience_score_sql_has_session_filter(self):
+        repo, cursor = self._spy_repo()
+        asyncio.run(repo.update_experience_score(7, 0.9))
+        sql, params = cursor.execute.call_args[0]
+        self.assertIn("AND session_id = ?", sql)
+        self.assertEqual(params, (0.9, 7, "sess-x"))
+
+    def test_archive_observation_sql_has_session_filter(self):
+        repo, cursor = self._spy_repo()
+        asyncio.run(repo.archive_observation(3))
+        sql, params = cursor.execute.call_args[0]
+        self.assertIn("AND session_id = ?", sql)
+        self.assertEqual(params, (3, "sess-x"))
+
+    def test_update_experience_score_other_session_noop(self):
+        """行为验证：用别的 session 的 exp_id 更新不生效。"""
+        db = Database(":memory:")
+        asyncio.run(db.open())
+        try:
+            repo_a = Repository(db)
+            repo_a.session_id = "sess-a"
+            repo_b = Repository(db)
+            repo_b.session_id = "sess-b"
+            eid = asyncio.run(repo_b.insert_experience("他的经历", "neutral", 0.5, []))
+            asyncio.run(repo_a.update_experience_score(eid, 0.01))
+            rows = asyncio.run(repo_b.search_experiences())
+            self.assertEqual(len(rows), 1)
+            self.assertNotEqual(rows[0].composite_score, 0.01)
+        finally:
+            asyncio.run(db.close())
+
+    def test_archive_observation_other_session_noop(self):
+        """行为验证：用别的 session 的 obs_id 归档不生效。"""
+        db = Database(":memory:")
+        asyncio.run(db.open())
+        try:
+            repo_a = Repository(db)
+            repo_a.session_id = "sess-a"
+            repo_b = Repository(db)
+            repo_b.session_id = "sess-b"
+            oid = asyncio.run(repo_b.insert_observation("他的观察"))
+            asyncio.run(repo_a.archive_observation(oid))
+            rows = asyncio.run(repo_b.get_recent_observations())
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(rows[0].is_archived)
+        finally:
+            asyncio.run(db.close())
+
+
 if __name__ == "__main__":
     unittest.main()

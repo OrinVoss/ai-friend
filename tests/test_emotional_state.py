@@ -254,6 +254,23 @@ class TestSerialization(unittest.TestCase):
         restored = EmotionalState.from_dict(d)
         self.assertFalse(hasattr(restored, "unknown_field"))
 
+    def test_turns_without_anger_roundtrip(self):
+        # L-07: turns_without_anger 是 dataclass 字段，随序列化持久化
+        self.e.turns_without_anger = 7
+        restored = EmotionalState.from_dict(self.e.to_dict())
+        self.assertEqual(restored.turns_without_anger, 7)
+
+    def test_turns_without_anger_default_for_old_files(self):
+        # L-07: 旧版人格文件没有该字段，加载时取默认值 0
+        restored = EmotionalState.from_dict({"valence": 0.5})
+        self.assertEqual(restored.turns_without_anger, 0)
+
+    def test_shift_increments_forgiveness_counter(self):
+        # L-07: shift() 在低 anger 轮次累加计数（改名后行为不变）
+        self.e.anger = 0.0
+        self.e.shift(0.0, 0.0)
+        self.assertEqual(self.e.turns_without_anger, 1)
+
 
 class TestRecordEmotionEvent(unittest.TestCase):
     def setUp(self):

@@ -1,3 +1,5 @@
+import json
+
 from prompts.instructions import (
     AGENT3_BASE_INSTRUCTIONS,
     AGENT3_EXPLORE_INSTRUCTIONS,
@@ -528,23 +530,39 @@ def _build_dreams_block(emotion: EmotionalState, idle_duration: float) -> str:
 
 
 def _build_internal_tools_block(tools) -> str:
-    if tools:
-        from tools.traits import ToolRegistry
-        if isinstance(tools, ToolRegistry):
-            internal_specs = tools.format_for_prompt(
-                names=["recall", "remember"]
-            )
-            if internal_specs:
-                return (
-                    "=== 可用工具 ===\n"
-                    "当你需要以下操作时，在回复中输出 <tool_call> 标签来调用工具：\n"
-                    f"{internal_specs}\n\n"
-                    "示例：\n"
-                    '<tool_call>\n{"name": "recall", "arguments": {"query": "用户喜欢什么"}}\n</tool_call>\n\n'
-                    "工具会依次执行，执行结果会返回给你。\n"
-                    "如果不需要调用工具，正常回复就好。"
-                )
-    return ""
+    if not tools:
+        return ""
+    from tools.traits import ToolRegistry
+    if not isinstance(tools, ToolRegistry):
+        return ""
+    specs = tools.list_specs()
+    if not specs:
+        return ""
+    # #281: 工具清单与示例都从 registry 实际内容派生，不硬编码工具名
+    # （对齐 #294 P2-4 的注释约定）
+    internal_specs = tools.format_for_prompt()
+    return (
+        "=== 可用工具 ===\n"
+        "当你需要以下操作时，在回复中输出 <tool_call> 标签来调用工具：\n"
+        f"{internal_specs}\n\n"
+        "示例：\n"
+        f"<tool_call>\n{_build_tool_call_example(specs[0])}\n</tool_call>\n\n"
+        "工具会依次执行，执行结果会返回给你。\n"
+        "如果不需要调用工具，正常回复就好。"
+    )
+
+
+def _build_tool_call_example(spec) -> str:
+    """Derive a <tool_call> JSON example from a tool's parameters schema. (#281)"""
+    schema = spec.parameters or {}
+    props = schema.get("properties", {})
+    required = schema.get("required", []) or list(props)[:1]
+    placeholders = {"string": "...", "integer": 0, "number": 0.0, "boolean": False}
+    args = {
+        key: props.get(key, {}).get("default", placeholders.get(props.get(key, {}).get("type"), "..."))
+        for key in required
+    }
+    return json.dumps({"name": spec.name, "arguments": args}, ensure_ascii=False)
 
 
 def _build_tool_history_block(tool_call_history: list | None) -> str:
