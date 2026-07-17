@@ -135,6 +135,10 @@ class ConversationEngine:
     def record_rate_limit(self, action: str) -> None:
         self._agent.record_rate_limit(action)
 
+    def record_topic(self, topic: str) -> None:
+        """#177: 记录 LLM 主路径选用的话题（供去重与 prompt 提示）。"""
+        self._agent.record_topic(topic)
+
     def persist_proactive_message(self, text: str, metadata: dict | None = None) -> None:
         """Persist an engine-initiated message (sleep/wake) to history."""
         self._agent.add_turn("assistant", text, metadata=metadata)

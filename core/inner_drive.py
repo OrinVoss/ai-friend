@@ -109,13 +109,17 @@ class InnerDriveAgent:
                  session_id: str | None = None,
                  prompt_cache=None,
                  prompt_cache_ttl: float = 60.0,
-                 memory_agent=None):
+                 memory_agent=None,
+                 rule_tools_registry=None):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
         self._retriever = retriever
         self._short_term = short_term
         self._full_registry = tool_registry
+        # M-06: prompt 里的工具规则/清单数据源（全量 registry）；
+        # 为 None 时 build_inner_drive_prompt 回退到 tool_registry。
+        self._rule_tools_registry = rule_tools_registry
         self._max_iterations = max_iterations
         self._max_tokens_assess = max_tokens_assess
         self._max_tokens_proactive = max_tokens_proactive
@@ -147,11 +151,9 @@ class InnerDriveAgent:
             cs = self._build_context_summary(mem_ctx)
 
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        emotion_summary = self._personality.emotion.to_prompt_summary()
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
-            emotion_summary=emotion_summary,
             memory_context=mem_ctx,
             conversation_history=conv_hist,
             tools=self._full_registry,
@@ -160,6 +162,7 @@ class InnerDriveAgent:
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
             memory_context_summary=cs if use_ma else "",
+            rule_tools=self._rule_tools_registry,
         )
 
         messages = [
@@ -249,29 +252,34 @@ class InnerDriveAgent:
             parts.append("（以上记忆证据不足，当作待确认信息，不要当作确定事实）")
         return "\n".join(parts)
 
-    def assess_proactive(self, idle_duration: float) -> ProactiveIntent:
+    def assess_proactive(self, idle_duration: float,
+                         recent_topics: list | None = None) -> ProactiveIntent:
         """Decide whether and how to proactively engage the user.
 
         Called after ProactivityManager's cheap scoring triggers.
         Replaces random topic selection and the 40/60 explore/chat split
         with LLM-based reasoning about context, memory, and emotional state.
+        #177: recent_topics 来自 ProactivityManager 的去重队列，
+        prompt 中告知 LLM 避开近期已聊话题。
         """
         from datetime import datetime
         from prompts.system import build_inner_drive_proactive_prompt
 
         now = datetime.now()
-        mem_ctx = self._retriever.retrieve_for_query("")
+        # M-04: 记忆上下文走 _context_summary_for（尊重 use_memory_agent），
+        # query 与原逻辑一致为空字符串
+        cs = self._context_summary_for("")
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         sys_prompt = build_inner_drive_proactive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
-            memory_context=mem_ctx,
+            memory_context=None,
             conversation_history=conv_hist,
             idle_duration=idle_duration,
             current_time=now,
-            emotion_summary=emotion_summary,
+            memory_context_summary=cs,
+            recent_topics=recent_topics,
         )
 
         messages = [
@@ -310,21 +318,24 @@ class InnerDriveAgent:
         from prompts.system import build_inner_drive_prompt
         from core.dispatcher import execute_tool_calls
 
-        mem_ctx = self._retriever.retrieve_for_query(user_input)
+        # M-04: 走 _context_summary_for，use_memory_agent 开关对 review 同样生效；
+        # retriever 直接调用仅保留在 _context_summary_for 内部作回退。
+        # 注意：review 结果的 context_summary 不填，避免改变 Agent 3 prompt 组成。
+        cs = self._context_summary_for(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
-            emotion_summary=emotion_summary,
-            memory_context=mem_ctx,
+            memory_context=None,
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
             session_id=self._session_id,
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
+            memory_context_summary=cs,
+            rule_tools=self._rule_tools_registry,
         )
 
         review_msg = (
@@ -380,9 +391,9 @@ class InnerDriveAgent:
         from prompts.system import build_inner_drive_prompt
         from core.dispatcher import execute_tool_calls
 
-        mem_ctx = self._retriever.retrieve_for_query(user_input)
+        # M-04: 同 review，记忆上下文走 _context_summary_for（尊重 use_memory_agent）
+        cs = self._context_summary_for(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        emotion_summary = self._personality.emotion.to_prompt_summary()
 
         # Build failure context
         fail_lines = ["=== 之前的工具调用全部失败 ==="]
@@ -395,14 +406,15 @@ class InnerDriveAgent:
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
-            emotion_summary=emotion_summary,
-            memory_context=mem_ctx,
+            memory_context=None,
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
             session_id=self._session_id,
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
+            memory_context_summary=cs,
+            rule_tools=self._rule_tools_registry,
         )
 
         messages = [
@@ -460,20 +472,21 @@ class InnerDriveAgent:
         """
         from prompts.system import build_inner_drive_prompt
 
-        mem_ctx = self._retriever.retrieve_for_query(user_input)
+        # M-04: 同 review，记忆上下文走 _context_summary_for（尊重 use_memory_agent）
+        cs = self._context_summary_for(user_input)
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        emotion_summary = self._personality.emotion.to_prompt_summary()
         sys_prompt = build_inner_drive_prompt(
             personality=self._personality.config,
             emotion=self._personality.emotion,
-            emotion_summary=emotion_summary,
-            memory_context=mem_ctx,
+            memory_context=None,
             conversation_history=conv_hist,
             tools=self._full_registry,
             tool_call_history=self._tool_call_history,
             session_id=self._session_id,
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
+            memory_context_summary=cs,
+            rule_tools=self._rule_tools_registry,
         )
 
         intent_to_tool = {

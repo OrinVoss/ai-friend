@@ -1,6 +1,8 @@
 """Proactive behavior engine: scoring, topic selection, rate limiting."""
 
+import json
 import logging
+import os
 import random
 import time
 from collections import deque
@@ -12,13 +14,70 @@ logger = logging.getLogger(__name__)
 class ProactivityManager:
     """Manages when and what the AI proactively says, with rate limiting."""
 
-    def __init__(self, personality, ltm, short_term):
+    def __init__(self, personality, ltm, short_term,
+                 state_dir: str | None = None, session_id: str = "default"):
         self._personality = personality
         self._ltm = ltm
         self._short_term = short_term
         self._last_explore_time: float = 0
         self._last_chat_time: float = 0
         self._recent_topics: deque = deque(maxlen=5)  # #265: topic dedup
+        # M-11: 限速/话题状态按 session 持久化（参照 .sleep_state 模式），
+        # Web session 重建后限速不再清零
+        self._state_file = (
+            os.path.join(state_dir, f".proactivity_state.{session_id or 'default'}.json")
+            if state_dir else None
+        )
+        self._load_state()
+
+    def _load_state(self) -> None:
+        """Load persisted rate-limit/topic state; silently keep defaults on failure."""
+        if not self._state_file:
+            return
+        try:
+            with open(self._state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._last_explore_time = float(data.get("last_explore_time", 0))
+            self._last_chat_time = float(data.get("last_chat_time", 0))
+            topics = data.get("recent_topics", [])
+            if isinstance(topics, list):
+                self._recent_topics.extend(str(t) for t in topics[-5:])
+        except Exception as e:
+            # M-11: 文件不存在/损坏时静默降级为默认值，不影响主流程
+            if os.path.exists(self._state_file):
+                logger.warning(f"[proactive] state load failed, using defaults: {e}")
+
+    def _save_state(self) -> None:
+        """Persist rate-limit/topic state; write failures never break the flow."""
+        if not self._state_file:
+            return
+        try:
+            data = {
+                "last_explore_time": self._last_explore_time,
+                "last_chat_time": self._last_chat_time,
+                "recent_topics": list(self._recent_topics),
+            }
+            with open(self._state_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"[proactive] state save failed: {e}")
+
+    def get_recent_topics(self) -> list:
+        """Recent topics (oldest first), for prompt injection and tests."""
+        return list(self._recent_topics)
+
+    def record_topic(self, topic: str) -> None:
+        """#177: 记录主路径（LLM 决策）实际选用的话题，供去重与 prompt 提示。
+
+        已在队列中的话题移到最新位置，保持 MRU 语义；队列满时最老的淘汰。
+        """
+        topic = (topic or "").strip()
+        if not topic:
+            return
+        if topic in self._recent_topics:
+            self._recent_topics.remove(topic)
+        self._recent_topics.append(topic)
+        self._save_state()
 
     def calculate_proactivity(self, idle_duration: float) -> float:
         """Return 0.0-0.8 probability of initiating proactive chat."""
@@ -95,6 +154,7 @@ class ProactivityManager:
         fresh = [t for t in topics if t not in self._recent_topics]
         chosen = random.choice(fresh) if fresh else topics[0]
         self._recent_topics.append(chosen)
+        self._save_state()  # M-11: 话题变更随状态一起落盘
         logger.debug(f"[proactive] topic chosen={chosen[:40]} filtered={len(topics) - len(fresh)} recent={list(self._recent_topics)}")
         return chosen
 
@@ -122,3 +182,5 @@ class ProactivityManager:
             self._last_explore_time = now
         elif action == "chat":
             self._last_chat_time = now
+        # M-11: 状态变更后落盘，Web session 重建后可恢复
+        self._save_state()

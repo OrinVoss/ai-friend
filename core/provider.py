@@ -54,6 +54,9 @@ class DeepSeekProvider(LLMProvider):
                  timeout: int = 180,
                  monitor_enabled: bool = True):
         self.endpoint = endpoint.rstrip("/")
+        # #261: endpoint 以 /v1 结尾时剥掉，避免拼出 /v1/v1/chat/completions
+        if self.endpoint.endswith("/v1"):
+            self.endpoint = self.endpoint[:-3]
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
@@ -142,8 +145,9 @@ class DeepSeekProvider(LLMProvider):
                 wait = 2 ** attempt
                 logger.warning(f"[api] http error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
+            # #213: ReadTimeout 纳入重试；StreamConsumedError 在本路径不可达（死 catch），移除
             except (requests.exceptions.ChunkedEncodingError,
-                    requests.exceptions.StreamConsumedError) as e:
+                    requests.exceptions.ReadTimeout) as e:
                 last_error = e
                 wait = 2 ** attempt
                 logger.warning(f"[api] stream error attempt={attempt+1}/3 retry_in={wait}s: {e}")
@@ -163,54 +167,58 @@ class DeepSeekProvider(LLMProvider):
             stream=True,
             timeout=(10, self.timeout),  # #174: connect=10s, read=self.timeout
         )
-        resp.raise_for_status()
+        # #213: try/finally 保证提前 break / 异常时也能 close 响应，连接归还连接池
+        try:
+            resp.raise_for_status()
 
-        if not stream:
-            data = resp.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            usage = data.get("usage", {})
+            if not stream:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                usage = data.get("usage", {})
+                elapsed = time.monotonic() - t0  # PR-006
+                logger.info(
+                    f"[api] model={self.model} stream=off "
+                    f"tok_in={usage.get('prompt_tokens', '?')} tok_out={usage.get('completion_tokens', '?')} "
+                    f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
+                )
+                return content
+
+            full_response = []
+            stream_size = 0  # PR-013: accumulated bytes
+            stream_deadline = time.monotonic() + self.timeout  # PR-006
+            for line in resp.iter_lines(decode_unicode=True):
+                if time.monotonic() > stream_deadline:  # PR-006
+                    logger.warning(f"[api] stream timeout after {self.timeout}s")
+                    break
+                if not line:
+                    continue
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        o = json.loads(data_str)
+                        choices = o.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        token = delta.get("content") or ""
+                        if token and on_token:
+                            on_token(token)
+                        full_response.append(token)
+                        stream_size += len(token.encode("utf-8"))
+                        if stream_size > STREAM_MAX_BYTES:
+                            logger.warning(f"[api] stream exceeded 1 MB, truncating")
+                            break
+                    except json.JSONDecodeError:
+                        continue
+
+            content = "".join(full_response)
             elapsed = time.monotonic() - t0  # PR-006
             logger.info(
-                f"[api] model={self.model} stream=off "
-                f"tok_in={usage.get('prompt_tokens', '?')} tok_out={usage.get('completion_tokens', '?')} "
+                f"[api] model={self.model} stream=on "
                 f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
             )
             return content
-
-        full_response = []
-        stream_size = 0  # PR-013: accumulated bytes
-        stream_deadline = time.monotonic() + self.timeout  # PR-006
-        for line in resp.iter_lines(decode_unicode=True):
-            if time.monotonic() > stream_deadline:  # PR-006
-                logger.warning(f"[api] stream timeout after {self.timeout}s")
-                break
-            if not line:
-                continue
-            if line.startswith("data: "):
-                data_str = line[6:]
-                if data_str.strip() == "[DONE]":
-                    break
-                try:
-                    o = json.loads(data_str)
-                    choices = o.get("choices", [])
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta", {})
-                    token = delta.get("content") or ""
-                    if token and on_token:
-                        on_token(token)
-                    full_response.append(token)
-                    stream_size += len(token.encode("utf-8"))
-                    if stream_size > STREAM_MAX_BYTES:
-                        logger.warning(f"[api] stream exceeded 1 MB, truncating")
-                        break
-                except json.JSONDecodeError:
-                    continue
-
-        content = "".join(full_response)
-        elapsed = time.monotonic() - t0  # PR-006
-        logger.info(
-            f"[api] model={self.model} stream=on "
-            f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
-        )
-        return content
+        finally:
+            resp.close()

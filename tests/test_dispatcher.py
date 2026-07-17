@@ -46,6 +46,21 @@ class TestParseToolCalls(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["name"], "web_search")
 
+    def test_bare_json_arguments_string_guarded(self):
+        # #260: Tier3 裸 JSON 的 arguments 为字符串时按空参数处理，不外抛 ValueError
+        text = '{"name": "web_search", "arguments": "query=news"}'
+        cleaned, calls = parse_tool_calls(text)
+        self.assertEqual(cleaned, "")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["arguments"], {})
+
+    def test_bare_json_arguments_list_guarded(self):
+        # #260: arguments 为列表同样按空参数处理
+        text = '{"name": "web_search", "arguments": ["a", "b"]}'
+        _, calls = parse_tool_calls(text)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["arguments"], {})
+
     def test_invalid_json_silent(self):
         text = '<tool_call>{invalid json}</tool_call> normal text'
         cleaned, calls = parse_tool_calls(text)

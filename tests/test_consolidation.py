@@ -33,11 +33,19 @@ class TestConsolidationFactChecker(unittest.TestCase):
         # Run extraction
         self.consolidator._extract_facts("用户说：我最爱吃披萨，最喜欢蓝色，名字是小明")
 
-        # Should have stored 3 facts
-        self.assertEqual(self.ltm.store_fact.call_count, 3)
+        # #161: 3 条事实经一次批量 upsert 落库，不再逐条 store_fact
+        self.ltm.store_fact.assert_not_called()
+        self.ltm.store_facts_bulk.assert_called_once()
+        bulk_facts = self.ltm.store_facts_bulk.call_args.args[0]
+        self.assertEqual(len(bulk_facts), 3)
 
         # Should have called get_similar_facts for each new fact
         self.assertEqual(self.ltm.get_similar_facts.call_count, 3)
+
+        # #161: 逐条矛盾检测（顺序不变）先于末尾批量落库
+        call_names = [c[0] for c in self.ltm.mock_calls]
+        self.assertLess(max(i for i, n in enumerate(call_names) if n == "get_similar_facts"),
+                        call_names.index("store_facts_bulk"))
 
     def test_extract_facts_low_confidence_skipped(self):
         """Facts with confidence <= 0.3 should not be stored."""
@@ -46,6 +54,7 @@ class TestConsolidationFactChecker(unittest.TestCase):
         self.consolidator._extract_facts("some text")
 
         self.ltm.store_fact.assert_not_called()
+        self.ltm.store_facts_bulk.assert_not_called()
 
     def test_extract_facts_contradiction_resolved(self):
         """When contradiction detected, old fact should be deactivated."""
@@ -59,8 +68,9 @@ class TestConsolidationFactChecker(unittest.TestCase):
 
         self.consolidator._extract_facts("用户说我叫小红")
 
-        # Old fact has low confidence (0.5), decayed to 0.2 → deactivated
-        self.ltm.store_fact.assert_called_once()
+        # #161: 新事实经一次批量 upsert 落库
+        self.ltm.store_fact.assert_not_called()
+        self.ltm.store_facts_bulk.assert_called_once()
         # The resolve should have called deactivate_fact on ltm (sync wrapper)
         self.ltm.deactivate_fact.assert_called_once_with(99)
 
@@ -253,6 +263,74 @@ class TestReembedStaleVersions(unittest.TestCase):
         self.assertEqual(len(facts), 1)
         self.assertEqual(facts[0].embedding_version, EMBEDDING_VERSION)
         embed.encode.assert_called_once()
+
+
+class TestEmbedNewItemsCoverage(unittest.TestCase):
+    """H-08/#285: _embed_new_items 覆盖 facts_v2 / observations，
+    且只处理本 session 的行。"""
+
+    def test_covers_facts_v2_and_observations_session_scoped(self):
+        import asyncio
+        import numpy as np
+        from memory.consolidation import MemoryConsolidator
+        from memory.long_term import LongTermMemory
+        from models.memory import EMBEDDING_VERSION
+        from storage.database import Database
+        from storage.repository import Repository
+
+        db = Database(":memory:")
+        asyncio.run(db.open())
+        repo = Repository(db)
+
+        async def _insert():
+            async with db.cursor() as c:
+                # 本 session：facts_v2 / observations 各一行，待嵌入
+                await c.execute(
+                    "INSERT INTO facts_v2 (category, fact_key, fact_value, session_id)"
+                    " VALUES ('preference', '饮品', '咖啡', 'default')")
+                await c.execute(
+                    "INSERT INTO observations (content, session_id)"
+                    " VALUES ('用户喜欢咖啡', 'default')")
+                # 其他 session：同类行，不应被触碰
+                await c.execute(
+                    "INSERT INTO facts_v2 (category, fact_key, fact_value, session_id)"
+                    " VALUES ('preference', '饮品', '茶', 'sess_other')")
+                await c.execute(
+                    "INSERT INTO observations (content, session_id)"
+                    " VALUES ('别的会话', 'sess_other')")
+                await db.commit()
+        asyncio.run(_insert())
+
+        embed = MagicMock()
+        embed.health_check.return_value = True
+        embed.encode.side_effect = lambda texts: np.array(
+            [np.ones(8, dtype=np.float32) / 3.0] * len(texts), dtype=np.float32)
+        ltm = LongTermMemory(repo)
+        consolidator = MemoryConsolidator(ltm, MagicMock(), embedding_engine=embed)
+        # 与生产一致：从同步上下文调用
+        consolidator._embed_new_items()
+
+        async def _fetch():
+            out = {}
+            async with db.cursor() as c:
+                for table in ("facts_v2", "observations"):
+                    await c.execute(
+                        f"SELECT session_id, embedding, embedding_version FROM {table}")
+                    out[table] = await c.fetchall()
+            return out
+        rows = asyncio.run(_fetch())
+        asyncio.run(db.close())
+
+        for table in ("facts_v2", "observations"):
+            mine = [r for r in rows[table] if r["session_id"] == "default"]
+            theirs = [r for r in rows[table] if r["session_id"] == "sess_other"]
+            self.assertEqual(len(mine), 1)
+            self.assertIsNotNone(mine[0]["embedding"])
+            self.assertEqual(mine[0]["embedding_version"], EMBEDDING_VERSION)
+            # 其他 session 的行保持未嵌入
+            self.assertEqual(len(theirs), 1)
+            self.assertIsNone(theirs[0]["embedding"])
+            self.assertEqual(theirs[0]["embedding_version"], 0)
 
 
 if __name__ == "__main__":

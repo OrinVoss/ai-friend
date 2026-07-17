@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import ANY, MagicMock, patch
 
-from core.message_handler import MessageHandler
+from core.message_handler import MessageHandler, MessageHandlerState
 from core.inner_drive import ProactiveIntent
 from tests.mocks import mock_tool_registry
 
@@ -60,6 +60,27 @@ class TestMessageHandler(unittest.TestCase):
         result = self.handler.handle_message("你好")
         self.assertEqual(result, "Hello!")
         self.agent._react_loop.assert_called_once()
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_message_persists_user_turn_once(self, _mock):
+        """Field bug 2026-07-17: the user message must be persisted exactly
+        once (was inserted twice — handle_message + _run_agent3 — causing
+        duplicate bubbles after page refresh)."""
+        self.handler.handle_message("你好")
+        user_calls = [c for c in self.agent.add_turn.call_args_list
+                      if c.args and c.args[0] == "user"]
+        self.assertEqual(len(user_calls), 1)
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_message_agent1_assess_error_degrades(self, _mock):
+        """#146: Agent 1 assess() 抛异常时降级直走 Agent 3，不向外抛错。"""
+        self.handler._ensure_inner_drive()
+        self.handler._inner_drive.assess = MagicMock(
+            side_effect=RuntimeError("provider down"))
+        result = self.handler.handle_message("你好")
+        self.assertEqual(result, "Hello!")
+        self.agent._react_loop.assert_called_once()
+        self.assertEqual(self.handler.current_state, MessageHandlerState.DONE)
 
     def test_handle_message_sleeping(self):
         self.agent._sleeping = True
@@ -282,6 +303,60 @@ class TestMessageHandler(unittest.TestCase):
         # Must be fresh instances, not borrowed from the main registry
         self.assertIsNot(recall, self.agent._tool_registry.get("recall"))
         self.assertIsNot(remember, self.agent._tool_registry.get("remember"))
+
+    def test_internal_registry_cached(self):
+        """H-01: internal registry 缓存复用，不再每次新建。"""
+        self.assertIs(
+            self.handler._make_internal_registry(),
+            self.handler._make_internal_registry(),
+        )
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_run_agent3_first_round_uses_internal_registry(self, _mock):
+        """H-01: Agent 3 首轮（无 tool_records）也只能用 recall/remember，
+        不再回退到全量 registry。"""
+        from core.inner_drive import InnerDriveResult
+        drive_result = InnerDriveResult(
+            needs_external_tools=False, reasoning="闲聊", summary="")
+        self.handler._run_agent3("你好", drive_result, tool_result=None)
+        _, kwargs = self.agent._react_loop.call_args
+        registry = kwargs.get("tool_registry")
+        self.assertIsNotNone(registry)
+        specs = {s.name for s in registry.list_specs()}
+        self.assertEqual(specs, {"recall", "remember"})
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_run_agent3_with_tool_records_same_registry(self, _mock):
+        """H-01: 同一函数两轮能力一致——有 tool_records 时 registry 不变。"""
+        from core.inner_drive import InnerDriveResult
+        drive_result = InnerDriveResult(
+            needs_external_tools=True, reasoning="查过了", summary="")
+        self.handler._run_agent3(
+            "你好", drive_result, tool_result=None, tool_records="[工具结果]")
+        _, kwargs = self.agent._react_loop.call_args
+        specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
+        self.assertEqual(specs, {"recall", "remember"})
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_proactive_uses_internal_registry(self, _mock):
+        """H-01: proactive 轮同样收窄 registry；skip_post_process 不丢。"""
+        self.handler.handle_proactive()
+        _, kwargs = self.agent._react_loop.call_args
+        specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
+        self.assertEqual(specs, {"recall", "remember"})
+        self.assertTrue(kwargs.get("skip_post_process"))
+
+    @patch('prompts.system.build_system_prompt', return_value="mock prompt")
+    def test_handle_explore_uses_internal_registry(self, _mock):
+        """H-01: explore 轮同样收窄 registry；skip_post_process 不丢。"""
+        self.agent._react_loop.return_value = (
+            "我发现了一篇关于机器学习的有趣文章，内容非常有启发性值得大家阅读！"
+        )
+        self.handler.handle_explore()
+        _, kwargs = self.agent._react_loop.call_args
+        specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
+        self.assertEqual(specs, {"recall", "remember"})
+        self.assertTrue(kwargs.get("skip_post_process"))
 
 
 if __name__ == "__main__":

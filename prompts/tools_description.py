@@ -22,6 +22,22 @@ _TOOL_RULES: dict[str, str] = {
 }
 
 
+# Mapping from canonical tool name to the follow-up interpretation rule shown
+# in Agent 1's checklist: how to read a short user reply right after the tool
+# was used.  Lives next to _TOOL_RULES so tool names stay centralized here
+# instead of being hard-coded in prompts/instructions.py (#294 P2-4, M-06).
+_TOOL_FOLLOWUP_RULES: dict[str, str] = {
+    "music_play": "刚用过 music_play，用户说歌名/歌手/专辑/风格 → 播放它",
+    "read_file": "刚用过 read_file，用户说文件名/路径 → 再读一次",
+    "glob": "刚用过 glob，用户说文件名/模式 → 再找一次",
+    "grep": "刚用过 grep，用户说关键词 → 再搜一次",
+    "web_search": "刚用过 web_search，用户说关键词/地名 → 再搜索",
+    "web_fetch": "刚用过 web_fetch，用户说链接 → 再获取",
+    "notify": "刚用过 notify，用户说标题/内容/对象 → 再发一条通知",
+    "file_tree": "刚用过 file_tree，用户说目录名 → 再看目录结构",
+}
+
+
 # Mapping from canonical tool name to the intent alias used by Agent 3 when it
 # proactively proposes an external action.  Empty means "no proactive intent".
 _TOOL_INTENT_ALIASES: dict[str, str] = {
@@ -43,6 +59,18 @@ def format_tool_rules(registry: ToolRegistry | None) -> str:
         if rule:
             rules.append(f"  · {rule}")
     return "\n".join(rules)
+
+
+def format_tool_followup_rules(registry: ToolRegistry | None) -> str:
+    """Return checklist follow-up lines for tools present in registry (M-06)."""
+    if not registry:
+        return ""
+    present = {spec.name for spec in registry.list_specs()}
+    return "\n".join(
+        f"  · {rule}"
+        for tool_name, rule in _TOOL_FOLLOWUP_RULES.items()
+        if tool_name in present
+    )
 
 
 def format_intent_options(registry: ToolRegistry | None) -> str:

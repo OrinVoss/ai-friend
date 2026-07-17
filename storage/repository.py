@@ -28,6 +28,9 @@ class Repository:
                           fact_type: str = "user_fact",
                           embedding: Optional[bytes] = None) -> int:
         logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f} type={fact_type}")
+        # #217: 冲突更新时复活被软删的事实（deactivate_fact 会把 is_active/composite_score
+        # 清零，否则用户重新陈述同名事实也永久不可见）。composite_score 取 excluded 值——
+        # INSERT 列清单不含该列，excluded 即列默认值 1.0。
         async with self.db.cursor() as c:
             if embedding is not None:
                 await c.execute(f"""
@@ -40,6 +43,8 @@ class Repository:
                         confidence = MAX(user_facts.confidence, excluded.confidence),
                         importance = MAX(user_facts.importance, excluded.importance),
                         recall_count = user_facts.recall_count + 1,
+                        is_active = 1,
+                        composite_score = excluded.composite_score,
                         embedding = excluded.embedding,
                         embedding_version = {EMBEDDING_VERSION},
                         updated_at = CURRENT_TIMESTAMP
@@ -55,10 +60,41 @@ class Repository:
                         confidence = MAX(user_facts.confidence, excluded.confidence),
                         importance = MAX(user_facts.importance, excluded.importance),
                         recall_count = user_facts.recall_count + 1,
+                        is_active = 1,
+                        composite_score = excluded.composite_score,
                         updated_at = CURRENT_TIMESTAMP
                 """, (category, key, value, fact_type, confidence, importance, source_turn, self.session_id))
             await self.db.commit()
             return c.lastrowid
+
+    async def store_facts_bulk(self, facts: list[dict]) -> int:
+        """#161: 单 cursor 单事务批量 upsert（末尾一次 commit），消除 _extract_facts
+        的 N+1 写入。SQL 与 upsert_fact 非 embedding 分支一致（含 #217 复活语义）；
+        consolidation 新提取的事实不带向量，embedding 由 _embed_new_items 统一回写。
+        facts 元素键：category/key/value 必填，confidence/importance/fact_type/source_turn 可选。"""
+        if not facts:
+            return 0
+        logger.info(f"[db] store_facts_bulk: {len(facts)} facts")
+        async with self.db.cursor() as c:
+            for f in facts:
+                await c.execute("""
+                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
+                                           source_turn, session_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
+                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
+                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
+                        confidence = MAX(user_facts.confidence, excluded.confidence),
+                        importance = MAX(user_facts.importance, excluded.importance),
+                        recall_count = user_facts.recall_count + 1,
+                        is_active = 1,
+                        composite_score = excluded.composite_score,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (f["category"], f["key"], f["value"], f.get("fact_type", "user_fact"),
+                      f.get("confidence", 1.0), f.get("importance", 0.5),
+                      f.get("source_turn"), self.session_id))
+            await self.db.commit()
+            return len(facts)
 
     async def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
         logger.debug(f"[db] search_facts: query='{query[:40]}' limit={limit}")
@@ -250,10 +286,14 @@ class Repository:
         if not updates:
             return
         async with self.db.cursor() as c:
+            # H-08: 按 session 隔离批量回写，避免串改其他会话的行
             await c.executemany(
-                f"UPDATE {table} SET embedding = ?, embedding_version = {EMBEDDING_VERSION} WHERE id = ?",
-                [(emb, rid) for rid, emb in updates],
+                f"UPDATE {table} SET embedding = ?, embedding_version = {EMBEDDING_VERSION}"
+                " WHERE id = ? AND session_id = ?",
+                [(emb, rid, self.session_id) for rid, emb in updates],
             )
+            # H-02: executemany 不会自动提交，显式 commit（与同文件其他写方法一致）
+            await self.db.commit()
             logger.debug(f"[db] bulk_embed: updated {len(updates)} rows in {table}")
 
     # ── Observations (Layer 1 Memory lifecycle) ──
@@ -592,6 +632,8 @@ class Repository:
             return c.rowcount
 
     async def prune_reflections(self, max_count: int) -> int:
+        # #217 已知限制：被软删（is_active=0）的反思目前没有任何读取路径
+        # （所有查询都过滤 is_active=1），等同于永久不可见；仅记录，不改行为。
         async with self.db.cursor() as c:
             await c.execute("SELECT COUNT(*) FROM reflections WHERE is_active = 1 AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
@@ -646,6 +688,8 @@ class Repository:
             related_experience_ids=json.loads(r["related_experience_ids"])
             if r["related_experience_ids"] else [],
             significance=r["significance"], created_at=r["created_at"],
+            embedding=r["embedding"] if "embedding" in r.keys() else None,
+            embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
         )
 
     def _row_to_observation(self, r) -> Observation:

@@ -2,7 +2,7 @@
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from core.inner_drive import ProactiveIntent
 
@@ -66,7 +66,8 @@ class TestAgentProactive(unittest.TestCase):
         intent = self.agent.decide_proactive_action(300)
         self.assertEqual(intent.action, "chat")
         self.assertEqual(intent.topic_hint, "旅行")
-        mock_inner.assess_proactive.assert_called_once_with(300)
+        # #177: Agent 把 ProactivityManager 的近期话题传给 inner drive
+        mock_inner.assess_proactive.assert_called_once_with(300, recent_topics=ANY)
 
     def test_decide_proactive_action_silent(self):
         """inner drive may choose silent."""

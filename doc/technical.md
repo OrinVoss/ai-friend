@@ -1232,3 +1232,5 @@ ASCII 字母: ÷ 4
 数字: ÷ 3
 其他: ÷ 8
 ```
+
+注意：cl100k_base 与 DeepSeek 实际 tokenizer 存在约 15–30% 误差，属已知限制（M-14）。DeepSeek 没有对应的 tiktoken 编码，替换需引入 HuggingFace tokenizers 新依赖，暂不处理。

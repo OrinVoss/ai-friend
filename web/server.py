@@ -29,12 +29,15 @@ rate_limiter = RateLimiter()
 _ws_connections: list[dict] = []  # #158: track active WebSocket connections for rate limiting
 
 
-def ensure_session():
-    """Synchronous guard — call before first request if lifespan didn't run."""
+async def ensure_session():
+    """L-04: async guard — lifespan 未执行时的兜底初始化。
+
+    旧实现是 sync 函数里 asyncio.run()，但调用方全是 async 端点，
+    在运行中的 loop 上调用 asyncio.run 必抛 RuntimeError。
+    """
     if session_manager.db is None:
-        logger.warning("[server] lifespan missed, synchronously opening session manager")
-        import asyncio
-        asyncio.run(session_manager.open())
+        logger.warning("[server] lifespan missed, opening session manager")
+        await session_manager.open()
 
 
 # WS-028: Content-Security-Policy — restrict fetch/script origins to block inline
@@ -129,7 +132,7 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 
 @app.get("/")
 async def index():
-    ensure_session()
+    await ensure_session()
     from fastapi.responses import FileResponse
     return FileResponse("web/static/index.html")
 
@@ -144,10 +147,13 @@ async def favicon():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_api(req: ChatRequest):
-    ensure_session()
+    await ensure_session()
     logger.info(f"[rest] chat session={req.session_id} len={len(req.message)}")
     _, agent = session_manager.get_or_create(req.session_id)
-    response = agent.process_message(req.message)
+    # M-16: process_message 内部是同步流式 HTTP，放 executor 跑，
+    # 避免阻塞事件循环（与 WS 路径 :423 一致）
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, agent.process_message, req.message)
     logger.info(f"[rest] chat_done session={req.session_id} turn={agent.turn_count} emotion={agent.emotion} resp_len={len(response)}")
     return ChatResponse(
         response=response,
@@ -160,6 +166,7 @@ async def chat_api(req: ChatRequest):
 @app.get("/api/status", response_model=StatusResponse)
 async def status_api(session_id: str = "default"):
     """Return relationship metrics + history (#132)."""
+    await ensure_session()
     logger.info(f"[rest] status session={session_id}")
     _, agent = session_manager.get_or_create(session_id)
     raw_rel = agent.agent.ltm.get_relationship()
@@ -217,7 +224,7 @@ async def status_api(session_id: str = "default"):
 @app.get("/api/roles")
 async def roles_api():
     """List available roles from personalities/*.json."""
-    ensure_session()
+    await ensure_session()
     logger.info("[rest] roles")
     roles = []
     for path in sorted(glob.glob("personalities/*.json")):
@@ -235,7 +242,7 @@ async def roles_api():
 @app.get("/api/sessions")
 async def sessions_api(role_id: str):
     """Return session IDs previously created for a given role."""
-    ensure_session()
+    await ensure_session()
     logger.info(f"[rest] sessions role={role_id}")
     sessions = await session_manager.repo.get_sessions_by_role(role_id)
     return {"role_id": role_id, "sessions": sessions}
@@ -244,6 +251,7 @@ async def sessions_api(role_id: str):
 @app.get("/api/chat/history", response_model=HistoryResponse)
 async def chat_history_api(session_id: str = "default"):
     """Return recent conversation turns for UI display on reconnect."""
+    await ensure_session()
     logger.info(f"[rest] history session={session_id}")
     _, agent = session_manager.get_or_create(session_id)
     turns = []
@@ -439,4 +447,9 @@ async def websocket_endpoint(websocket: WebSocket):
         # #158: remove from connection tracking
         _ws_connections[:] = [c for c in _ws_connections if c.get("ws") is not websocket]
         if session_id:
-            session_manager.remove(session_id)
+            # M-12: 多 tab 归属判断 — 仅当断开的是当前活跃连接才清除归属并
+            # 安排延迟销毁（旧 tab 的 finally 不能销毁新 tab 正在用的 session）；
+            # 宽限期内刷新/重连可复用内存状态（限速、tool_call_history 等）
+            if session_manager.get_active_ws(session_id) is websocket:
+                session_manager.unregister_ws(session_id, websocket)
+                session_manager.schedule_remove(session_id)

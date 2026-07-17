@@ -115,6 +115,70 @@ class TestMemoryAgentIntegration(unittest.TestCase):
         self.assertEqual(IDA._format_memory_answer(MemoryAnswer(answer="", confidence=0.0)), "")
 
 
+class TestReviewReDecideMemoryAgent(unittest.TestCase):
+    """M-04: review/re_decide/assess_proactive 同样尊重 use_memory_agent 开关。"""
+
+    def test_review_uses_memory_agent_when_enabled(self):
+        ma = MagicMock()
+        ma.answer = AsyncMock(return_value=_ma_answer())
+        drive, provider, retriever = _make_drive(memory_agent=ma)
+
+        result = drive.review("查一下披萨", "[工具结果]", round_num=1, max_rounds=3)
+
+        ma.answer.assert_awaited_once_with("查一下披萨")
+        retriever.retrieve_for_query.assert_not_called()
+        # review 路径不填 context_summary（避免改变 Agent 3 prompt 组成）
+        self.assertEqual(result.context_summary, "")
+        # Agent 1 的 prompt 携带 MA 摘要
+        messages = provider.generate.call_args.args[0]
+        self.assertIn("披萨", messages[0]["content"])
+
+    def test_review_uses_retriever_when_disabled(self):
+        drive, _, retriever = _make_drive(memory_agent=None)
+
+        drive.review("查一下披萨", "[工具结果]", round_num=1, max_rounds=3)
+
+        retriever.retrieve_for_query.assert_called_once_with("查一下披萨")
+
+    def test_re_decide_uses_memory_agent_when_enabled(self):
+        ma = MagicMock()
+        ma.answer = AsyncMock(return_value=_ma_answer())
+        drive, _, retriever = _make_drive(memory_agent=ma)
+
+        drive.re_decide("查一下披萨", [{"name": "web_fetch", "output": "超时"}])
+
+        ma.answer.assert_awaited_once_with("查一下披萨")
+        retriever.retrieve_for_query.assert_not_called()
+
+    def test_re_decide_uses_retriever_when_disabled(self):
+        drive, _, retriever = _make_drive(memory_agent=None)
+
+        drive.re_decide("查一下披萨", [{"name": "web_fetch", "output": "超时"}])
+
+        retriever.retrieve_for_query.assert_called_once_with("查一下披萨")
+
+    def test_assess_proactive_uses_memory_agent_when_enabled(self):
+        ma = MagicMock()
+        ma.answer = AsyncMock(return_value=_ma_answer())
+        drive, provider, retriever = _make_drive(memory_agent=ma)
+        provider.generate.return_value = "决策：沉默\n理由：测试"
+
+        drive.assess_proactive(300)
+
+        ma.answer.assert_awaited_once_with("")
+        retriever.retrieve_for_query.assert_not_called()
+        messages = provider.generate.call_args.args[0]
+        self.assertIn("披萨", messages[0]["content"])
+
+    def test_assess_proactive_uses_retriever_when_disabled(self):
+        drive, provider, retriever = _make_drive(memory_agent=None)
+        provider.generate.return_value = "决策：沉默\n理由：测试"
+
+        drive.assess_proactive(300)
+
+        retriever.retrieve_for_query.assert_called_once_with("")
+
+
 class TestMessageHandlerWiring(unittest.TestCase):
     def _handler(self, use_memory_agent):
         from core.message_handler import MessageHandler

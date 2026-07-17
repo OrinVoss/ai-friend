@@ -23,7 +23,8 @@ def run_async(coro, timeout: float = 60.0):
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        # #263: 无循环分支同样应用 timeout，wait_for 超时会掐断协程
+        return asyncio.run(asyncio.wait_for(coro, timeout))
 
     # Already inside an event loop — use a thread to run the coroutine
     future = _EXECUTOR.submit(asyncio.run, coro)
@@ -31,6 +32,8 @@ def run_async(coro, timeout: float = 60.0):
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         # AU-002: cancel future on timeout
+        # #263: cancel() 对已在运行的线程是 no-op —— 协程仍在后台继续执行，
+        # 超时只是放弃等待其结果，并不会终止协程本身。
         future.cancel()
         logger.error(f"[async] coroutine timed out after {timeout}s")
         raise

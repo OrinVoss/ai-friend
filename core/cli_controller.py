@@ -143,6 +143,77 @@ class CliController:
             a.ui.display.print_system(f"未知命令: {cmd}")
 
 
+class _StreamTagFilter:
+    """M-15: 流式标签过滤器——迭代 0 逐 token 流式期间，<think>/<tool_call>
+    块会原样泄到终端（剥离发生在完整响应返回后）。标签可能跨 chunk
+    （"<tool" + "_call>"），所以缓冲未确定内容：确认是普通文本才放行，
+    识别到完整开标签后进入抑制状态直到对应闭标签。"""
+
+    _TAGS = {"<think>": "</think>", "<tool_call>": "</tool_call>"}
+
+    def __init__(self):
+        self._buf = ""
+        self._close = None  # 抑制状态下等待的闭标签；None 表示正常状态
+
+    def feed(self, token: str) -> str:
+        """喂入一个 chunk，返回当前可安全输出的文本（标签内容被抑制）。"""
+        self._buf += token
+        out = []
+        while self._buf:
+            if self._close is not None:
+                idx = self._buf.find(self._close)
+                if idx >= 0:
+                    # 丢弃到闭标签结尾，回到正常状态
+                    self._buf = self._buf[idx + len(self._close):]
+                    self._close = None
+                    continue
+                # 闭标签未到：只保留可能是闭标签前缀的尾巴，其余抑制内容丢弃
+                keep = self._partial_suffix_len(self._buf, self._close)
+                self._buf = self._buf[len(self._buf) - keep:] if keep else ""
+                break
+            lt = self._buf.find("<")
+            if lt < 0:
+                out.append(self._buf)
+                self._buf = ""
+                break
+            out.append(self._buf[:lt])
+            rest = self._buf[lt:]
+            matched = None
+            pending = False
+            for tag, close in self._TAGS.items():
+                if rest.startswith(tag):
+                    matched = (tag, close)
+                    break
+                if tag.startswith(rest):
+                    pending = True  # 可能是跨 chunk 的标签前缀，等后续再判定
+            if matched is not None:
+                tag, self._close = matched
+                self._buf = rest[len(tag):]
+                continue
+            if pending:
+                self._buf = rest
+                break
+            # 确定不是目标标签：'<' 本身是普通字符
+            out.append("<")
+            self._buf = rest[1:]
+        return "".join(out)
+
+    def flush(self) -> str:
+        """流结束：返回残余缓冲中的非标签内容；抑制状态下的内容（标签未闭合）丢弃。"""
+        text = "" if self._close is not None else self._buf
+        self._buf = ""
+        self._close = None
+        return text
+
+    @staticmethod
+    def _partial_suffix_len(s: str, tag: str) -> int:
+        """s 的结尾中最长能作为 tag 前缀的长度（用于跨 chunk 闭标签）。"""
+        for n in range(min(len(s), len(tag) - 1), 0, -1):
+            if tag.startswith(s[-n:]):
+                return n
+        return 0
+
+
 class _CliFrontend(Frontend):
     """Terminal frontend: typewriter streaming with a lazy name prefix.
 
@@ -154,18 +225,29 @@ class _CliFrontend(Frontend):
         self._ui = ui
         self._name = name
         self._streamed = False
+        self._filter = _StreamTagFilter()  # M-15: 抑制流式期间的 XML 标签
 
     def on_token(self, token: str) -> None:
         if not token:
             return
+        text = self._filter.feed(token)
+        if text:
+            self._emit(text)
+
+    def _emit(self, text: str) -> None:
+        # 名字前缀惰性打印：第一个可见文本到达时才出前缀，
+        # 纯标签流（如整段 <tool_call>）不会留下裸前缀
         if not self._streamed and self._ui:
             print("\r", end="", flush=True)
             print(f"\033[1;36m{self._name}:\033[0m ", end="", flush=True)
         self._streamed = True
         if self._ui:
-            print(token, end="", flush=True)
+            print(text, end="", flush=True)
 
     def on_message_done(self, text: str) -> None:
+        rest = self._filter.flush()
+        if rest:
+            self._emit(rest)
         if self._streamed:
             print()
         elif self._ui and text:

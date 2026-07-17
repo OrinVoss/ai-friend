@@ -27,6 +27,9 @@ class LongTermMemory:
         return await self.repo.upsert_fact(category, key, value, confidence, source_turn,
                                           importance, fact_type, embedding)
 
+    async def _store_facts_bulk(self, facts: list[dict]) -> int:
+        return await self.repo.store_facts_bulk(facts)
+
     async def _search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
         return await self.repo.search_facts(query, limit)
 
@@ -100,6 +103,7 @@ class LongTermMemory:
     # ── Sync wrappers ──
 
     def store_fact(self, *a, **kw): return run_async(self._store_fact(*a, **kw))  # #193: single definition
+    def store_facts_bulk(self, *a, **kw): return run_async(self._store_facts_bulk(*a, **kw))  # #161
     def search_facts(self, *a, **kw): return run_async(self._search_facts(*a, **kw))
     def get_all_active_facts(self, *a, **kw): return run_async(self._get_all_active_facts(*a, **kw))
     def store_experience(self, *a, **kw): return run_async(self._store_experience(*a, **kw))

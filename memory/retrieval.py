@@ -32,11 +32,11 @@ class MemoryRetriever:
         # Layer 1: hot memory (always included)
         hot_facts = self.ltm.get_all_active_facts(limit=50)
         recent_experiences = self.ltm.get_recent_experiences(limit=5)
-        reflections = self.ltm.get_recent_reflections(limit=3)
+        reflections = self.search_reflections(query, limit=3)  # #251: 有 query 按相关度，空则按时间
         relationship = self.ltm.get_relationship()
 
         # Layer 2: hybrid or keyword scoring
-        keywords = self._extract_keywords(query)
+        keywords = self.extract_keywords(query)
         embed_ok = self._embed and self._embed.health_check()  # RT-003: cache result
         # RT-006: encode the query exactly once and thread the vector through
         # both the fact and experience scorers instead of re-encoding per call.
@@ -89,10 +89,10 @@ class MemoryRetriever:
         if not m:
             return None
         query = m.group(1).strip()
-        keywords = self._extract_keywords(query)
+        keywords = self.extract_keywords(query)
         facts = self.ltm.search_facts(query, limit=5)
         experiences = self.ltm.search_experiences(keywords, limit=3)
-        reflections = self.ltm.get_recent_reflections(limit=2)
+        reflections = self.search_reflections(query, limit=2)  # #251: 按相关度检索
 
         parts = []
         if facts:
@@ -112,6 +112,44 @@ class MemoryRetriever:
         if result and len(result) > 2000:
             result = result[:2000] + "\n...[省略更多回忆]"
         return result
+
+    def search_reflections(self, query: str, limit: int = 3) -> list:
+        """#251: 按相关度检索反思（此前无论 query 只按时间取最近 N 条）。
+        候选池取最近 30 条：有 embedding 走混合评分（语义 0.6 + 关键词 0.4，
+        同 _hybrid_score），无则关键词评分；query 为空回退为按时间取最近。"""
+        if not query.strip():
+            return self.ltm.get_recent_reflections(limit=limit)
+        keywords = self.extract_keywords(query)
+        candidates = self.ltm.get_recent_reflections(limit=30)
+        if not candidates:
+            return []
+        query_vec = None
+        if self._embed and self._embed.health_check():
+            try:
+                query_vec = self._embed.encode_single(query)
+            except Exception as e:
+                logger.warning(f"[retrieval] reflection query encode failed, keyword fallback: {e}")
+        scored = [(r, self._reflection_score(r, keywords, query_vec)) for r in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [r for r, _ in scored[:limit]]
+
+    def _reflection_score(self, r, keywords: list[str], query_vec=None) -> float:
+        """#251: 单条反思评分 —— 语义 0.6 + 关键词 0.4（混合模式同 _hybrid_score）。
+        无向量（或未编码/版本过旧）时语义项为 0，退化为关键词评分。"""
+        semantic = 0.0
+        if query_vec is not None and getattr(r, "embedding", None) is not None:
+            if getattr(r, "embedding_version", 0) == EMBEDDING_VERSION:
+                try:
+                    from memory.embeddings import EmbeddingEngine
+                    vec = EmbeddingEngine.bytes_to_vec(bytes(r.embedding), dim=len(query_vec))
+                    semantic = float(np.dot(vec, query_vec))
+                except Exception as e:
+                    logger.debug(f"[retrieval] reflection embedding unusable "
+                                 f"(id={getattr(r, 'id', '?')}): {e}")
+        content = r.content.lower()
+        keyword_hits = sum(1 for kw in keywords if kw in content)
+        keyword = keyword_hits * 0.2 + r.significance * 0.1
+        return semantic * 0.6 + keyword * 0.4
 
     def check_recall_tag(self, response_text: str) -> Optional[str]:
         """Check if AI response contains [回忆:] and return query."""
@@ -236,7 +274,7 @@ class MemoryRetriever:
         return max(0, score)
 
     @staticmethod
-    def _extract_keywords(text: str) -> list[str]:
+    def extract_keywords(text: str) -> list[str]:
         words = re.findall(r'[\w一-鿿]+', text.lower())
         stopwords = {
             "的", "了", "在", "是", "我", "你", "他", "她", "它",
@@ -247,6 +285,9 @@ class MemoryRetriever:
             "do", "does", "did", "have", "has", "had",
         }
         return [w for w in words if w not in stopwords and len(w) > 1]
+
+    # #251: 公共化为 extract_keywords；保留私有别名兼容既有调用/测试
+    _extract_keywords = extract_keywords
 
     @staticmethod
     def _score_facts(facts: list[UserFact], keywords: list[str],

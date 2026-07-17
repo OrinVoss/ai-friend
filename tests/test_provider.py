@@ -3,7 +3,10 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from requests.exceptions import ConnectionError as ReqConnectionError, HTTPError, ChunkedEncodingError, StreamConsumedError
+from requests.exceptions import (
+    ConnectionError as ReqConnectionError, HTTPError, ChunkedEncodingError,
+    StreamConsumedError, ReadTimeout,
+)
 
 
 class TestProviderRetry(unittest.TestCase):
@@ -197,6 +200,111 @@ class TestProviderRetry(unittest.TestCase):
         payload = call_args[1]["json"]
         self.assertIn("response_format", payload)
         self.assertEqual(payload["response_format"], rf)
+
+    @patch('requests.Session.post')
+    def test_stream_done_break_closes_response(self, mock_post):
+        # #213: [DONE] 提前 break（响应未读完）后必须 close，连接归还连接池
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_lines.return_value = [
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+            'data: [DONE]',
+            'data: {"choices":[{"delta":{"content":"unread"}}]}',  # 不会被消费
+        ]
+        mock_post.return_value = mock_resp
+
+        result = self.provider.generate([{"role": "user", "content": "hi"}], stream=True)
+        self.assertEqual(result, "Hello")
+        mock_resp.close.assert_called_once()
+
+    @patch('requests.Session.post')
+    def test_stream_truncation_break_closes_response(self, mock_post):
+        # #213: 1MB 截断提前 break 后同样 close
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        big_token = "a" * 1_100_000
+        mock_resp.iter_lines.return_value = [
+            f'data: {{"choices":[{{"delta":{{"content":"{big_token}"}}}}]}}',
+            'data: [DONE]',
+        ]
+        mock_post.return_value = mock_resp
+
+        result = self.provider.generate([{"role": "user", "content": "hi"}], stream=True)
+        self.assertEqual(len(result), 1_100_000)
+        mock_resp.close.assert_called_once()
+
+    @patch('requests.Session.post')
+    def test_non_stream_closes_response(self, mock_post):
+        # #213: 非流式分支也显式 close
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {},
+        }
+        mock_post.return_value = mock_resp
+
+        result = self.provider.generate([{"role": "user", "content": "hi"}], stream=False)
+        self.assertEqual(result, "ok")
+        mock_resp.close.assert_called_once()
+
+    @patch('requests.Session.post')
+    def test_endpoint_trailing_v1_normalized(self, mock_post):
+        # #261: endpoint 以 /v1 结尾时归一化，不拼出 /v1/v1/...
+        # （setUp 中 endpoint 为 "https://test.api/v1"）
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {},
+        }
+        mock_post.return_value = mock_resp
+
+        self.provider.generate([{"role": "user", "content": "hi"}], stream=False)
+        url = mock_post.call_args[0][0]
+        self.assertEqual(url, "https://test.api/v1/chat/completions")
+
+    @patch('requests.Session.post')
+    def test_endpoint_without_v1_unchanged(self, mock_post):
+        # #261: 普通 endpoint 行为不变
+        from core.provider import DeepSeekProvider
+        p = DeepSeekProvider(
+            endpoint="https://test.api/", api_key="sk-test",
+            model="test-model", timeout=5,
+        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {},
+        }
+        mock_post.return_value = mock_resp
+
+        p.generate([{"role": "user", "content": "hi"}], stream=False)
+        url = mock_post.call_args[0][0]
+        self.assertEqual(url, "https://test.api/v1/chat/completions")
+
+    @patch('requests.Session.post')
+    def test_retry_on_read_timeout(self, mock_post):
+        # #213: ReadTimeout 纳入重试链，不再绕过三次重试直接外抛
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise ReadTimeout("read timed out")
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {
+                "choices": [{"message": {"content": "retry ok"}}],
+                "usage": {},
+            }
+            return mock_resp
+
+        mock_post.side_effect = side_effect
+        result = self.provider.generate([{"role": "user", "content": "hi"}], stream=False)
+        self.assertEqual(result, "retry ok")
+        self.assertEqual(call_count[0], 2)
 
 
 if __name__ == "__main__":

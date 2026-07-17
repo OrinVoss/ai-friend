@@ -30,6 +30,12 @@ def _validate(cfg: "Config") -> None:
     if cfg.conversation_examples_max_turns < 0:
         messages.append(f"conversation_examples_max_turns {cfg.conversation_examples_max_turns} < 0, clamped to 3")
         cfg.conversation_examples_max_turns = 3
+    if cfg.degrade_threshold < 1:
+        messages.append(f"degrade_threshold {cfg.degrade_threshold} < 1, clamped to 3")
+        cfg.degrade_threshold = 3
+    if cfg.max_fake_actions < 0:
+        messages.append(f"max_fake_actions {cfg.max_fake_actions} < 0, clamped to 3")
+        cfg.max_fake_actions = 3
     for msg in messages:
         logger.warning(f"[config] validation: {msg}")
 
@@ -55,6 +61,8 @@ class Config:
     max_experiences: int = 100
     max_reflections: int = 50
     max_tool_iterations: int = 5  # #152: ReAct loop max tool call iterations
+    degrade_threshold: int = 3    # #255: consecutive tool failures before degrading
+    max_fake_actions: int = 3     # #255: max fake action corrections
     web_host: str = "0.0.0.0"
     web_port: int = 8000
     log_level: str = "INFO"
@@ -151,6 +159,8 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         "AI_FRIEND_TEMPERATURE": "temperature",
         "AI_FRIEND_MAX_TOKENS": "max_tokens",
         "AI_FRIEND_MAX_TOOL_ITERATIONS": "max_tool_iterations",
+        "AI_FRIEND_DEGRADE_THRESHOLD": "degrade_threshold",
+        "AI_FRIEND_MAX_FAKE_ACTIONS": "max_fake_actions",
         "AI_FRIEND_TIMEOUT": "api_timeout",
         "AI_FRIEND_TYPING_SPEED": "typing_speed",
         "AI_FRIEND_WEB_HOST": "web_host",

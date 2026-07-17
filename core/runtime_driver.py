@@ -93,6 +93,10 @@ class RuntimeDriver:
                 score = engine.calculate_proactivity(idle)
                 if random.random() < score:
                     intent = await self._run_blocking(engine.decide_proactive_action, idle)
+                    # #177: LLM 主路径的话题同样记入去重队列，
+                    # 与 fallback 的 pick_proactive_topic 行为对齐
+                    if intent.topic_hint:
+                        engine.record_topic(intent.topic_hint)
                     response = None
                     if intent.action == "explore" and engine.check_rate_limit("explore"):
                         response = await self._run_blocking(partial(engine.handle_explore, intent=intent))

@@ -17,7 +17,11 @@ from prompts.instructions import (
     TOOL_AGENT_OUTPUT_FORMAT,
     TOOL_AGENT_RULES,
 )
-from prompts.tools_description import format_intent_options, format_tool_rules
+from prompts.tools_description import (
+    format_intent_options,
+    format_tool_followup_rules,
+    format_tool_rules,
+)
 from models.conversation import MemoryContext
 from models.personality import PersonalityConfig, EmotionalState
 
@@ -88,14 +92,10 @@ def _build_inner_identity_block(personality: PersonalityConfig) -> str:
     )
 
 
-def _build_inner_emotion_block(
-    emotion_summary: dict | None = None,
-    emotion: EmotionalState | None = None,
-) -> str:
-    if emotion_summary is None:
-        if emotion is None:
-            raise ValueError("emotion or emotion_summary required")
-        emotion_summary = emotion.to_prompt_summary()
+def _build_inner_emotion_block(emotion: EmotionalState) -> str:
+    # M-07: 统一读活 EmotionalState，摘要由 block 内部现取，
+    # 不再接收调用方预冻结的 emotion_summary（消除双路径发散）
+    emotion_summary = emotion.to_prompt_summary()
     return (
         f"你现在的情绪：{emotion_summary['dominant_emotion']}"
         f"（效价 {emotion_summary['valence']:+.2f}，唤醒度 {emotion_summary['arousal']:.2f}）"
@@ -125,14 +125,21 @@ def _build_inner_memory_block(memory_context: MemoryContext) -> str:
 def _build_inner_drive_instructions_block(
     personality: PersonalityConfig,
     tools=None,
+    rule_tools=None,
 ) -> str:
     # Tool rules are derived from the live registry so prompt never hard-codes
     # tool names except in the central tools_description mapping (#294 P2-4).
-    tool_rules = format_tool_rules(tools)
+    # M-06: Agent 1 的执行 registry 只有 recall/remember，规则与清单的数据源
+    # 单独用 rule_tools（全量 registry）；缺省回退 tools 保持兼容。
+    rules_source = rule_tools if rule_tools is not None else tools
+    tool_rules = format_tool_rules(rules_source)
+    followup_rules = format_tool_followup_rules(rules_source)
     return (
         INNER_DRIVE_INTRO.format(name=personality.name)
         + "\n\n"
-        + INNER_DRIVE_CHECKLIST
+        + INNER_DRIVE_CHECKLIST.format(
+            followup_rules=followup_rules or "  · 刚用过某个工具，用户给出相关补充 → 针对它再操作"
+        )
         + "\n\n"
         + INNER_DRIVE_DECISION_PRINCIPLES
         + "\n\n"
@@ -173,7 +180,6 @@ def build_inner_drive_prompt(
     emotion: EmotionalState,
     memory_context: MemoryContext | None,
     conversation_history: str,
-    emotion_summary: dict | None = None,
     tools=None,
     tool_call_history: list | None = None,
     session_id: str | None = None,
@@ -181,6 +187,7 @@ def build_inner_drive_prompt(
     personality_file: str | None = None,
     prompt_cache_ttl: float = 60.0,
     memory_context_summary: str = "",
+    rule_tools=None,
 ) -> str:
     """Agent 1: Inner drive reasoning prompt -- assess what the AI needs to do.
 
@@ -192,6 +199,9 @@ def build_inner_drive_prompt(
     When `memory_context_summary` is provided (e.g. from MemoryAgent), the
     two slow blocks are replaced by the pre-formatted summary and
     `memory_context` may be None.
+
+    `rule_tools` is the registry used to derive tool rules/checklist lines
+    (M-06: Agent 1 判断外部工具需求需要看到全量规则)；defaults to `tools`.
     """
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -207,7 +217,7 @@ def build_inner_drive_prompt(
         )
     )
 
-    blocks.append(_build_inner_emotion_block(emotion_summary=emotion_summary, emotion=emotion))
+    blocks.append(_build_inner_emotion_block(emotion))
 
     if memory_context_summary:
         blocks.append(memory_context_summary)
@@ -231,7 +241,8 @@ def build_inner_drive_prompt(
     blocks.append(
         _cache(
             prompt_cache, session_id, pfile, STATIC_INNER_DRIVE_INSTRUCTIONS,
-            lambda: _build_inner_drive_instructions_block(personality, tools=tools),
+            lambda: _build_inner_drive_instructions_block(
+                personality, tools=tools, rule_tools=rule_tools),
             ttl=None,
         )
     )
@@ -264,18 +275,21 @@ def build_inner_drive_proactive_prompt(
     conversation_history: str,
     idle_duration: float,
     current_time,
-    emotion_summary: dict | None = None,
+    memory_context_summary: str = "",
+    recent_topics: list | None = None,
 ) -> str:
     """Agent 1: Proactive engagement decision prompt.
 
     Single-turn prompt asking the inner drive LLM to decide whether to
     chat, explore, or stay silent. Receives all the context the hardcoded
     ProactivityManager scoring uses so the LLM can make nuanced decisions.
+
+    When `memory_context_summary` is provided (e.g. from MemoryAgent), the
+    relationship/facts/experiences blocks are replaced by the pre-formatted
+    summary and `memory_context` may be None (M-04).
     """
-    if emotion_summary is None:
-        if emotion is None:
-            raise ValueError("emotion or emotion_summary required")
-        emotion_summary = emotion.to_prompt_summary()
+    # M-07: 摘要内部现取，不收外部预冻结的 emotion_summary（同 _build_inner_emotion_block）
+    emotion_summary = emotion.to_prompt_summary()
 
     now_str = current_time.strftime("%Y-%m-%d %H:%M %A")
     blocks = []
@@ -296,22 +310,32 @@ def build_inner_drive_proactive_prompt(
         f"（效价 {emotion_summary['valence']:+.2f}，唤醒度 {emotion_summary['arousal']:.2f}）"
     )
 
-    rel = memory_context.relationship
-    blocks.append(
-        f"关系：信任 {rel.get('trust',0.3):.1f}，"
-        f"熟悉度 {rel.get('familiarity',0.3):.1f}，"
-        f"亲密 {rel.get('intimacy',0.3):.1f}"
-    )
+    if memory_context_summary:
+        blocks.append(memory_context_summary)
+    else:
+        rel = memory_context.relationship
+        blocks.append(
+            f"关系：信任 {rel.get('trust',0.3):.1f}，"
+            f"熟悉度 {rel.get('familiarity',0.3):.1f}，"
+            f"亲密 {rel.get('intimacy',0.3):.1f}"
+        )
 
-    if memory_context.facts:
-        blocks.append("=== 用户信息 ===")
-        for f in memory_context.facts[:5]:
-            blocks.append(f"- {f.fact_key}: {f.fact_value}")
+        if memory_context.facts:
+            blocks.append("=== 用户信息 ===")
+            for f in memory_context.facts[:5]:
+                blocks.append(f"- {f.fact_key}: {f.fact_value}")
 
-    if memory_context.experiences:
-        blocks.append("=== 共同回忆 ===")
-        for exp in memory_context.experiences[:3]:
-            blocks.append(f"- [{exp.emotional_tone}] {exp.summary}")
+        if memory_context.experiences:
+            blocks.append("=== 共同回忆 ===")
+            for exp in memory_context.experiences[:3]:
+                blocks.append(f"- [{exp.emotional_tone}] {exp.summary}")
+
+    # #177: 告知 LLM 近期已聊话题，避免重复开启相同话题
+    if recent_topics:
+        blocks.append(
+            "=== 最近聊过的话题（请避开，不要重复）===\n"
+            + "\n".join(f"- {t}" for t in recent_topics)
+        )
 
     blocks.append(
         "=== 主动互动决策 ===\n"
@@ -411,17 +435,11 @@ def _build_examples_block(
     )
 
 
-def _build_emotion_block(
-    emotion_summary: dict | None = None,
-    emotion: EmotionalState | None = None,
-) -> str:
+def _build_emotion_block(emotion: EmotionalState) -> str:
     # Formatting logic has moved to EmotionalState.to_prompt_summary() so the
-    # prompt builder receives a lightweight summary instead of raw dimensions.
-    if emotion_summary is None:
-        if emotion is None:
-            raise ValueError("emotion or emotion_summary required")
-        emotion_summary = emotion.to_prompt_summary()
-    s = emotion_summary
+    # prompt builder renders a lightweight summary instead of raw dimensions.
+    # M-07: 统一读活 EmotionalState，摘要内部现取，消除双路径发散。
+    s = emotion.to_prompt_summary()
     return (
         f"""=== 你现在啥状态 ===
 {s['mood']}{s['primary_hint']}，{s['valence_desc']}、{s['arousal_desc']}的那种。
@@ -635,7 +653,6 @@ def build_system_prompt(
     personality_file: str | None = None,
     prompt_cache_ttl: float = 60.0,
     memory_context_summary: str = "",
-    emotion_summary: dict | None = None,
 ) -> str:
     """Agent 3 / proactive / explore system prompt.
 
@@ -673,7 +690,7 @@ def build_system_prompt(
         blocks.append(examples_block)
 
     # Dynamic: Current Emotional State + resentment + recent events
-    blocks.append(_build_emotion_block(emotion_summary=emotion_summary, emotion=emotion))
+    blocks.append(_build_emotion_block(emotion))
     resentment_block = _build_resentment_block(emotion)
     if resentment_block:
         blocks.append(resentment_block)

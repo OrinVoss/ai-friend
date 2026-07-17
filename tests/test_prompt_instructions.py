@@ -3,7 +3,11 @@ import unittest
 from unittest.mock import MagicMock
 
 from prompts import instructions
-from prompts.tools_description import format_intent_options, format_tool_rules
+from prompts.tools_description import (
+    format_intent_options,
+    format_tool_followup_rules,
+    format_tool_rules,
+)
 from prompts.system import (
     _build_emotion_block,
     _build_inner_drive_instructions_block,
@@ -90,6 +94,61 @@ class TestRegistryDerivedToolRules(unittest.TestCase):
         self.assertIn("用户要求放音乐 → 调用 music_play", text)
 
 
+class TestAgent1RuleTools(unittest.TestCase):
+    """M-06: Agent 1 prompt 的工具规则/检查清单以 rule_tools（全量 registry）
+    为数据源，不再因隔离 registry 误报"无可用的外部工具"。"""
+
+    def _make_registry(self, names):
+        registry = ToolRegistry()
+        for name in names:
+            tool = MagicMock()
+            tool.name.return_value = name
+            tool.description.return_value = f"Mock {name}"
+            tool.parameters_schema.return_value = {}
+            tool.spec.return_value = ToolSpec(name=name, description=f"Mock {name}", parameters={})
+            registry.register(tool)
+        return registry
+
+    def _build_prompt(self, tools, rule_tools):
+        from models.personality import PersonalityConfig, EmotionalState
+        from models.conversation import MemoryContext
+        personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                       backstory="", interests=[])
+        ctx = MemoryContext(facts=[], experiences=[], reflections=[],
+                            relationship={"trust": 0.5, "familiarity": 0.5})
+        return build_inner_drive_prompt(
+            personality=personality, emotion=EmotionalState(),
+            memory_context=ctx, conversation_history="",
+            tools=tools, rule_tools=rule_tools,
+        )
+
+    def test_internal_registry_with_full_rule_tools(self):
+        internal = self._make_registry(["recall", "remember"])
+        full = self._make_registry(
+            ["web_fetch", "web_search", "music_play", "recall", "remember"])
+        prompt = self._build_prompt(internal, full)
+        # 不再误报"无可用的外部工具"
+        self.assertNotIn("（当前无可用的外部工具）", prompt)
+        # 规则文本与全量 registry 一致
+        self.assertIn(format_tool_rules(full), prompt)
+        # 检查清单的跟进规则同样由 registry 动态派生
+        self.assertIn("刚用过 music_play", prompt)
+        self.assertIn("刚用过 web_fetch", prompt)
+
+    def test_rule_tools_defaults_to_tools(self):
+        """兼容旧行为：rule_tools=None 时回退到 tools。"""
+        internal = self._make_registry(["recall", "remember"])
+        prompt = self._build_prompt(internal, None)
+        self.assertIn("（当前无可用的外部工具）", prompt)
+
+    def test_checklist_followup_rules_filtered_by_registry(self):
+        registry = self._make_registry(["music_play"])
+        rules = format_tool_followup_rules(registry)
+        self.assertIn("刚用过 music_play", rules)
+        self.assertNotIn("刚用过 web_fetch", rules)
+        self.assertNotIn("刚用过 notify", rules)
+
+
 class TestEmotionPromptSummary(unittest.TestCase):
     def _make_context(self):
         from models.conversation import MemoryContext
@@ -111,7 +170,8 @@ class TestEmotionPromptSummary(unittest.TestCase):
         self.assertIn("valence", summary)
         self.assertIn("arousal", summary)
 
-    def test_build_system_prompt_with_emotion_summary(self):
+    def test_build_system_prompt_renders_live_emotion(self):
+        # M-07: emotion_summary 参数已删除，情绪块统一读活 EmotionalState
         from models.personality import PersonalityConfig, EmotionalState
         personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
                                        backstory="", interests=[])
@@ -119,40 +179,33 @@ class TestEmotionPromptSummary(unittest.TestCase):
         summary = emotion.to_prompt_summary()
         ctx = self._make_context()
 
-        prompt_with_emotion = build_system_prompt(
+        prompt = build_system_prompt(
             personality=personality, emotion=emotion,
             memory_context=ctx, conversation_history="",
         )
-        prompt_with_summary = build_system_prompt(
-            personality=personality, emotion=emotion, emotion_summary=summary,
-            memory_context=ctx, conversation_history="",
-        )
-        self.assertEqual(prompt_with_emotion, prompt_with_summary)
-        self.assertIn("=== 你现在啥状态 ===", prompt_with_summary)
-        self.assertIn(summary["mood"], prompt_with_summary)
+        self.assertIn("=== 你现在啥状态 ===", prompt)
+        self.assertIn(summary["mood"], prompt)
 
-    def test_build_inner_drive_prompt_with_emotion_summary(self):
+    def test_build_inner_drive_prompt_renders_live_emotion(self):
+        # M-07: 同上，内驱 prompt 的情绪行也直接读活对象
         from models.personality import PersonalityConfig, EmotionalState
         personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
                                        backstory="", interests=[])
         emotion = EmotionalState()
-        summary = emotion.to_prompt_summary()
         ctx = self._make_context()
 
-        prompt_with_emotion = build_inner_drive_prompt(
+        prompt = build_inner_drive_prompt(
             personality=personality, emotion=emotion,
             memory_context=ctx, conversation_history="",
         )
-        prompt_with_summary = build_inner_drive_prompt(
-            personality=personality, emotion=emotion, emotion_summary=summary,
-            memory_context=ctx, conversation_history="",
-        )
-        self.assertEqual(prompt_with_emotion, prompt_with_summary)
-        self.assertIn(emotion.dominant_emotion, prompt_with_summary)
+        self.assertIn(emotion.dominant_emotion, prompt)
 
-    def test_build_emotion_block_requires_emotion_or_summary(self):
-        with self.assertRaises(ValueError):
-            _build_emotion_block()
+    def test_build_emotion_block_from_live_emotion(self):
+        from models.personality import EmotionalState
+        emotion = EmotionalState()
+        block = _build_emotion_block(emotion)
+        self.assertIn("=== 你现在啥状态 ===", block)
+        self.assertIn(emotion.to_prompt_summary()["mood"], block)
 
 
 if __name__ == "__main__":

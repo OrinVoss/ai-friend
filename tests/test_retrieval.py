@@ -199,6 +199,60 @@ class TestHybridScoreSemanticDim(unittest.TestCase):
         self.assertEqual(result[0].id, 5)
 
 
+class TestSearchReflections(unittest.TestCase):
+    """#251: search_reflections 相关度排序与空 query 回退。"""
+
+    @staticmethod
+    def _ltm(reflections):
+        ltm = MagicMock()
+        ltm.get_recent_reflections.side_effect = lambda limit=5: reflections[:limit]
+        return ltm
+
+    def test_semantic_relevance_beats_recency(self):
+        """语义更相关的旧反思应排在更新的无关反思之前。"""
+        import numpy as np
+        from memory.embeddings import EmbeddingEngine
+        from models.memory import Reflection
+        qvec = np.array([1.0] + [0.0] * 7, dtype=np.float32)
+        relevant_old = Reflection(
+            id=1, content="用户其实很享受一个人写代码的安静时光",
+            embedding=EmbeddingEngine.vec_to_bytes(qvec),
+            embedding_version=EMBEDDING_VERSION)
+        newer_irrelevant = Reflection(
+            id=2, content="今天聊了聊天气",
+            embedding=EmbeddingEngine.vec_to_bytes(np.zeros(8, dtype=np.float32)),
+            embedding_version=EMBEDDING_VERSION)
+        engine = MagicMock()
+        engine.health_check.return_value = True
+        engine.encode_single.return_value = qvec
+        # 候选池按时间序返回：新的在前
+        retriever = MemoryRetriever(
+            self._ltm([newer_irrelevant, relevant_old]), embedding_engine=engine)
+
+        result = retriever.search_reflections("编程 独处", limit=2)
+        self.assertEqual(result[0].id, 1)
+
+    def test_keyword_relevance_beats_recency_without_embeddings(self):
+        """无 embedding 时按关键词评分：命中 query 的旧反思排在新的无关反思之前。"""
+        from models.memory import Reflection
+        relevant_old = Reflection(id=1, content="用户提到自己最喜欢的爱好是编程")
+        newer_irrelevant = Reflection(id=2, content="最近用户的作息很规律")
+        retriever = MemoryRetriever(self._ltm([newer_irrelevant, relevant_old]))
+
+        result = retriever.search_reflections("编程 爱好", limit=2)
+        self.assertEqual(result[0].id, 1)
+
+    def test_empty_query_falls_back_to_recency(self):
+        """query 为空时保持按时间取最近 N 条。"""
+        from models.memory import Reflection
+        r_old = Reflection(id=1, content="旧的反思")
+        r_new = Reflection(id=2, content="新的反思")
+        retriever = MemoryRetriever(self._ltm([r_new, r_old]))  # 时间序：新的在前
+
+        result = retriever.search_reflections("", limit=1)
+        self.assertEqual([r.id for r in result], [2])
+
+
 class TestLongTermImport(unittest.TestCase):
     """P2: import re should be at top of long_term.py, not inline."""
 

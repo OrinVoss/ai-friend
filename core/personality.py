@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from typing import Optional
 
 from models.personality import PersonalityConfig, EmotionalState
@@ -12,6 +13,11 @@ class Personality:
     def __init__(self, config: PersonalityConfig,
                  emotion: Optional[EmotionalState] = None):
         self.config = config
+        # #291: 叶子级锁，序列化情绪突变与 save/to_dict 快照（asdict 深拷贝
+        # deque/list 时被另一线程突变会抛 RuntimeError）。持有本锁期间绝不
+        # 获取其他锁——save() 会在 web/session.py 的 SessionManager._lock
+        # 持有期间被调用。RLock 允许 save() -> to_dict() 重入。
+        self._lock = threading.RLock()
         self.emotion = emotion or EmotionalState(
             baseline_valence=config.emotional_baseline.get("valence", 0.4),
             baseline_arousal=config.emotional_baseline.get("arousal", 0.3),
@@ -74,27 +80,40 @@ class Personality:
         return dv, da, primary_deltas
 
     def decay_emotion(self) -> None:
-        logger.debug(f"[emotion] decay: v={self.emotion.valence:+.3f} a={self.emotion.arousal:.3f}")
-        self.emotion.decay()
+        with self._lock:  # #291
+            logger.debug(f"[emotion] decay: v={self.emotion.valence:+.3f} a={self.emotion.arousal:.3f}")
+            self.emotion.decay()
 
     def apply_emotional_shift(self, user_sentiment: float,
                                personal_sharing: bool = False,
                                topic_energy: float = 0.5) -> None:
-        dv, da, primary_deltas = self.estimate_emotional_impact(
-            user_sentiment, personal_sharing, topic_energy
-        )
-        logger.debug(f"[emotion] shift dv={dv:+.3f} da={da:+.3f} primaries={list(primary_deltas.keys())}")
-        self.emotion.shift(dv, da, primary_deltas)
-        self.emotion.decay()
+        with self._lock:  # #291
+            dv, da, primary_deltas = self.estimate_emotional_impact(
+                user_sentiment, personal_sharing, topic_energy
+            )
+            logger.debug(f"[emotion] shift dv={dv:+.3f} da={da:+.3f} primaries={list(primary_deltas.keys())}")
+            self.emotion.shift(dv, da, primary_deltas)
+            self.emotion.decay()
 
-        # Update background mood slowly based on accumulated emotion
-        self.emotion.apply_mood_shift(dv, da)
+            # Update background mood slowly based on accumulated emotion
+            self.emotion.apply_mood_shift(dv, da)
+
+    def set_consecutive_negative(self, value: int) -> None:
+        # #291: 加锁 setter，替代 core/agent.py 里对 emotion 字段的直接写
+        with self._lock:
+            self.emotion.consecutive_negative = value
+
+    def record_emotion_event(self, trigger: str, context: str = "") -> None:
+        # #291: 加锁转发——emotion_events 是 deque，突变必须与 to_dict 快照互斥
+        with self._lock:
+            self.emotion.record_emotion_event(trigger, context)
 
     def to_dict(self) -> dict:
-        return {
-            "personality": self.config.to_dict(),
-            "emotional_state": self.emotion.to_dict(),
-        }
+        with self._lock:  # #291
+            return {
+                "personality": self.config.to_dict(),
+                "emotional_state": self.emotion.to_dict(),
+            }
 
     @classmethod
     def load(cls, path: str) -> "Personality":
@@ -133,12 +152,31 @@ class Personality:
 
     def save(self, path: str) -> None:
         # #153: atomic write with unique tmp name (#206: prevent concurrent write races)
+        # #291: 整段在锁内执行，快照与写盘期间情绪状态不会被另一线程突变
         import os, time
-        tmp = f"{path}.tmp.{os.getpid()}.{time.time_ns()}"
+        with self._lock:
+            tmp = f"{path}.tmp.{os.getpid()}.{time.time_ns()}"
+            try:
+                # H-06: 合并保存，避免内存旧态覆盖运行时对磁盘的手工编辑
+                data = self._merge_with_disk(path)
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                os.replace(tmp, path)
+                logger.info(f"[personality] saved to: {path}")
+            except Exception as e:
+                logger.warning(f"[personality] save failed: {e}")
+
+    def _merge_with_disk(self, path: str) -> dict:
+        """H-06: 静态人格段以磁盘为准（原样保留用户在线编辑与未知字段），
+        内存只负责写入 emotional_state；磁盘缺失/损坏/段缺失时回退内存全量。
+        调用方须已持有 self._lock（内部走 to_dict 快照）。"""
+        snapshot = self.to_dict()
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
-            os.replace(tmp, path)
-            logger.info(f"[personality] saved to: {path}")
-        except Exception as e:
-            logger.warning(f"[personality] save failed: {e}")
+            with open(path, encoding="utf-8") as f:
+                disk = json.load(f)
+            if isinstance(disk, dict) and isinstance(disk.get("personality"), dict):
+                disk["emotional_state"] = snapshot["emotional_state"]
+                return disk
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+            logger.debug(f"[personality] merge skipped, fallback to memory ({path}): {e}")
+        return snapshot

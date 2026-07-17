@@ -78,7 +78,12 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
             if isinstance(obj, dict):
                 name = obj.get("name") or obj.get("tool", "")
                 if name:
-                    args = _normalize_args(obj.get("arguments", {}))
+                    args = obj.get("arguments", {})
+                    # #260: arguments 非 dict（字符串/列表等）时按空参数处理，
+                    # 避免 _normalize_args 中 dict(args) 抛 ValueError 外溢
+                    if not isinstance(args, dict):
+                        args = {}
+                    args = _normalize_args(args)
                     calls.append({"name": name, "arguments": args})
                     cleaned = ""
         except json.JSONDecodeError:

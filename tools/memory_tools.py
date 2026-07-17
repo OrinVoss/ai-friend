@@ -42,7 +42,7 @@ class RecallTool(Tool):
                 return ToolResult.fail("请告诉我你想回忆什么")
 
             logger.info(f"[tool] recall query={query[:60]}")
-            keywords = self.retriever._extract_keywords(query)
+            keywords = self.retriever.extract_keywords(query)
             facts = self.ltm.search_facts(query, limit=5)
             experiences = self.ltm.search_experiences(keywords, limit=3)
             reflections = self.ltm.get_recent_reflections(limit=2)

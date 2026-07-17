@@ -101,6 +101,7 @@ class MessageHandler:
         self._tool_agent = None  # lazy init
         self._inner_drive = None  # lazy init
         self._memory_agent = None  # lazy init (MA-001, use_memory_agent only)
+        self._internal_registry = None  # lazy init (H-01, cached)
         self._prompt_cache = PromptCache()
         self._state = MessageHandlerState.IDLE
 
@@ -141,6 +142,9 @@ class MessageHandler:
                 prompt_cache=self._prompt_cache,
                 prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
                 memory_agent=memory_agent,
+                # M-06: prompt 的工具规则/检查清单用全量 registry 生成，
+                # Agent 1 判断 needs_external_tools 需要看到外部工具
+                rule_tools_registry=a._tool_registry,
             )
 
     def _ensure_memory_agent(self):
@@ -170,15 +174,21 @@ class MessageHandler:
             )
 
     def _make_internal_registry(self):
-        """Build an isolated registry for Agent 1 with fresh recall/remember instances."""
-        from tools.traits import ToolRegistry
-        from tools.memory_tools import RecallTool, RememberTool
-        a = self.a
-        r = ToolRegistry()
-        if a.retriever is not None and a.ltm is not None:
-            r.register(RecallTool(retriever=a.retriever, ltm=a.ltm))
-            r.register(RememberTool(ltm=a.ltm))
-        return r
+        """Isolated registry (recall/remember only) for Agent 1 / Agent 3.
+
+        H-01: cached and reused — RecallTool/RememberTool 无可变内部状态，
+        重复新建没有收益。
+        """
+        if self._internal_registry is None:
+            from tools.traits import ToolRegistry
+            from tools.memory_tools import RecallTool, RememberTool
+            a = self.a
+            r = ToolRegistry()
+            if a.retriever is not None and a.ltm is not None:
+                r.register(RecallTool(retriever=a.retriever, ltm=a.ltm))
+                r.register(RememberTool(ltm=a.ltm))
+            self._internal_registry = r
+        return self._internal_registry
 
     def _make_external_registry(self):
         """Build a registry containing only external tools for Agent 2."""
@@ -224,7 +234,19 @@ class MessageHandler:
         # ── Agent 1: Inner Drive ──
         self._transition(MessageHandlerState.ASSESSING)
         self._ensure_inner_drive()
-        drive_result = self._inner_drive.assess(user_input)
+        try:
+            drive_result = self._inner_drive.assess(user_input)
+        except Exception as exc:
+            # #146: Agent 1 异常不再穿透——REST chat_api 路径没有外层 try，
+            # 穿透会直接 500。降级为直走 Agent 3（同 agent2_error 先例）。
+            logger.warning(f"[msg] agent1 assess failed, degrading to direct reply: {exc}")
+            self._transition(MessageHandlerState.ERROR_FALLBACK)
+            from core.inner_drive import InnerDriveResult
+            drive_result = InnerDriveResult(
+                needs_external_tools=False,
+                reasoning=f"内驱评估异常（{type(exc).__name__}），已降级为直接回复",
+                summary="",
+            )
 
         if not drive_result.needs_external_tools:
             # No external tools needed → straight to Agent 3
@@ -360,10 +382,8 @@ class MessageHandler:
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
-        emotion_summary = a.personality.emotion.to_prompt_summary()
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
-            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,
@@ -385,7 +405,13 @@ class MessageHandler:
             f"[proactive] chat: topic={topic} "
             f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
         )
-        return a._react_loop(messages, on_token, add_to_history=True)
+        # H-05: 主动搭话轮跳过情绪后处理——short_term 里最后一条 user turn 是
+        # 上一轮真实用户消息，重复施加会让情绪影响被计算两次
+        # H-01: registry 收窄为内部工具（recall/remember），与 prompt 声明一致，
+        # 外部动作一律走 intent→Agent 2 管线
+        return a._react_loop(messages, on_token, add_to_history=True,
+                            tool_registry=self._make_internal_registry(),
+                            skip_post_process=True)
 
     def handle_explore(self, intent=None) -> str | None:
         from prompts.system import build_system_prompt
@@ -403,7 +429,6 @@ class MessageHandler:
 
         mem_ctx = a.retriever.retrieve_for_query(memory_query)
         conv_hist = a.short_term.format_for_prompt(max_tokens=1800)
-        emotion_summary = a.personality.emotion.to_prompt_summary()
 
         self._ensure_tool_agent()
         explore_prompt = f"[自由探索] 可以搜搜关于{topic}的内容。用 web_search 和 web_fetch。"
@@ -415,7 +440,6 @@ class MessageHandler:
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
-            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,
@@ -447,9 +471,11 @@ class MessageHandler:
             f"[explore] start: topic={topic} "
             f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
         )
-        phase2_registry = self._make_internal_registry() if tool_records else None
+        # H-05: 自由探索轮同样跳过情绪后处理（理由同 handle_proactive）
+        # H-01: registry 固定收窄为内部工具（理由同 handle_proactive）
         result = a._react_loop(messages, on_token=None, add_to_history=True,
-                              tool_registry=phase2_registry)
+                              tool_registry=self._make_internal_registry(),
+                              skip_post_process=True)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
             logger.info(f"[explore] shared: {len(result)} chars")
             return result
@@ -474,7 +500,9 @@ class MessageHandler:
         else:
             mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx
-        a.add_turn("user", user_input)
+        # NOTE: the user turn is persisted once in handle_message() — do NOT
+        # add_turn here again (field bug 2026-07-17: duplicated user message
+        # in DB and short-term buffer → duplicate bubbles after refresh).
 
         conv_hist = a.short_term.format_for_prompt(max_tokens=self.CONV_HIST_MAX_TOKENS)
         # #205: use accumulated tool_records if provided, otherwise fall back to last round
@@ -486,11 +514,9 @@ class MessageHandler:
             0,
             getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
         )
-        emotion_summary = a.personality.emotion.to_prompt_summary()
 
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
-            emotion_summary=emotion_summary,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a._context.compressed_summary,
             tools=a._tool_registry,
@@ -510,9 +536,10 @@ class MessageHandler:
         # Inject tool results as USER message (LLM respects user messages >> system messages)
         if tool_records:
             messages.insert(-1, {"role": "user", "content": tool_records})
-        phase2_registry = self._make_internal_registry() if tool_records else None
+        # H-01: 无论是否有 tool_records，Agent 3 的 registry 都固定为内部工具
+        # （recall/remember），与 prompt 声明一致，不再回退到全量 registry
         return a._react_loop(messages, on_token, add_to_history=True,
-                            tool_registry=phase2_registry)
+                            tool_registry=self._make_internal_registry())
 
     def _parse_agent3_output(self, text: str) -> dict:
         """Detect whether Agent 3 output is a JSON intent or plain text."""

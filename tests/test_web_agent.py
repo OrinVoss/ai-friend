@@ -1,5 +1,6 @@
 """Tests for web/session.py — WebAgent proactive wrappers (#125)."""
 import unittest
+from threading import Lock
 from unittest.mock import MagicMock, AsyncMock
 
 from core.inner_drive import ProactiveIntent
@@ -25,6 +26,8 @@ class TestWebAgentProactive(unittest.TestCase):
         self.agent.personality.emotion.dominant_emotion = "neutral"
         self.agent.agent = MagicMock()
         self.agent._on_token_callback = None
+        # #276: __new__ 绕过 __init__，手动补上防抖锁
+        self.agent._save_lock = Lock()
 
     def test_process_proactive_with_intent(self):
         intent = ProactiveIntent(

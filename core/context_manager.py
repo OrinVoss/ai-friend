@@ -28,7 +28,8 @@ def estimate_tokens(text: str) -> int:
     tok = _get_tokenizer()
     if tok:
         return len(tok.encode(text, disallowed_special=()))
-    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '\U00020000' <= c <= '\U0002A6DF' or '　' <= c <= '〿')
+    # #262: 补 CJK Ext A (U+3400-U+4DBF)；本分支仅在 tiktoken 不可用时生效
+    cjk = sum(1 for c in text if '一' <= c <= '鿿' or '㐀' <= c <= '䶿' or '\U00020000' <= c <= '\U0002A6DF' or '　' <= c <= '〿')
     ascii_chars = sum(1 for c in text if c.isascii() and c.isalpha())
     digits = sum(1 for c in text if c.isdigit())
     other = len(text) - cjk - ascii_chars - digits

@@ -69,6 +69,8 @@
 
 ### P1-3 run_async 路径下连接锁失效
 
+> 🔴→✅ **已修复（2026-07-17，H-03）**：`_get_lock()`/按 loop 缓存已删除，`Database.__init__` 改为单个进程级 `threading.Lock`，`cursor()` 跨 await 持有（acquire 放最前、finally release），execute..commit 序列在 run_async 的 4 个 worker 线程间互斥。约束写在 `cursor()` 注释里：同一事件循环内禁止两个协程并发进入（阻塞 acquire 会卡 loop），并发访问走 run_async 桥接。同型的 `SleepManager._lock`（`core/sleep_manager.py`）一并改为 threading.Lock 同步临界区。`tests/test_database_concurrency.py`、`tests/test_sleep_manager.py` 已钉住。
+
 `Database._get_lock()`（`database.py:39-45`）按 event loop id 缓存一把 `asyncio.Lock`；而 `run_async()`（`core/async_utils.py:29`）每次都 `asyncio.run()` 建一个**新** loop。Web 模式下 repo 调用大量走 run_async（如 `web/session.py:307`），锁几乎每次调用都被重建——4 线程池并发的 run_async 在同一个 aiosqlite 连接上没有任何互斥。aiosqlite 单 worker 线程保证单语句不交错，但「cursor() 执行 + commit()」这类多语句单元可以交错，方法级原子性形同虚设。
 
 ### P1-4 `bulk_update_embeddings` 没有 commit

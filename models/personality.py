@@ -410,6 +410,8 @@ class PersonalityConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "PersonalityConfig":
+        # H-06: 先拷贝再转换 traits，避免原地改入参（调用方可能复用该 dict）
+        d = dict(d)
         if "traits" in d and isinstance(d["traits"], dict):
             d["traits"] = [Trait(k, v) for k, v in d["traits"].items()]
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})

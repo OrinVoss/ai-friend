@@ -2,8 +2,11 @@
 
 SL-001: sleep state file is namespaced per session_id so concurrent CLI/Web
 sessions no longer share a single global `.sleep_state`.
-SL-002: `_sleeping` transitions are guarded by an asyncio.Lock so two
-proactive ticks cannot race the nap/night/wake windows into a torn state.
+SL-002: `_sleeping` transitions are guarded by a threading.Lock so two
+proactive ticks cannot race the nap/night/wake windows into a torn state
+(H-03 同型: 本对象会被不同事件循环使用——RuntimeDriver 守护线程的 loop
+与 web proactive loop——asyncio.Lock 跨 loop 会失效/报错，故用 threading.Lock
+只保护同步临界区，持锁期间绝不 await)。
 SL-010: `generate_dream` is async so the proactive loop can `await` it
 instead of blocking the executor thread on `provider.generate()`.
 """
@@ -12,6 +15,7 @@ import asyncio
 import logging
 import os
 import random
+import threading
 import time
 from datetime import datetime
 
@@ -29,7 +33,8 @@ class SleepManager:
         self._ltm = ltm
         self._provider = provider
         # SL-002: guard _sleeping transitions against concurrent proactive ticks
-        self._lock = asyncio.Lock()
+        # H-03 同型: threading.Lock——跨事件循环可用；只保护同步临界区
+        self._lock = threading.Lock()
         self._sleeping = self._load_sleep_state()
         # #167: cooldown to prevent rapid sleep/wake cycling
         self._last_transition_time = 0.0
@@ -60,9 +65,10 @@ class SleepManager:
     async def get_sleep_state(self) -> tuple[bool, str | None]:
         """Check if AI should sleep/wake. Returns (should_sleep, wake_message_or_None).
 
-        SL-002: the whole window-check + transition + persistence is one critical
-        section under `_lock`, so two concurrent ticks cannot both flip `_sleeping`
-        and overwrite each other's saved state.
+        SL-002: the window-check + transition + persistence is one synchronous
+        critical section under `_lock` (threading.Lock), so two concurrent ticks
+        cannot both flip `_sleeping` and overwrite each other's saved state.
+        H-03 同型: dream generation awaits OUTSIDE the lock — 持锁期间绝不 await。
         """
         now = datetime.now()
         hour = now.hour + now.minute / 60.0
@@ -79,7 +85,10 @@ class SleepManager:
             sleepiness -= 0.2
         sleepiness += r * 0.2
 
-        async with self._lock:
+        # 同步临界区：只读/改状态并持久化；三个唤醒窗口按小时互斥，
+        # 用 wake_kind 记录触发的唤醒类型，梦境在锁外生成
+        wake_kind: str | None = None
+        with self._lock:
             # #167: cooldown guard — don't transition if too soon after last change
             if time.time() - self._last_transition_time < self._MIN_SLEEP_INTERVAL:
                 return False, None
@@ -109,9 +118,7 @@ class SleepManager:
                 if random.random() < min(0.9, wake_chance):
                     self._sleeping = False; self._save_sleep_state()
                     self._last_transition_time = time.time()
-                    dream = await self.generate_dream()
-                    logger.info(f"[sleep] nap wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
-                    return False, f"睡醒了...{'做了个梦：' + dream if dream else '没做梦，睡得挺香'}"
+                    wake_kind = "nap"
 
             # Wake from night: 7:00-10:00
             if 7 <= hour < 10 and self._sleeping:
@@ -124,18 +131,27 @@ class SleepManager:
                 if random.random() < min(0.9, wake_chance):
                     self._sleeping = False; self._save_sleep_state()
                     self._last_transition_time = time.time()
-                    dream = await self.generate_dream()
-                    logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
-                    return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"
+                    wake_kind = "morning"
 
             # SL-011: hard fail-safe — if still sleeping past the normal wake window,
             # force wake-up between 10:00-11:00 so the AI never sleeps forever.
             if 10 <= hour < 11 and self._sleeping:
                 self._sleeping = False; self._save_sleep_state()
                 self._last_transition_time = time.time()
-                dream = await self.generate_dream()
-                logger.info(f"[sleep] forced morning wake: arousal={e.arousal:.2f} dream={'yes' if dream else 'no'}")
-                return False, f"太阳都晒屁股了才醒…{'做了个梦：' + dream if dream else '睡过头了！'}"
+                wake_kind = "forced"
+
+        # 锁外：生成梦境（await）并拼接唤醒消息
+        if wake_kind is not None:
+            dream = await self.generate_dream()
+            has_dream = 'yes' if dream else 'no'
+            if wake_kind == "nap":
+                logger.info(f"[sleep] nap wake: arousal={e.arousal:.2f} dream={has_dream}")
+                return False, f"睡醒了...{'做了个梦：' + dream if dream else '没做梦，睡得挺香'}"
+            if wake_kind == "morning":
+                logger.info(f"[sleep] morning wake: arousal={e.arousal:.2f} dream={has_dream}")
+                return False, f"早上好！{'我做了个梦：' + dream if dream else '睡得很好！'}"
+            logger.info(f"[sleep] forced morning wake: arousal={e.arousal:.2f} dream={has_dream}")
+            return False, f"太阳都晒屁股了才醒…{'做了个梦：' + dream if dream else '睡过头了！'}"
 
         return False, None
 
@@ -161,7 +177,8 @@ class SleepManager:
                     stream=False, max_tokens=100, source="dream",
                 ),
             )
-            self._personality.emotion.record_emotion_event(
+            # #291: 经 Personality 的加锁转发方法写 emotion_events deque
+            self._personality.record_emotion_event(
                 trigger=f"梦: {dream.strip()[:100]}",
                 context=dream.strip()[:200],
             )

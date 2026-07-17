@@ -1,3 +1,4 @@
+import asyncio
 import time
 import uuid
 import logging
@@ -71,20 +72,24 @@ class WebAgent:
         except Exception as e:
             logger.warning(f"[session] restore turn_count failed: {e}")
         self._last_save_time: float = 0.0  # #44: debounce personality save
+        self._save_lock = Lock()  # #276: 防抖 check-then-set 的线程锁
         self._ensure_relationship_defaults()
 
     def _save_personality_debounced(self) -> None:
         """Save personality at most once every 30s to reduce disk writes. (#44)"""
-        now = time.time()
-        if now - getattr(self, '_last_save_time', 0.0) < 30:
-            logger.debug(f"[session] personality save debounced for {self.session_id}")
-            return
-        self._last_save_time = now
-        try:
-            self.personality.save(self.personality_path)
-            logger.info(f"[session] personality saved: {self.session_id} -> {self.personality_path}")
-        except Exception as e:
-            logger.warning(f"[session] save personality failed: {e}")
+        # #276: check-then-set 加锁 — process_* 跑在 executor 线程，
+        # 无锁时两个线程可同时穿过 30s 窗口重复落盘
+        with self._save_lock:
+            now = time.time()
+            if now - getattr(self, '_last_save_time', 0.0) < 30:
+                logger.debug(f"[session] personality save debounced for {self.session_id}")
+                return
+            self._last_save_time = now
+            try:
+                self.personality.save(self.personality_path)
+                logger.info(f"[session] personality saved: {self.session_id} -> {self.personality_path}")
+            except Exception as e:
+                logger.warning(f"[session] save personality failed: {e}")
 
     def close(self) -> None:
         """SN-013: release per-session resources on eviction/shutdown.
@@ -228,19 +233,28 @@ class SessionManager:
         self._shared_provider: LLMProvider | None = None
         self._shared_embed_engine: EmbeddingEngine | None = None
         self._create_count: int = 0  # #123: throttle cleanup_old
+        # L-04: open() 幂等锁 — 并发首请求（ensure_session 兜底路径）防双开。
+        # asyncio.Lock 在 3.10+ 延迟绑定 loop，__init__ 中创建安全。
+        self._open_lock = asyncio.Lock()
+        # M-12: session 延迟销毁 — sid → 待执行的 remove asyncio.Task
+        self._pending_remove: dict[str, asyncio.Task] = {}
 
     async def open(self):
-        self.db = Database(self.config.db_path,
-                           backup_enabled=self.config.db_backup_enabled,
-                           backup_keep=self.config.db_backup_keep)
-        await self.db.open()
-        self.repo = Repository(self.db)
-        # SN-005/006: build the shared clients once for all future sessions.
-        self._shared_provider = build_provider(self.config)
-        self._shared_embed_engine = build_embed_engine(self.config)
-        # Startup self-check: fail loudly if the embedding pipeline is broken
-        schedule_embedding_self_check(
-            self._shared_embed_engine, make_embedding_sampler(self.repo))
+        # L-04: 锁内判空，幂等 — 并发调用只真正执行一次
+        async with self._open_lock:
+            if self.db is not None:
+                return
+            self.db = Database(self.config.db_path,
+                               backup_enabled=self.config.db_backup_enabled,
+                               backup_keep=self.config.db_backup_keep)
+            await self.db.open()
+            self.repo = Repository(self.db)
+            # SN-005/006: build the shared clients once for all future sessions.
+            self._shared_provider = build_provider(self.config)
+            self._shared_embed_engine = build_embed_engine(self.config)
+            # Startup self-check: fail loudly if the embedding pipeline is broken
+            schedule_embedding_self_check(
+                self._shared_embed_engine, make_embedding_sampler(self.repo))
 
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:
@@ -254,6 +268,8 @@ class SessionManager:
                 sid = "default"
 
             if sid in self._sessions:
+                # M-12: 复用存活 session（重连/刷新）→ 取消宽限期内的延迟销毁
+                self._cancel_pending_remove(sid)
                 logger.debug(f"[session] restore: {sid}")
                 return sid, self._sessions[sid]
 
@@ -287,6 +303,7 @@ class SessionManager:
 
     def remove(self, session_id: str) -> None:
         with self._lock:
+            self._cancel_pending_remove(session_id)
             agent = self._sessions.pop(session_id, None)
             # SN-013: release per-session resources before dropping the ref.
             if agent is not None:
@@ -300,9 +317,50 @@ class SessionManager:
             self._active_ws.pop(session_id, None)
             logger.info(f"Session removed: {session_id}")
 
+    def schedule_remove(self, session_id: str, delay: float = 60) -> None:
+        """M-12: 延迟销毁 session — WS 断开后留 delay 秒宽限期。
+
+        宽限期内重连（get_or_create 复用存活 session 或 register_proactive
+        注册新连接）会取消该任务；到期时仍无该 session 的活跃连接才真正
+        remove()。需在运行中的事件循环里调用（WS 端点 finally 即此场景）。
+        """
+        self._cancel_pending_remove(session_id)
+        # 记录当前 session 对象，到期时若已被 evict+重建则不误杀新 session
+        agent_at_schedule = self._sessions.get(session_id)
+
+        async def _delayed_remove():
+            try:
+                await asyncio.sleep(delay)
+                # 到期仍无该 session 的活跃连接、且对象未被替换才销毁
+                if (self._active_ws.get(session_id) is None
+                        and self._sessions.get(session_id) is agent_at_schedule):
+                    self._pending_remove.pop(session_id, None)
+                    self.remove(session_id)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._pending_remove.pop(session_id, None)
+
+        self._pending_remove[session_id] = asyncio.ensure_future(_delayed_remove())
+        logger.info(f"[session] remove scheduled: {session_id} (delay={delay}s)")
+
+    def _cancel_pending_remove(self, session_id: str) -> None:
+        """M-12: 取消该 session 待执行的延迟销毁任务（若有）。"""
+        task = self._pending_remove.pop(session_id, None)
+        if task is not None:
+            task.cancel()
+
+    def unregister_ws(self, session_id: str, websocket) -> None:
+        """M-12: 多 tab 归属 — 仅当断开的是当前活跃连接才清除 _active_ws。"""
+        with self._lock:
+            if self._active_ws.get(session_id) is websocket:
+                self._active_ws.pop(session_id, None)
+
     def register_proactive(self, session_id: str, task, websocket) -> None:
         """Register or replace proactive task for a session. Cancels old task if exists."""
         with self._lock:
+            # M-12: 新连接接管（刷新/双 tab）→ 取消宽限期内的延迟销毁
+            self._cancel_pending_remove(session_id)
             old_task = self._proactive_tasks.pop(session_id, None)
             if old_task:
                 old_task.cancel()
@@ -351,6 +409,10 @@ class SessionManager:
     async def shutdown(self) -> None:
         """Graceful shutdown: save all sessions, cancel tasks. (#212)"""
         logger.info("Shutting down sessions...")
+        # M-12: 取消所有待执行的延迟销毁任务
+        for task in self._pending_remove.values():
+            task.cancel()
+        self._pending_remove.clear()
         for sid, agent in list(self._sessions.items()):
             try:
                 agent.save_personality()

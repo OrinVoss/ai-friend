@@ -1,6 +1,6 @@
-import asyncio
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -42,17 +42,10 @@ class Database:
         self.db_path = db_path
         self.backup_enabled = backup_enabled
         self.backup_keep = backup_keep
-        self._lock_init: asyncio.Lock | None = None
-        self._lock_loop_id: int = 0
+        # H-03: 单个进程级 threading.Lock。run_async 每次调用都新建事件循环，
+        # 按 loop id 缓存的 asyncio.Lock 会被反复重建，4 个 worker 线程间零互斥。
+        self._lock = threading.Lock()
         self.conn: aiosqlite.Connection | None = None
-
-    async def _get_lock(self) -> asyncio.Lock:
-        """Return an asyncio.Lock bound to the current event loop."""
-        current_loop_id = id(asyncio.get_running_loop())
-        if self._lock_init is None or self._lock_loop_id != current_loop_id:
-            self._lock_init = asyncio.Lock()
-            self._lock_loop_id = current_loop_id
-        return self._lock_init
 
     async def open(self) -> None:
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
@@ -82,16 +75,24 @@ class Database:
     async def cursor(self):
         if self.conn is None:
             raise RuntimeError("Database not opened. Call await db.open() first.")
-        lock = await self._get_lock()
-        async with lock:
+        # H-03: threading.Lock 跨 await 持有，保证 execute..commit 序列在
+        # run_async 的 4 个 worker 线程间互斥。约束：同一事件循环内禁止两个
+        # 协程并发进入 cursor()（阻塞 acquire 会卡住整个 loop）；并发访问请
+        # 走 run_async 桥接（每协程独占 worker 线程跑到底，阻塞的是自己的线程）。
+        self._lock.acquire()
+        try:
             c = await self.conn.cursor()
             try:
                 yield c
             except aiosqlite.Error:
+                # 注意：rollback 作用于共享连接，任何绕过本锁直接操作连接的
+                # 未提交写入也会被一并回滚
                 await self.conn.rollback()
                 raise
             finally:
                 await c.close()
+        finally:
+            self._lock.release()
 
     async def commit(self) -> None:
         """Explicit commit for write operations. (#142)"""

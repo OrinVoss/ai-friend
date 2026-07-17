@@ -74,6 +74,8 @@ class Agent:
         self._context = ContextManager(provider=provider, short_term=short_term)
         self._proactive = ProactivityManager(
             personality=personality, ltm=ltm, short_term=short_term,
+            # M-11: 与 sleep state 同目录、按 session 命名，重建后限速恢复
+            state_dir=sleep_dir, session_id=session_tag,
         )
         self._tool_failures: int = 0  # #165: degradation counter
         self._consecutive_negative = self.personality.emotion.consecutive_negative
@@ -81,8 +83,8 @@ class Agent:
         self._react_iteration: int = 0
         self._react_messages: list[dict] | None = None
         self._max_tool_iterations: int = getattr(config, 'max_tool_iterations', 5)
-        self._degrade_threshold: int = 3   # #255: consecutive tool failures before degrading
-        self._max_fake_actions: int = 3    # #255: max fake action corrections
+        self._degrade_threshold: int = getattr(config, 'degrade_threshold', 3)   # #255: consecutive tool failures before degrading
+        self._max_fake_actions: int = getattr(config, 'max_fake_actions', 3)     # #255: max fake action corrections
         self._tool_registry: ToolRegistry = ToolRegistry()
         self._tool_calls_pending: list = []
 
@@ -165,12 +167,17 @@ class Agent:
         """Use inner drive to decide what proactive action to take."""
         from core.inner_drive import ProactiveIntent
         inner_drive = self._messages.ensure_inner_drive()
-        return inner_drive.assess_proactive(idle_duration)
+        # #177: 传入近期话题，让 LLM 选话题时避开重复
+        return inner_drive.assess_proactive(
+            idle_duration, recent_topics=self._proactive.get_recent_topics())
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
                     tool_registry=None, skip_post_process: bool = False) -> str:
         from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
         registry = tool_registry if tool_registry is not None else self._tool_registry
+        # H-07: 每条消息重置降级计数——否则上一条消息消耗的失败额度会让
+        # 本条消息 1 次失败就触发降级
+        self._tool_failures = 0
         max_tok = self._max_tokens_for_emotion()
         final_text = ""
         fake_action_count = 0
@@ -268,7 +275,8 @@ class Agent:
         elif sentiment > 0.1:
             self._consecutive_negative = max(0, self._consecutive_negative - 1)
         # Persist to EmotionalState so personality.save() captures it
-        self.personality.emotion.consecutive_negative = self._consecutive_negative
+        # #291: 经加锁 setter 写入，不再直接写字段
+        self.personality.set_consecutive_negative(self._consecutive_negative)
 
         hurt_multiplier = 1.0 + self._consecutive_negative * 0.4
         sentiment *= hurt_multiplier
@@ -280,7 +288,8 @@ class Agent:
                         f"arousal={self.personality.emotion.arousal:.2f} sentiment={sentiment:+.2f} "
                         f"consec_neg={self._consecutive_negative}")
 
-        self.personality.emotion.record_emotion_event(
+        # #291: 经 Personality 的加锁转发方法写 emotion_events deque
+        self.personality.record_emotion_event(
             trigger=last_user_turn[:100] if last_user_turn else "",
             context=last_user_turn[:200] if last_user_turn else "",
         )
@@ -321,6 +330,10 @@ class Agent:
 
     def record_rate_limit(self, action: str) -> None:
         return self._proactive.record_rate_limit(action)
+
+    def record_topic(self, topic: str) -> None:
+        """#177: 记录 LLM 主路径选用的话题（供去重与 prompt 提示）。"""
+        return self._proactive.record_topic(topic)
 
     def _calculate_proactivity(self, idle_duration: float) -> float:
         return self._proactive.calculate_proactivity(idle_duration)

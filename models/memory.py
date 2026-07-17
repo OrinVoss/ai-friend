@@ -83,6 +83,8 @@ class Reflection:
     created_at: str = ""
     level: int = 1                                # MM-006: L1/L2/L3
     parent_ids: list[int] = field(default_factory=list)  # MM-006
+    embedding: Optional[bytes] = None        # (#251) 供反思按相关度检索
+    embedding_version: int = 0               # (#251)
 
 
 # ML-001: Layer 1 Memory lifecycle models

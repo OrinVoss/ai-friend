@@ -22,6 +22,17 @@ class TestEstimateTokens(unittest.TestCase):
         result = estimate_tokens("hello 你好 123")
         self.assertGreater(result, 0)
 
+    def test_ext_a_counted_as_cjk(self):
+        # #262: CJK Ext A (U+3400-U+4DBF) 在启发式回退路径按 CJK ×1.5 计数
+        import core.context_manager as cm
+        original = cm._TOKENIZER
+        cm._TOKENIZER = False  # 强制走 tiktoken 不可用时的回退路径
+        try:
+            # 㐀 = U+3400，㐁 = U+3401
+            self.assertEqual(estimate_tokens("㐀㐁"), int(2 * 1.5))
+        finally:
+            cm._TOKENIZER = original
+
 
 class TestContextManager(unittest.TestCase):
     def setUp(self):
