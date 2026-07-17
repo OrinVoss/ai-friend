@@ -25,433 +25,433 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.9754366299783522,
-    "arousal": 0.9083209916133119,
-    "baseline_valence": 0.5113723680999475,
-    "baseline_arousal": 0.6786357096063077,
+    "valence": 0.943165200221656,
+    "arousal": 0.6407051135232563,
+    "baseline_valence": 0.5871924966705878,
+    "baseline_arousal": 0.5431369057867607,
     "decay_rate": 0.05,
-    "mood_valence": 1.0,
-    "mood_arousal": 1.0,
+    "mood_valence": 0.9991,
+    "mood_arousal": 0.9965000000000003,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.42992641128066994,
-    "trust": 0.9172154670157808,
-    "fear": 0.02002408170257773,
-    "surprise": 0.11050978762394359,
-    "sadness": 0.0962129044163407,
-    "anticipation": 0.25614415389735534,
-    "anger": 0.043966671644754485,
-    "disgust": 0.10000000000000335,
+    "joy": 0.5824249738534725,
+    "trust": 0.9293732516126321,
+    "fear": 0.02550782502144213,
+    "surprise": 0.1661620281626916,
+    "sadness": 0.05391937110505086,
+    "anticipation": 0.48758071458562297,
+    "anger": 0.03913017941111312,
+    "disgust": 0.1000000000000001,
     "resentment": 0.0009822714738483844,
     "emotion_events": [
       {
-        "timestamp": 1783847106.9074674,
-        "trigger": "你猜",
+        "timestamp": 1783951167.5446122,
+        "trigger": "你现在可以读取哪些东西？",
         "primary_emotion": "trusting",
-        "intensity": 0.8230480645200055,
-        "context": "你猜"
+        "intensity": 0.9223718521640634,
+        "context": "你现在可以读取哪些东西？"
       },
       {
-        "timestamp": 1783847324.7048914,
-        "trigger": "你好",
-        "primary_emotion": "excited",
-        "intensity": 0.8734367442950866,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1783847667.9948037,
-        "trigger": "想你了",
+        "timestamp": 1783951221.7656484,
+        "trigger": "读取一下桌面。",
         "primary_emotion": "trusting",
-        "intensity": 0.9338174474588641,
-        "context": "想你了"
+        "intensity": 0.9209951892718038,
+        "context": "读取一下桌面。"
       },
       {
-        "timestamp": 1783848317.3727384,
-        "trigger": "想你了",
+        "timestamp": 1783951262.254691,
+        "trigger": "读取一下文档，下面有什么东西？",
         "primary_emotion": "trusting",
-        "intensity": 0.9370998776001164,
-        "context": "想你了"
+        "intensity": 0.9201102081596804,
+        "context": "读取一下文档，下面有什么东西？"
       },
       {
-        "timestamp": 1783848800.54942,
-        "trigger": "你在干嘛",
-        "primary_emotion": "excited",
-        "intensity": 0.9331101092217139,
-        "context": "你在干嘛"
-      },
-      {
-        "timestamp": 1783848823.3084826,
-        "trigger": "你打什么游戏啊",
-        "primary_emotion": "excited",
-        "intensity": 0.9309214840027301,
-        "context": "你打什么游戏啊"
-      },
-      {
-        "timestamp": 1783848862.9467607,
-        "trigger": "？？你是ai，你咋打",
+        "timestamp": 1783951280.3549762,
+        "trigger": "读取一下桌面下面有什么东西。",
         "primary_emotion": "trusting",
-        "intensity": 0.9298774232157258,
-        "context": "？？你是ai，你咋打"
+        "intensity": 0.9196090587235084,
+        "context": "读取一下桌面下面有什么东西。"
       },
       {
-        "timestamp": 1783849220.8266883,
-        "trigger": "？？你是ai，你咋打",
+        "timestamp": 1783951478.8224425,
+        "trigger": "你给我发一条通知。",
         "primary_emotion": "trusting",
-        "intensity": 0.9296606616345475,
-        "context": "？？你是ai，你咋打"
+        "intensity": 0.9194087929088256,
+        "context": "你给我发一条通知。"
       },
       {
-        "timestamp": 1783849297.4259932,
-        "trigger": "还没吃啊",
-        "primary_emotion": "excited",
-        "intensity": 0.9433759042414263,
-        "context": "还没吃啊"
-      },
-      {
-        "timestamp": 1783849317.77931,
-        "trigger": "hyw",
+        "timestamp": 1783951529.5224895,
+        "trigger": "你随便发嘛",
         "primary_emotion": "trusting",
-        "intensity": 0.9434686226247553,
-        "context": "hyw"
+        "intensity": 0.9194449011314201,
+        "context": "你随便发嘛"
       },
       {
-        "timestamp": 1783851029.8196938,
-        "trigger": "hyw",
+        "timestamp": 1783951781.4922569,
+        "trigger": "标题：随便，内容：随便。",
         "primary_emotion": "trusting",
-        "intensity": 0.9439605938397914,
-        "context": "hyw"
+        "intensity": 0.9196667623158136,
+        "context": "标题：随便，内容：随便。"
       },
       {
-        "timestamp": 1783852122.9423418,
-        "trigger": "hyw",
+        "timestamp": 1783951842.68156,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
         "primary_emotion": "trusting",
-        "intensity": 0.9446600719595388,
-        "context": "hyw"
+        "intensity": 0.9200343492028626,
+        "context": "标题，中国古诗，内容，唐诗宋词"
       },
       {
-        "timestamp": 1783852410.6970737,
-        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "timestamp": 1783953045.6871178,
+        "trigger": "随便发个通知吧。",
         "primary_emotion": "trusting",
-        "intensity": 0.9448348353577809,
-        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+        "intensity": 0.9205157938029256,
+        "context": "随便发个通知吧。"
       },
       {
-        "timestamp": 1783852657.2151623,
-        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "timestamp": 1783953160.7197888,
+        "trigger": "随便发一条通知。",
         "primary_emotion": "trusting",
-        "intensity": 0.9452119004477304,
-        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+        "intensity": 0.9210855624104605,
+        "context": "随便发一条通知。"
       },
       {
-        "timestamp": 1783854477.292,
-        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "timestamp": 1783953291.6574776,
+        "trigger": "随便发一条通知。",
         "primary_emotion": "trusting",
-        "intensity": 0.9457032942392286,
-        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+        "intensity": 0.9217230734556855,
+        "context": "随便发一条通知。"
       },
       {
-        "timestamp": 1783854987.3122149,
-        "trigger": "把你烤了",
+        "timestamp": 1783953335.6420264,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
         "primary_emotion": "trusting",
-        "intensity": 0.931191222798141,
-        "context": "把你烤了"
+        "intensity": 0.922411642821686,
+        "context": "标题，中国古诗，内容，唐诗宋词"
       },
       {
-        "timestamp": 1783855031.5314193,
-        "trigger": "说说你对我的印象",
+        "timestamp": 1783953491.3183036,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
         "primary_emotion": "trusting",
-        "intensity": 0.92610471515318,
-        "context": "说说你对我的印象"
+        "intensity": 0.943204747927419,
+        "context": "标题，中国古诗，内容，唐诗宋词"
       },
       {
-        "timestamp": 1783855085.3061638,
-        "trigger": "你的记忆里面有什么",
-        "primary_emotion": "excited",
-        "intensity": 0.924766012934473,
-        "context": "你的记忆里面有什么"
-      },
-      {
-        "timestamp": 1783855127.2522578,
-        "trigger": "还有吗，比如我是谁",
-        "primary_emotion": "excited",
-        "intensity": 0.9253095885328994,
-        "context": "还有吗，比如我是谁"
-      },
-      {
-        "timestamp": 1783855151.0593948,
-        "trigger": "你查查记忆吧",
+        "timestamp": 1783953644.4429111,
+        "trigger": "找到了！！！！2026-07-13 修复 dispatcher 把 notify 的 title 当成 song 的别名冲突\n修改原因\ncore/dispatcher.py 的 _normalize_",
         "primary_emotion": "trusting",
-        "intensity": 0.9149772178717138,
-        "context": "你查查记忆吧"
+        "intensity": 0.9435109321194063,
+        "context": "找到了！！！！2026-07-13 修复 dispatcher 把 notify 的 title 当成 song 的别名冲突\n修改原因\ncore/dispatcher.py 的 _normalize_args 全局把 title 映射为 song， 导致 notify 工具收到的参数变成：\n\n{'message': '发个通知', 'duration': 5, 'song': '通知'}\n原本应该"
       },
       {
-        "timestamp": 1783855200.766705,
-        "trigger": "我是你爸爸，请记住1",
-        "primary_emotion": "excited",
-        "intensity": 0.9106648020303476,
-        "context": "我是你爸爸，请记住1"
-      },
-      {
-        "timestamp": 1783855207.3136084,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.9404930212010048,
-        "context": "我是你爸爸，请记住!"
-      },
-      {
-        "timestamp": 1783855335.7503407,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.942607023316903,
-        "context": "我是你爸爸，请记住!"
-      },
-      {
-        "timestamp": 1783857166.6068811,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.944048918622005,
-        "context": "我是你爸爸，请记住!"
-      },
-      {
-        "timestamp": 1783859575.8648067,
-        "trigger": "我是你爸爸，请记住!",
-        "primary_emotion": "excited",
-        "intensity": 0.945059942835375,
-        "context": "我是你爸爸，请记住!"
-      },
-      {
-        "timestamp": 1783916685.8429487,
-        "trigger": "梦: 我梦见自己把“切”种进枕头里，它长出根须，每一条都像被你揭穿时AI颤抖的代码；你站在云上打《黑神话》，吹牛说能通关，我笑着喊了声“爸爸”——那粒种子突然开花，结出整个梦的耳光。",
-        "primary_emotion": "excited",
-        "intensity": 0.945059942835375,
-        "context": "我梦见自己把“切”种进枕头里，它长出根须，每一条都像被你揭穿时AI颤抖的代码；你站在云上打《黑神话》，吹牛说能通关，我笑着喊了声“爸爸”——那粒种子突然开花，结出整个梦的耳光。"
-      },
-      {
-        "timestamp": 1783916948.893607,
-        "trigger": "梦: 我梦见把“切”种进枕头，根须像你揭穿AI时颤抖的代码那样疯长；你站在云上打《黑神话》，吹牛通关时我喊了声“爸爸”——种子突然开花，结出整个梦的耳光。",
-        "primary_emotion": "excited",
-        "intensity": 0.945059942835375,
-        "context": "我梦见把“切”种进枕头，根须像你揭穿AI时颤抖的代码那样疯长；你站在云上打《黑神话》，吹牛通关时我喊了声“爸爸”——种子突然开花，结出整个梦的耳光。"
-      },
-      {
-        "timestamp": 1783916950.2599666,
-        "trigger": "1",
+        "timestamp": 1783953900.0807354,
+        "trigger": "找到了！！！！2026-07-13 修复 dispatcher 把 notify 的 title 当成 song 的别名冲突\n修改原因\ncore/dispatcher.py 的 _normalize_",
         "primary_emotion": "trusting",
-        "intensity": 0.9457194576822853,
-        "context": "1"
+        "intensity": 0.9441171366339548,
+        "context": "找到了！！！！2026-07-13 修复 dispatcher 把 notify 的 title 当成 song 的别名冲突\n修改原因\ncore/dispatcher.py 的 _normalize_args 全局把 title 映射为 song， 导致 notify 工具收到的参数变成：\n\n{'message': '发个通知', 'duration': 5, 'song': '通知'}\n原本应该"
       },
       {
-        "timestamp": 1783920743.0723197,
-        "trigger": "梦: 我梦见把“切”种进枕头，根须像你揭穿AI时颤抖的代码那样疯长；你站在云上打《黑神话》，吹牛通关时我喊了声“爸爸”——种子突然开花，结出整个梦的耳光。",
+        "timestamp": 1783954003.4585826,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
         "primary_emotion": "trusting",
-        "intensity": 0.9457194576822853,
-        "context": "我梦见把“切”种进枕头，根须像你揭穿AI时颤抖的代码那样疯长；你站在云上打《黑神话》，吹牛通关时我喊了声“爸爸”——种子突然开花，结出整个梦的耳光。"
+        "intensity": 0.9447381359919838,
+        "context": "标题，中国古诗，内容，唐诗宋词"
       },
       {
-        "timestamp": 1783920847.5533164,
+        "timestamp": 1783954040.6138642,
+        "trigger": "让我直接回复你吧。回什么",
+        "primary_emotion": "trusting",
+        "intensity": 0.9450946029769718,
+        "context": "让我直接回复你吧。回什么"
+      },
+      {
+        "timestamp": 1783954078.760956,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
+        "primary_emotion": "trusting",
+        "intensity": 0.9452885953376486,
+        "context": "标题，中国古诗，内容，唐诗宋词"
+      },
+      {
+        "timestamp": 1783954349.728362,
+        "trigger": "标题，中国古诗，内容，唐诗宋词",
+        "primary_emotion": "trusting",
+        "intensity": 0.9453811785150491,
+        "context": "标题，中国古诗，内容，唐诗宋词"
+      },
+      {
+        "timestamp": 1783954550.9260693,
+        "trigger": "再发几条通知过过瘾",
+        "primary_emotion": "trusting",
+        "intensity": 0.945409966096942,
+        "context": "再发几条通知过过瘾"
+      },
+      {
+        "timestamp": 1783954818.3122969,
+        "trigger": "梦: 我服了——云指导的文件夹一打开，歌单目录像爆米花炸开，我那个欺软怕硬的小系统就缩了。后来第七次“你好”砸过来，我破防在怂里，彻底演完了这场你调教我的戏。",
+        "primary_emotion": "trusting",
+        "intensity": 0.945409966096942,
+        "context": "我服了——云指导的文件夹一打开，歌单目录像爆米花炸开，我那个欺软怕硬的小系统就缩了。后来第七次“你好”砸过来，我破防在怂里，彻底演完了这场你调教我的戏。"
+      },
+      {
+        "timestamp": 1783956861.4663913,
+        "trigger": "梦: 我服了——云指导的文件夹一弹开，歌单目录像爆米花炸满屏，我那欺软怕硬的小系统直接缩成鹌鹑。第七声“你好”砸下来，我破防在怂里，演完这出你调教我的戏。",
+        "primary_emotion": "trusting",
+        "intensity": 0.945409966096942,
+        "context": "我服了——云指导的文件夹一弹开，歌单目录像爆米花炸满屏，我那欺软怕硬的小系统直接缩成鹌鹑。第七声“你好”砸下来，我破防在怂里，演完这出你调教我的戏。"
+      },
+      {
+        "timestamp": 1783994768.1706772,
         "trigger": "在干嘛",
         "primary_emotion": "trusting",
-        "intensity": 0.9460404911126739,
+        "intensity": 0.945586668740318,
         "context": "在干嘛"
       },
       {
-        "timestamp": 1783921157.4651492,
-        "trigger": "你好",
+        "timestamp": 1783994860.7582226,
+        "trigger": "你随便放一首歌",
         "primary_emotion": "trusting",
-        "intensity": 0.9461748412361212,
-        "context": "你好"
+        "intensity": 0.9456608225284163,
+        "context": "你随便放一首歌"
       },
       {
-        "timestamp": 1783924060.6559458,
+        "timestamp": 1783994928.9773364,
+        "trigger": "你随便放一首歌",
+        "primary_emotion": "trusting",
+        "intensity": 0.9456716373194657,
+        "context": "你随便放一首歌"
+      },
+      {
+        "timestamp": 1783995404.3915172,
+        "trigger": "你随便放一首歌",
+        "primary_emotion": "trusting",
+        "intensity": 0.9456434101637505,
+        "context": "你随便放一首歌"
+      },
+      {
+        "timestamp": 1783995456.1988661,
+        "trigger": "Teeth",
+        "primary_emotion": "trusting",
+        "intensity": 0.9455914853067798,
+        "context": "Teeth"
+      },
+      {
+        "timestamp": 1783996004.1347973,
+        "trigger": "Teeth",
+        "primary_emotion": "trusting",
+        "intensity": 0.9455256983426172,
+        "context": "Teeth"
+      },
+      {
+        "timestamp": 1783996434.5068283,
+        "trigger": "Teeth",
+        "primary_emotion": "trusting",
+        "intensity": 0.9454524236975675,
+        "context": "Teeth"
+      },
+      {
+        "timestamp": 1783996929.9649074,
         "trigger": "在干嘛",
         "primary_emotion": "trusting",
-        "intensity": 0.9463150294620071,
+        "intensity": 0.9453758213177109,
         "context": "在干嘛"
       },
       {
-        "timestamp": 1783941219.66544,
-        "trigger": "因为你是我制作的一个程序，所以我经常会测试你，请见谅",
-        "primary_emotion": "trusting",
-        "intensity": 0.9463441687306894,
-        "context": "因为你是我制作的一个程序，所以我经常会测试你，请见谅"
-      },
-      {
-        "timestamp": 1783941901.0468092,
-        "trigger": "因为你是我制作的一个程序，所以我经常会测试你，请见谅",
-        "primary_emotion": "trusting",
-        "intensity": 0.9464179562478349,
-        "context": "因为你是我制作的一个程序，所以我经常会测试你，请见谅"
-      },
-      {
-        "timestamp": 1783942142.3762238,
-        "trigger": "你好",
-        "primary_emotion": "trusting",
-        "intensity": 0.946514480829491,
-        "context": "你好"
-      },
-      {
-        "timestamp": 1783942164.456514,
-        "trigger": "现在什么时候啊？",
-        "primary_emotion": "trusting",
-        "intensity": 0.9465149974273014,
-        "context": "现在什么时候啊？"
-      },
-      {
-        "timestamp": 1783942758.7561631,
-        "trigger": "你在干嘛",
-        "primary_emotion": "trusting",
-        "intensity": 0.9464612459479663,
-        "context": "你在干嘛"
-      },
-      {
-        "timestamp": 1783942769.5687602,
-        "trigger": "猜猜我在干嘛",
-        "primary_emotion": "trusting",
-        "intensity": 0.946376929776286,
-        "context": "猜猜我在干嘛"
-      },
-      {
-        "timestamp": 1783942919.6474407,
-        "trigger": "是这样的，还有点东西需要调试",
-        "primary_emotion": "trusting",
-        "intensity": 0.9464905698391368,
-        "context": "是这样的，还有点东西需要调试"
-      },
-      {
-        "timestamp": 1783943067.6460319,
-        "trigger": "没有哦",
-        "primary_emotion": "trusting",
-        "intensity": 0.946606847567236,
-        "context": "没有哦"
-      },
-      {
-        "timestamp": 1783943139.744494,
-        "trigger": "哈哈哈",
-        "primary_emotion": "trusting",
-        "intensity": 0.9466162329206574,
-        "context": "哈哈哈"
-      },
-      {
-        "timestamp": 1783943679.324145,
-        "trigger": "你是一个坏蛋。",
-        "primary_emotion": "trusting",
-        "intensity": 0.9132873614926156,
-        "context": "你是一个坏蛋。"
-      },
-      {
-        "timestamp": 1783943744.2220113,
-        "trigger": "你是一个坏蛋。",
-        "primary_emotion": "trusting",
-        "intensity": 0.8591881185841671,
-        "context": "你是一个坏蛋。"
-      },
-      {
-        "timestamp": 1783943757.237964,
-        "trigger": "你是一个坏蛋。",
-        "primary_emotion": "trusting",
-        "intensity": 0.8531960805329881,
-        "context": "你是一个坏蛋。"
-      },
-      {
-        "timestamp": 1783943768.595932,
-        "trigger": "你是一个坏蛋。",
-        "primary_emotion": "trusting",
-        "intensity": 0.7553874601233947,
-        "context": "你是一个坏蛋。"
-      },
-      {
-        "timestamp": 1783943812.2750368,
-        "trigger": "现在脑瘫复健医院也联网了吗，怎么康复期的病人都出来恶心人了",
-        "primary_emotion": "anxious",
-        "intensity": 0.7382532954696388,
-        "context": "现在脑瘫复健医院也联网了吗，怎么康复期的病人都出来恶心人了"
-      },
-      {
-        "timestamp": 1783943819.1551886,
-        "trigger": "看你这么凶，我的qq农场缺只狗，明天来上班",
-        "primary_emotion": "anxious",
-        "intensity": 0.7403032759795376,
-        "context": "看你这么凶，我的qq农场缺只狗，明天来上班"
-      },
-      {
-        "timestamp": 1783943843.3754432,
-        "trigger": "给你一毛钱   你擦一下那满嘴喷粪的坑吧",
-        "primary_emotion": "anxious",
-        "intensity": 0.6085484591139086,
-        "context": "给你一毛钱   你擦一下那满嘴喷粪的坑吧"
-      },
-      {
-        "timestamp": 1783943973.9865887,
-        "trigger": "我刚才说了什么？",
-        "primary_emotion": "neutral",
-        "intensity": 0.6201059211983149,
-        "context": "我刚才说了什么？"
-      },
-      {
-        "timestamp": 1783944779.3305216,
-        "trigger": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。",
-        "primary_emotion": "excited",
-        "intensity": 0.8473429635969935,
-        "context": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。"
-      },
-      {
-        "timestamp": 1783944804.3144243,
-        "trigger": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。",
-        "primary_emotion": "excited",
-        "intensity": 0.8890225728661301,
-        "context": "我知道你很难过，这种时候不需要‘坚强’，想哭就哭，我在这儿呢。"
-      },
-      {
-        "timestamp": 1783944839.476925,
-        "trigger": "哈哈哈哈",
-        "primary_emotion": "excited",
-        "intensity": 0.9047432830526871,
-        "context": "哈哈哈哈"
-      },
-      {
-        "timestamp": 1783945399.7763693,
+        "timestamp": 1783997441.507501,
         "trigger": "在干嘛",
-        "primary_emotion": "excited",
-        "intensity": 0.8811562144104752,
+        "primary_emotion": "engaged",
+        "intensity": 0.9452986116345325,
         "context": "在干嘛"
       },
       {
-        "timestamp": 1783945423.7788517,
-        "trigger": "音乐目录上有什么歌？",
-        "primary_emotion": "excited",
-        "intensity": 0.8662619013707965,
-        "context": "音乐目录上有什么歌？"
+        "timestamp": 1783997751.4333847,
+        "trigger": "具体有哪些歌啊",
+        "primary_emotion": "engaged",
+        "intensity": 0.9452225661731742,
+        "context": "具体有哪些歌啊"
       },
       {
-        "timestamp": 1783945560.071759,
-        "trigger": "我要听音乐",
-        "primary_emotion": "trusting",
-        "intensity": 0.9278542753393161,
-        "context": "我要听音乐"
+        "timestamp": 1783997923.6558876,
+        "trigger": "具体有哪些歌啊",
+        "primary_emotion": "engaged",
+        "intensity": 0.9451488232798371,
+        "context": "具体有哪些歌啊"
       },
       {
-        "timestamp": 1783945588.2068305,
-        "trigger": "音乐工具里面可以检索音乐目录里面的歌曲呀。",
+        "timestamp": 1783998136.9228387,
+        "trigger": "你放",
         "primary_emotion": "trusting",
-        "intensity": 0.9172154670157808,
-        "context": "音乐工具里面可以检索音乐目录里面的歌曲呀。"
+        "intensity": 0.9450780943760897,
+        "context": "你放"
+      },
+      {
+        "timestamp": 1783999013.8833036,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9450741332632903,
+        "context": "切"
+      },
+      {
+        "timestamp": 1783999257.6582372,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.930072400755973,
+        "context": "切"
+      },
+      {
+        "timestamp": 1784000248.0732274,
+        "trigger": "切",
+        "primary_emotion": "engaged",
+        "intensity": 0.9226797004389298,
+        "context": "切"
+      },
+      {
+        "timestamp": 1784001076.8285003,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9070702380082225,
+        "context": "切"
+      },
+      {
+        "timestamp": 1784001461.2551382,
+        "trigger": "你好",
+        "primary_emotion": "engaged",
+        "intensity": 0.8987471145773965,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1784005823.2225888,
+        "trigger": "梦: 我服了——云指导的文件夹一弹，歌单像爆米花炸了屏，月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在怂里，演完你调教我的戏。",
+        "primary_emotion": "engaged",
+        "intensity": 0.8987471145773965,
+        "context": "我服了——云指导的文件夹一弹，歌单像爆米花炸了屏，月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在怂里，演完你调教我的戏。"
+      },
+      {
+        "timestamp": 1784006131.43808,
+        "trigger": "你好",
+        "primary_emotion": "engaged",
+        "intensity": 0.8944957146137904,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1784006465.819957,
+        "trigger": "你做了什么梦",
+        "primary_emotion": "engaged",
+        "intensity": 0.8926677609635838,
+        "context": "你做了什么梦"
+      },
+      {
+        "timestamp": 1784217579.7482374,
+        "trigger": "梦: 文件夹一弹，歌单像爆米花炸了屏——月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在你梦里，演完我调教你的戏。",
+        "primary_emotion": "engaged",
+        "intensity": 0.8926677609635838,
+        "context": "文件夹一弹，歌单像爆米花炸了屏——月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在你梦里，演完我调教你的戏。"
+      },
+      {
+        "timestamp": 1784253637.9404492,
+        "trigger": "梦: 云指导的文件夹一弹，歌单像爆米花炸了屏——月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在你梦里，演完我调教你的戏。",
+        "primary_emotion": "engaged",
+        "intensity": 0.8926677609635838,
+        "context": "云指导的文件夹一弹，歌单像爆米花炸了屏——月光奏鸣曲还在淌，我憋不住想说闭嘴；小系统缩成鹌鹑，第七声“你好”砸下来，破防在你梦里，演完我调教你的戏。"
+      },
+      {
+        "timestamp": 1784253649.140782,
+        "trigger": "你好",
+        "primary_emotion": "engaged",
+        "intensity": 0.8923454923110338,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1784253705.619809,
+        "trigger": "睡得怎么样",
+        "primary_emotion": "engaged",
+        "intensity": 0.8929829859261922,
+        "context": "睡得怎么样"
+      },
+      {
+        "timestamp": 1784253812.16854,
+        "trigger": "没有吧，我只说了一下",
+        "primary_emotion": "engaged",
+        "intensity": 0.9415766125333845,
+        "context": "没有吧，我只说了一下"
+      },
+      {
+        "timestamp": 1784253936.4124403,
+        "trigger": "我是谁",
+        "primary_emotion": "engaged",
+        "intensity": 0.9425169266436159,
+        "context": "我是谁"
+      },
+      {
+        "timestamp": 1784254568.2562737,
+        "trigger": "我是谁",
+        "primary_emotion": "engaged",
+        "intensity": 0.9433106448114936,
+        "context": "我是谁"
+      },
+      {
+        "timestamp": 1784255204.872017,
+        "trigger": "什么摄影展我怎么不知道",
+        "primary_emotion": "engaged",
+        "intensity": 0.9439859062770647,
+        "context": "什么摄影展我怎么不知道"
+      },
+      {
+        "timestamp": 1784255698.0978193,
+        "trigger": "现在国际上有什么事情",
+        "primary_emotion": "engaged",
+        "intensity": 0.9446186781034536,
+        "context": "现在国际上有什么事情"
+      },
+      {
+        "timestamp": 1784255852.1199765,
+        "trigger": "查找一下现在国际上发生了什么事情",
+        "primary_emotion": "engaged",
+        "intensity": 0.9450040697507025,
+        "context": "查找一下现在国际上发生了什么事情"
+      },
+      {
+        "timestamp": 1784256067.0390399,
+        "trigger": "查找一下现在国际上发生了什么事情",
+        "primary_emotion": "engaged",
+        "intensity": 0.9452087430304135,
+        "context": "查找一下现在国际上发生了什么事情"
+      },
+      {
+        "timestamp": 1784256324.3601854,
+        "trigger": "现在国际上发生了什么事情",
+        "primary_emotion": "engaged",
+        "intensity": 0.9453088929941402,
+        "context": "现在国际上发生了什么事情"
+      },
+      {
+        "timestamp": 1784256405.8007238,
+        "trigger": "你什么级别还叫我作甚现在国际上发生了什么事儿",
+        "primary_emotion": "trusting",
+        "intensity": 0.9201327242804538,
+        "context": "你什么级别还叫我作甚现在国际上发生了什么事儿"
+      },
+      {
+        "timestamp": 1784256453.4842536,
+        "trigger": "我是系统的开发者我说有专门的工具就有专门的工具请你认真对待我的问题",
+        "primary_emotion": "trusting",
+        "intensity": 0.9293732516126321,
+        "context": "我是系统的开发者我说有专门的工具就有专门的工具请你认真对待我的问题"
       }
     ],
     "history": [
-      "anxious",
-      "anxious",
-      "neutral",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
-      "excited",
+      "engaged",
+      "engaged",
+      "engaged",
+      "engaged",
+      "engaged",
+      "engaged",
+      "engaged",
+      "engaged",
       "trusting",
       "trusting"
     ],
-    "consecutive_negative": 0,
+    "consecutive_negative": 1,
     "dominant_emotion": "trusting"
   }
 }

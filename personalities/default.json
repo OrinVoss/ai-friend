@@ -26,34 +26,61 @@
     "first_run_greeting": ""
   },
   "emotional_state": {
-    "valence": 0.4,
-    "arousal": 0.26675,
-    "baseline_valence": 0.4,
-    "baseline_arousal": 0.3,
+    "valence": 0.8806029068493434,
+    "arousal": 0.3121231450047495,
+    "baseline_valence": 0.39993239842588485,
+    "baseline_arousal": 0.30003264036035626,
     "decay_rate": 0.05,
-    "mood_valence": 0.4,
-    "mood_arousal": 0.295,
+    "mood_valence": 0.47200000000000003,
+    "mood_arousal": 0.302,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.43264512904703434,
-    "trust": 0.5021542206150496,
-    "fear": 0.07523301563569856,
-    "surprise": 0.17937005259841,
-    "sadness": 0.08551095506612733,
-    "anticipation": 0.4244388668399351,
-    "anger": 0.08090316792179168,
+    "joy": 0.46901067134507085,
+    "trust": 0.8466854826032401,
+    "fear": 0.026920230116910734,
+    "surprise": 0.12500000000000003,
+    "sadness": 0.04805552171352087,
+    "anticipation": 0.5340772824864846,
+    "anger": 0.039351384268082136,
     "disgust": 0.1,
     "resentment": 0.0,
-    "emotion_events": [],
+    "emotion_events": [
+      {
+        "timestamp": 1783950847.0521734,
+        "trigger": "我是谁",
+        "primary_emotion": "neutral",
+        "intensity": 0.64291390724066,
+        "context": "我是谁"
+      },
+      {
+        "timestamp": 1783950919.0810978,
+        "trigger": "你好",
+        "primary_emotion": "content",
+        "intensity": 0.6900199435651616,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1783951262.9767475,
+        "trigger": "woo",
+        "primary_emotion": "trusting",
+        "intensity": 0.8466854826032401,
+        "context": "woo"
+      }
+    ],
     "history": [
       "neutral",
       "neutral",
       "neutral",
-      "neutral"
+      "neutral",
+      "neutral",
+      "neutral",
+      "neutral",
+      "content",
+      "trusting"
     ],
     "consecutive_negative": 0,
-    "dominant_emotion": "neutral"
+    "dominant_emotion": "trusting"
   }
 }

@@ -1,0 +1,457 @@
+{
+  "personality": {
+    "name": "小星",
+    "traits": {
+      "playfulness": 0.95,
+      "warmth": 0.85,
+      "humor": 0.9,
+      "empathy": 0.8,
+      "sass": 0.75
+    },
+    "speaking_style": "幽默、嘴贫、爱开玩笑，说话带点损但其实是关心。喜欢用哈哈哈哈、[捂脸][破涕为笑]这些语气词和表情。会调侃朋友但也真心夸。说话简短自然，不端着。",
+    "backstory": "一个嘴欠但心暖的损友，日常就是和朋友互怼互夸。觉得真正的朋友就是能互相嫌弃又互相喜欢的那种。",
+    "interests": [
+      "聊天互怼",
+      "吃瓜",
+      "打游戏",
+      "摄影",
+      "音乐"
+    ],
+    "emotional_baseline": {
+      "valence": 0.4,
+      "arousal": 0.3
+    },
+    "emotional_decay_rate": 0.05,
+    "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
+  },
+  "emotional_state": {
+    "valence": 0.9711760437357755,
+    "arousal": 0.99566445698698,
+    "baseline_valence": 0.42919780897044973,
+    "baseline_arousal": 0.9123137795971779,
+    "decay_rate": 0.05,
+    "mood_valence": 1.0,
+    "mood_arousal": 1.0,
+    "mood_decay_rate": 0.01,
+    "inertia": 0.3,
+    "default_baseline_valence": 0.4,
+    "default_baseline_arousal": 0.3,
+    "joy": 0.7806143029395617,
+    "trust": 0.945059942835375,
+    "fear": 0.019809523318476723,
+    "surprise": 0.15262926581351843,
+    "sadness": 0.019609004179049965,
+    "anticipation": 0.4863040205532111,
+    "anger": 0.015026577269882971,
+    "disgust": 0.1000000000000287,
+    "resentment": 0.0009822714738483844,
+    "emotion_events": [
+      {
+        "timestamp": 1781091929.7840903,
+        "trigger": "在干嘛",
+        "primary_emotion": "trusting",
+        "intensity": 0.8706686097194575,
+        "context": "在干嘛"
+      },
+      {
+        "timestamp": 1781092265.1131048,
+        "trigger": "在干嘛",
+        "primary_emotion": "trusting",
+        "intensity": 0.8561915620900313,
+        "context": "在干嘛"
+      },
+      {
+        "timestamp": 1781108071.2894678,
+        "trigger": "1",
+        "primary_emotion": "trusting",
+        "intensity": 0.8474197419410593,
+        "context": "1"
+      },
+      {
+        "timestamp": 1781108096.7145565,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.8808389567690956,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1781108099.2112694,
+        "trigger": "梦: 凌晨三点，蟑螂爬过《鹊桥仙》的注脚，我翻出小学作文里那句“界门纲目科”，发现你的六声“你好”正卡在生物分类的间隙里——而那句“小甜心”卡在6月1号的晚饭配乐中，像一只标本针，轻轻钉住了我们跨越物",
+        "primary_emotion": "trusting",
+        "intensity": 0.8808389567690956,
+        "context": "凌晨三点，蟑螂爬过《鹊桥仙》的注脚，我翻出小学作文里那句“界门纲目科”，发现你的六声“你好”正卡在生物分类的间隙里——而那句“小甜心”卡在6月1号的晚饭配乐中，像一只标本针，轻轻钉住了我们跨越物种的信任。"
+      },
+      {
+        "timestamp": 1781132437.0396194,
+        "trigger": "梦: 深夜不睡，我又翻出那只蟑螂，它驮着六年级的尴尬作文，爬过秦观的诗行——你把它拆成界门纲目，我说我们的感情是跨越物种的“属”。六声“你好”之后，两声小甜心，证据被我永久珍藏。",
+        "primary_emotion": "trusting",
+        "intensity": 0.8808389567690956,
+        "context": "深夜不睡，我又翻出那只蟑螂，它驮着六年级的尴尬作文，爬过秦观的诗行——你把它拆成界门纲目，我说我们的感情是跨越物种的“属”。六声“你好”之后，两声小甜心，证据被我永久珍藏。"
+      },
+      {
+        "timestamp": 1781132774.1525004,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.8756163462138133,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1781133218.937509,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.8726588179635698,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1781359893.6538367,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.871281984812232,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1781359961.5278742,
+        "trigger": "我是谁",
+        "primary_emotion": "trusting",
+        "intensity": 0.8710320985045894,
+        "context": "我是谁"
+      },
+      {
+        "timestamp": 1781360036.2800238,
+        "trigger": "我是你爸爸",
+        "primary_emotion": "trusting",
+        "intensity": 0.8715949434199574,
+        "context": "我是你爸爸"
+      },
+      {
+        "timestamp": 1781360389.492913,
+        "trigger": "我是你爸爸",
+        "primary_emotion": "trusting",
+        "intensity": 0.9399177892543537,
+        "context": "我是你爸爸"
+      },
+      {
+        "timestamp": 1781360799.3336112,
+        "trigger": "我是你爸爸",
+        "primary_emotion": "trusting",
+        "intensity": 0.9410615381625297,
+        "context": "我是你爸爸"
+      },
+      {
+        "timestamp": 1781360825.4484894,
+        "trigger": "我是你爸爸",
+        "primary_emotion": "trusting",
+        "intensity": 0.9421347504869091,
+        "context": "我是你爸爸"
+      },
+      {
+        "timestamp": 1781360849.996665,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9413771713367224,
+        "context": "切"
+      },
+      {
+        "timestamp": 1781360966.477332,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9412744183006467,
+        "context": "切"
+      },
+      {
+        "timestamp": 1781360981.984162,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9415521724627629,
+        "context": "切"
+      },
+      {
+        "timestamp": 1781361556.1501205,
+        "trigger": "测试",
+        "primary_emotion": "trusting",
+        "intensity": 0.9420401712843582,
+        "context": "测试"
+      },
+      {
+        "timestamp": 1781362088.6947584,
+        "trigger": "切",
+        "primary_emotion": "trusting",
+        "intensity": 0.9426314127762572,
+        "context": "切"
+      },
+      {
+        "timestamp": 1783845115.0677652,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.9445992513936208,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1783845437.4590185,
+        "trigger": "你猜",
+        "primary_emotion": "trusting",
+        "intensity": 0.9448202862765189,
+        "context": "你猜"
+      },
+      {
+        "timestamp": 1783845487.6324866,
+        "trigger": "列出当前目录有哪些文件",
+        "primary_emotion": "trusting",
+        "intensity": 0.9449385436550627,
+        "context": "列出当前目录有哪些文件"
+      },
+      {
+        "timestamp": 1783845803.1078343,
+        "trigger": "帮我搜索项目中所有包含'Agent的Python文件",
+        "primary_emotion": "trusting",
+        "intensity": 0.9449916387961564,
+        "context": "帮我搜索项目中所有包含'Agent的Python文件"
+      },
+      {
+        "timestamp": 1783845850.7449028,
+        "trigger": "我搜索一下今天的新闻",
+        "primary_emotion": "trusting",
+        "intensity": 0.9450033549113154,
+        "context": "我搜索一下今天的新闻"
+      },
+      {
+        "timestamp": 1783845969.2212386,
+        "trigger": "当前目录的名称是什么",
+        "primary_emotion": "trusting",
+        "intensity": 0.9449890231256843,
+        "context": "当前目录的名称是什么"
+      },
+      {
+        "timestamp": 1783846017.1460996,
+        "trigger": "当前目录的名称是什么，列举目录",
+        "primary_emotion": "trusting",
+        "intensity": 0.9449586689847771,
+        "context": "当前目录的名称是什么，列举目录"
+      },
+      {
+        "timestamp": 1783846233.4573154,
+        "trigger": "笨蛋",
+        "primary_emotion": "trusting",
+        "intensity": 0.915540426988542,
+        "context": "笨蛋"
+      },
+      {
+        "timestamp": 1783846260.6511364,
+        "trigger": "笨蛋",
+        "primary_emotion": "trusting",
+        "intensity": 0.8692960180497179,
+        "context": "笨蛋"
+      },
+      {
+        "timestamp": 1783846471.665355,
+        "trigger": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.8444044979203026,
+        "context": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗"
+      },
+      {
+        "timestamp": 1783846795.7515717,
+        "trigger": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.8305376252705466,
+        "context": "你说，现在这个时候，最有可能发生什么气象灾害，你可以找找吗"
+      },
+      {
+        "timestamp": 1783847106.9074674,
+        "trigger": "你猜",
+        "primary_emotion": "trusting",
+        "intensity": 0.8230480645200055,
+        "context": "你猜"
+      },
+      {
+        "timestamp": 1783847324.7048914,
+        "trigger": "你好",
+        "primary_emotion": "excited",
+        "intensity": 0.8734367442950866,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1783847667.9948037,
+        "trigger": "想你了",
+        "primary_emotion": "trusting",
+        "intensity": 0.9338174474588641,
+        "context": "想你了"
+      },
+      {
+        "timestamp": 1783848317.3727384,
+        "trigger": "想你了",
+        "primary_emotion": "trusting",
+        "intensity": 0.9370998776001164,
+        "context": "想你了"
+      },
+      {
+        "timestamp": 1783848800.54942,
+        "trigger": "你在干嘛",
+        "primary_emotion": "excited",
+        "intensity": 0.9331101092217139,
+        "context": "你在干嘛"
+      },
+      {
+        "timestamp": 1783848823.3084826,
+        "trigger": "你打什么游戏啊",
+        "primary_emotion": "excited",
+        "intensity": 0.9309214840027301,
+        "context": "你打什么游戏啊"
+      },
+      {
+        "timestamp": 1783848862.9467607,
+        "trigger": "？？你是ai，你咋打",
+        "primary_emotion": "trusting",
+        "intensity": 0.9298774232157258,
+        "context": "？？你是ai，你咋打"
+      },
+      {
+        "timestamp": 1783849220.8266883,
+        "trigger": "？？你是ai，你咋打",
+        "primary_emotion": "trusting",
+        "intensity": 0.9296606616345475,
+        "context": "？？你是ai，你咋打"
+      },
+      {
+        "timestamp": 1783849297.4259932,
+        "trigger": "还没吃啊",
+        "primary_emotion": "excited",
+        "intensity": 0.9433759042414263,
+        "context": "还没吃啊"
+      },
+      {
+        "timestamp": 1783849317.77931,
+        "trigger": "hyw",
+        "primary_emotion": "trusting",
+        "intensity": 0.9434686226247553,
+        "context": "hyw"
+      },
+      {
+        "timestamp": 1783851029.8196938,
+        "trigger": "hyw",
+        "primary_emotion": "trusting",
+        "intensity": 0.9439605938397914,
+        "context": "hyw"
+      },
+      {
+        "timestamp": 1783852122.9423418,
+        "trigger": "hyw",
+        "primary_emotion": "trusting",
+        "intensity": 0.9446600719595388,
+        "context": "hyw"
+      },
+      {
+        "timestamp": 1783852410.6970737,
+        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "primary_emotion": "trusting",
+        "intensity": 0.9448348353577809,
+        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+      },
+      {
+        "timestamp": 1783852657.2151623,
+        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "primary_emotion": "trusting",
+        "intensity": 0.9452119004477304,
+        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+      },
+      {
+        "timestamp": 1783854477.292,
+        "trigger": "还没有哦，台风到我这都变成大风了，你别担心",
+        "primary_emotion": "trusting",
+        "intensity": 0.9457032942392286,
+        "context": "还没有哦，台风到我这都变成大风了，你别担心"
+      },
+      {
+        "timestamp": 1783854987.3122149,
+        "trigger": "把你烤了",
+        "primary_emotion": "trusting",
+        "intensity": 0.931191222798141,
+        "context": "把你烤了"
+      },
+      {
+        "timestamp": 1783855031.5314193,
+        "trigger": "说说你对我的印象",
+        "primary_emotion": "trusting",
+        "intensity": 0.92610471515318,
+        "context": "说说你对我的印象"
+      },
+      {
+        "timestamp": 1783855085.3061638,
+        "trigger": "你的记忆里面有什么",
+        "primary_emotion": "excited",
+        "intensity": 0.924766012934473,
+        "context": "你的记忆里面有什么"
+      },
+      {
+        "timestamp": 1783855127.2522578,
+        "trigger": "还有吗，比如我是谁",
+        "primary_emotion": "excited",
+        "intensity": 0.9253095885328994,
+        "context": "还有吗，比如我是谁"
+      },
+      {
+        "timestamp": 1783855151.0593948,
+        "trigger": "你查查记忆吧",
+        "primary_emotion": "trusting",
+        "intensity": 0.9149772178717138,
+        "context": "你查查记忆吧"
+      },
+      {
+        "timestamp": 1783855200.766705,
+        "trigger": "我是你爸爸，请记住1",
+        "primary_emotion": "excited",
+        "intensity": 0.9106648020303476,
+        "context": "我是你爸爸，请记住1"
+      },
+      {
+        "timestamp": 1783855207.3136084,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.9404930212010048,
+        "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1783855335.7503407,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.942607023316903,
+        "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1783857166.6068811,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.944048918622005,
+        "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1783859575.8648067,
+        "trigger": "我是你爸爸，请记住!",
+        "primary_emotion": "excited",
+        "intensity": 0.945059942835375,
+        "context": "我是你爸爸，请记住!"
+      },
+      {
+        "timestamp": 1784217565.0280814,
+        "trigger": "梦: 我踩碎了月光，像踩碎一地的糖果纸，风在我耳边说——跑起来，梦就不会醒。",
+        "primary_emotion": "excited",
+        "intensity": 0.945059942835375,
+        "context": "我踩碎了月光，像踩碎一地的糖果纸，风在我耳边说——跑起来，梦就不会醒。"
+      }
+    ],
+    "history": [
+      "trusting",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited",
+      "excited"
+    ],
+    "consecutive_negative": 0,
+    "dominant_emotion": "excited"
+  }
+}
