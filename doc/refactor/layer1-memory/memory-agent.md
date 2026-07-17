@@ -1,7 +1,7 @@
 # Memory Agent —— 记忆智能体设计
 
 > 目标：把「记忆检索 + 交叉验证 + 重构回答」封装成一个独立的 Memory Agent，替代当前散在 `memory/retrieval.py` 中的被动查询函数。
-> 状态：设计文档，待实现。
+> 状态：P0/P1 已实现（2026-07-16，`memory/memory_agent.py`，`tests/test_memory_agent.py` 21 用例）；P2/P3 待实施。
 
 ---
 
@@ -272,17 +272,17 @@ if user_says_correction:
 
 ### P0：基础版本
 
-- [ ] `MemoryClues` / `MemoryEvidence` / `MemoryAnswer` 数据模型
-- [ ] `MemoryAgent.answer()`：向量检索 + 简单交叉验证
-- [ ] `MemoryAgent.correct_fact()`：用户纠正通道
-- [ ] `tests/test_memory_agent.py`
+- [x] `MemoryClues` / `MemoryEvidence` / `MemoryAnswer` 数据模型
+- [x] `MemoryAgent.answer()`：向量检索 + 简单交叉验证
+- [x] `MemoryAgent.correct_fact()`：用户纠正通道
+- [x] `tests/test_memory_agent.py`
 
 ### P1：交叉验证增强 + 最小版睡眠巩固
 
-- [ ] `_extract_clues()`：时间解析（统一为绝对日期范围）+ 意图向量锚点（可选）
-- [ ] `_cross_verify()`：分类型时间线检查、矛盾检测、stale 检测
-- [ ] `verify_fact()`：主动验证旧 Fact
-- [ ] **批量验证（最小版睡眠式巩固）**：低负载时取最近未验证的 Fact，批量跑 `verify_fact()`，低置信度的触发 decay——只复用已有能力，先解决「旧 Fact 无人验证」的核心问题
+- [x] `_extract_clues()`：时间解析（统一为绝对日期范围）+ 意图向量锚点（可选）
+- [x] `_cross_verify()`：分类型时间线检查、矛盾检测、stale 检测
+- [x] `verify_fact()`：主动验证旧 Fact
+- [x] **批量验证（最小版睡眠式巩固）**：低负载时取最近未验证的 Fact，批量跑 `verify_fact()`，低置信度的触发 decay——只复用已有能力，先解决「旧 Fact 无人验证」的核心问题
 
 ### P2：完整交叉验证与 GC
 

@@ -376,13 +376,14 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 │   ├── logging_setup.py     日志配置（logs/YYYY-MM-DD.log + stderr）
 │   ├── async_utils.py       异步→同步桥接 run_async()（线程池安全）
 │   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）+ 执行 + 别名归一化
-├── memory/                  记忆系统（7 模块）
+├── memory/                  记忆系统（8 模块）
 │   ├── short_term.py        ConversationBuffer（deque, 线程安全）
 │   ├── long_term.py         LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
 │   ├── embeddings.py        本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache）
 │   ├── retrieval.py         三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
 │   ├── consolidation.py     记忆合并 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
 │   ├── fact_checker.py      矛盾检测 + 置信度衰减 + 用户纠正
+│   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答（确定性管道）
 │   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）

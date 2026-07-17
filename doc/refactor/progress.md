@@ -53,12 +53,18 @@ Layer 6: Personality / Session / 记忆绑定
 Phase 1（下一步）：
 - [ ] `insights_v2` 表 + `InsightV2` 模型
 - [ ] 用 Insight 替换 Reflection（双写过渡）
-- [ ] Memory Agent P0 实现（answer / correct_fact + 测试）
+- [x] Memory Agent P0 实现（answer / correct_fact + 测试）（2026-07-16）
 - [ ] 开启 `use_observation_fact=true` 灰度验证 `facts_v2` 数据质量
-- [ ] 批量验证旧 Fact（最小版睡眠巩固）
+- [x] 批量验证旧 Fact（最小版睡眠巩固，`batch_verify_facts`，2026-07-16）
+
+Phase 1.5（Memory Agent P1，2026-07-16 完成）：
+- [x] `_extract_clues()`：时间解析（绝对日期范围）+ 意图向量锚点
+- [x] `_cross_verify()`：分类型时间线、矛盾检测、stale 检测、综合置信度
+- [x] `verify_fact()` 主动验证
 
 Phase 2：
-- [ ] Memory Agent 完整交叉验证（矛盾传播、分类型时间线、LLM 线索提取）
+- [ ] Memory Agent 完整交叉验证（矛盾传播、LLM 线索提取）
+- [ ] Memory Agent 接入 InnerDrive（`use_memory_agent` 灰度开关）
 - [ ] Retrieval 切换到 `facts_v2` + `insights_v2`
 - [ ] 完整 GC：merge / decay / obsolete / archive
 - [ ] 旧数据迁移 + 删除旧表
