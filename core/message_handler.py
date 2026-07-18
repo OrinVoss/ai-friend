@@ -157,7 +157,10 @@ class MessageHandler:
             lifecycle = MemoryLifecycleManager(
                 a.ltm, config=a.config, embedding_engine=embed)
             self._memory_agent = MemoryAgent(
-                a.ltm, lifecycle, a.retriever, embedding_engine=embed)
+                a.ltm, lifecycle, a.retriever, embedding_engine=embed,
+                relevance_floor=getattr(a.config, "memory_agent_relevance_floor", 0.35),
+                relevance_full=getattr(a.config, "memory_agent_relevance_full", 0.75),
+            )
         return self._memory_agent
 
     def ensure_inner_drive(self):

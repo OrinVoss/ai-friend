@@ -283,6 +283,7 @@ if user_says_correction:
 - [x] `_cross_verify()`：分类型时间线检查、矛盾检测、stale 检测
 - [x] `verify_fact()`：主动验证旧 Fact
 - [x] **批量验证（最小版睡眠式巩固）**：低负载时取最近未验证的 Fact，批量跑 `verify_fact()`，低置信度的触发 decay——只复用已有能力，先解决「旧 Fact 无人验证」的核心问题
+- [x] **相关性下限（MA-002）**：可测量证据低于 `memory_agent_relevance_floor`（默认 0.35）直接丢弃，置信度按 `top_sim / memory_agent_relevance_full`（默认 0.75）缩放；recall/summarize 意图豁免——解决「无关输入也召回 10 条噪声、置信度虚高」的问题 ✅ 已完成（2026-07-18，`changes/2026-07-18-memory-agent-relevance-floor.md`）
 
 ### P2：完整交叉验证与 GC
 

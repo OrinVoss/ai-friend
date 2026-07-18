@@ -47,6 +47,7 @@ class MemoryEvidence:
     timestamp: str
     verification_count: int = 1
     similarity: float = 0.0          # vector similarity to the query
+    has_similarity: bool = False     # whether similarity was actually measurable
     is_contradicted: bool = False
     is_stale: bool = False
 
@@ -79,6 +80,10 @@ INTENT_ANCHORS = {
     "summarize": ["总结一下", "讲讲这段时间", "概括一下"],
 }
 INTENT_THRESHOLD = 0.65
+
+# Recall/summarize queries are topic-less ("上周我们聊了什么") — their query
+# embedding carries no topic, so the relevance floor must not apply.
+RECALL_LIKE_INTENTS = {"recall", "summarize"}
 
 
 def parse_time_ranges(query: str, today: Optional[datetime] = None) -> list[tuple[str, str]]:
@@ -180,26 +185,34 @@ class MemoryAgent:
 
     def __init__(self, ltm: LongTermMemory, lifecycle: MemoryLifecycleManager,
                  retriever: MemoryRetriever, embedding_engine=None,
-                 fact_checker: Optional[FactChecker] = None):
+                 fact_checker: Optional[FactChecker] = None,
+                 relevance_floor: float = 0.35,
+                 relevance_full: float = 0.75):
         self.ltm = ltm
         self.lifecycle = lifecycle
         self.retriever = retriever
         self._embed = embedding_engine
         self._fact_checker = fact_checker or FactChecker(embedding_engine=embedding_engine)
         self._intent_vecs: Optional[dict[str, np.ndarray]] = None  # lazy anchors
+        # MA-002: relevance floor. Measurable evidences below relevance_floor
+        # are dropped; final confidence is scaled by top_sim/relevance_full.
+        self._relevance_floor = relevance_floor
+        self._relevance_full = relevance_full
 
     # ── Public API ──
 
     async def answer(self, query: str, max_evidence: int = 10) -> MemoryAnswer:
         """Answer a question about the past with evidence + confidence."""
         clues = await self._extract_clues(query)
-        evidences = await self._retrieve_parallel(clues, max_evidence)
+        evidences, top_sim = await self._retrieve_parallel(clues, max_evidence)
         verified, contradictions, consistency = await self._cross_verify(evidences)
-        result = self._reconstruct(query, verified, contradictions, consistency)
+        result = self._reconstruct(query, verified, contradictions, consistency,
+                                   top_sim=top_sim)
+        sim_log = f"{top_sim:.2f}" if top_sim is not None else "n/a"
         logger.info(
             f"[memory_agent] answer: query={query[:40]!r} "
             f"evidences={len(result.evidences)} confidence={result.confidence} "
-            f"contradictions={len(result.contradictions)}"
+            f"top_sim={sim_log} contradictions={len(result.contradictions)}"
         )
         return result
 
@@ -211,7 +224,7 @@ class MemoryAgent:
             return MemoryAnswer(answer="找不到该事实", confidence=0.0,
                                 needs_more_evidence=True)
         clues = await self._extract_clues(f"{fact.fact_key} {fact.fact_value}")
-        evidences = await self._retrieve_parallel(clues, max_evidence=10)
+        evidences, top_sim = await self._retrieve_parallel(clues, max_evidence=10)
         verified, contradictions, consistency = await self._cross_verify(evidences)
 
         # FactChecker semantic contradiction against sibling facts
@@ -229,7 +242,7 @@ class MemoryAgent:
                     f"{fact.fact_key}: '{fact.fact_value}' vs '{conflict.fact_value}'")
 
         result = self._reconstruct_fact_verification(
-            fact, verified, contradictions, consistency)
+            fact, verified, contradictions, consistency, top_sim=top_sim)
         logger.info(
             f"[memory_agent] verify_fact: id={fact_id} "
             f"confidence={result.confidence} verdict={result.answer[:40]}"
@@ -329,7 +342,11 @@ class MemoryAgent:
     # ── Parallel retrieval (vector recall, no keyword filtering) ──
 
     async def _retrieve_parallel(self, clues: MemoryClues,
-                                 max_evidence: int) -> list[MemoryEvidence]:
+                                 max_evidence: int,
+                                 ) -> tuple[list[MemoryEvidence], Optional[float]]:
+        """Returns (evidences, top_sim). top_sim is None when relevance was
+        not applicable (no query vector, recall-like intent, or no measurable
+        evidence); otherwise it is the max measured cosine similarity."""
         repo = self.ltm.repo
         qvec = None
         if clues.query_embedding is not None:
@@ -345,6 +362,10 @@ class MemoryAgent:
             repo.get_all_relationships(),
         )
 
+        def _measurable(blob, version) -> bool:
+            return (qvec is not None and blob is not None
+                    and version == EMBEDDING_VERSION)
+
         evidences: list[MemoryEvidence] = []
         for f in facts:
             evidences.append(MemoryEvidence(
@@ -354,6 +375,7 @@ class MemoryAgent:
                 timestamp=f.updated_at or f.created_at,
                 verification_count=f.verification_count,
                 similarity=self._sim(qvec, f.embedding, f.embedding_version),
+                has_similarity=_measurable(f.embedding, f.embedding_version),
                 is_contradicted=(f.status == "contradicted"),
                 is_stale=(f.status not in ("active",)),
             ))
@@ -363,6 +385,7 @@ class MemoryAgent:
                 content=o.content[:200],
                 confidence=0.6, timestamp=o.created_at,
                 similarity=self._sim(qvec, o.embedding, o.embedding_version),
+                has_similarity=_measurable(o.embedding, o.embedding_version),
             ))
         for e in experiences:
             evidences.append(MemoryEvidence(
@@ -370,6 +393,7 @@ class MemoryAgent:
                 content=f"[{e.emotional_tone}] {e.summary}",
                 confidence=e.composite_score, timestamp=e.created_at,
                 similarity=self._sim(qvec, e.embedding, e.embedding_version),
+                has_similarity=_measurable(e.embedding, e.embedding_version),
             ))
         if relationship:
             rel_text = "，".join(f"{k}={v:.2f}" for k, v in relationship.items())
@@ -390,15 +414,37 @@ class MemoryAgent:
             ]
             logger.debug(f"[memory_agent] time filter: {before} -> {len(evidences)}")
 
+        # MA-002 relevance floor: drop measurable evidences whose cosine
+        # similarity to the query is below the floor. Unmeasurable evidences
+        # (no/old embedding, relationship) are kept — relevance unknowable.
+        # Skipped for recall-like intents: those queries carry no topic.
+        top_sim: Optional[float] = None
+        if qvec is not None and clues.intent not in RECALL_LIKE_INTENTS:
+            meas_sims = [e.similarity for e in evidences if e.has_similarity]
+            if meas_sims:
+                top_sim = max(meas_sims)
+                before = len(evidences)
+                evidences = [
+                    e for e in evidences
+                    if not e.has_similarity
+                    or e.similarity >= self._relevance_floor
+                ]
+                if len(evidences) != before:
+                    logger.debug(
+                        f"[memory_agent] relevance floor: {before} -> "
+                        f"{len(evidences)} (floor={self._relevance_floor} "
+                        f"top_sim={top_sim:.2f})"
+                    )
+
         evidences.sort(key=lambda e: (e.similarity, e.confidence), reverse=True)
         kept = evidences[:max_evidence]
-        top_sim = f"{kept[0].similarity:.2f}" if kept else "-"
+        kept_sim = f"{kept[0].similarity:.2f}" if kept else "-"
         logger.debug(
             f"[memory_agent] retrieve: facts={len(facts)} obs={len(observations)} "
             f"exp={len(experiences)} rel={bool(relationship)} "
-            f"kept={len(kept)} top_sim={top_sim}"
+            f"kept={len(kept)} top_sim={kept_sim}"
         )
-        return kept
+        return kept, top_sim
 
     @staticmethod
     def _sim(qvec: Optional[np.ndarray], blob, version: int) -> float:
@@ -459,7 +505,8 @@ class MemoryAgent:
 
     def _compute_confidence(self, evidences: list[MemoryEvidence],
                             contradictions: list[str], consistency: float,
-                            category: str = "event") -> float:
+                            category: str = "event",
+                            top_sim: Optional[float] = None) -> float:
         if not evidences:
             return 0.0
         timeline = check_timeline(evidences, category=category)
@@ -468,18 +515,23 @@ class MemoryAgent:
         avg_verif = sum(e.verification_count for e in evidences) / len(evidences)
         verification_score = min(avg_verif / 3.0, 1.0)
         penalty = 1.0 - min(len(contradictions) * 0.2, 0.5)
-        return round(
+        score = (
             consistency * WEIGHTS["consistency"]
             + verification_score * WEIGHTS["verification"]
             + avg_source * WEIGHTS["source_quality"]
             + freshness * WEIGHTS["freshness"]
             + timeline * WEIGHTS["timeline"]
-            + penalty * WEIGHTS["contradiction"],
-            2,
+            + penalty * WEIGHTS["contradiction"]
         )
+        # MA-002: scale by query relevance so off-topic recall (e.g. "你好"
+        # pulling 10 noise evidences) cannot reach a high confidence.
+        if top_sim is not None:
+            score *= min(top_sim / self._relevance_full, 1.0)
+        return round(score, 2)
 
     def _reconstruct(self, query: str, evidences: list[MemoryEvidence],
-                     contradictions: list[str], consistency: float) -> MemoryAnswer:
+                     contradictions: list[str], consistency: float,
+                     top_sim: Optional[float] = None) -> MemoryAnswer:
         if not evidences:
             return MemoryAnswer(
                 answer="没有找到相关记忆。", confidence=0.0,
@@ -488,7 +540,8 @@ class MemoryAgent:
             )
         category = self._dominant_category(evidences)
         confidence = self._compute_confidence(evidences, contradictions,
-                                              consistency, category=category)
+                                              consistency, category=category,
+                                              top_sim=top_sim)
         parts = []
         top_facts = [e for e in evidences if e.source_type == "fact"][:2]
         others = [e for e in evidences if e.source_type != "fact"][:2]
@@ -512,9 +565,11 @@ class MemoryAgent:
     def _reconstruct_fact_verification(self, fact: FactV2,
                                        evidences: list[MemoryEvidence],
                                        contradictions: list[str],
-                                       consistency: float) -> MemoryAnswer:
+                                       consistency: float,
+                                       top_sim: Optional[float] = None) -> MemoryAnswer:
         confidence = self._compute_confidence(evidences, contradictions,
-                                              consistency, category=fact.category)
+                                              consistency, category=fact.category,
+                                              top_sim=top_sim)
         label = f"「{fact.fact_key}: {fact.fact_value}」"
         if contradictions:
             verdict = f"事实{label}存在矛盾证据"

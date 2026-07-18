@@ -86,6 +86,10 @@ class Config:
     # MA-001: Memory Agent gray switch — InnerDrive uses memory_agent.answer()
     # for memory instead of retriever.retrieve_for_query() (memory-agent.md 7.1)
     use_memory_agent: bool = False
+    # MA-002: Memory Agent relevance floor — measurable evidences below this
+    # cosine similarity are dropped; confidence scales by top_sim/relevance_full
+    memory_agent_relevance_floor: float = 0.35
+    memory_agent_relevance_full: float = 0.75
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5

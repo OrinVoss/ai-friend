@@ -190,6 +190,23 @@ def compute_confidence(evidences: list[MemoryEvidence],
     return round(confidence, 2)
 ```
 
+### 3.6.1 查询相关性缩放（MA-002）
+
+✅ 已实现（2026-07-18，`changes/2026-07-18-memory-agent-relevance-floor.md`）
+
+六维加权衡量的是「证据本身的质量」，但没有衡量「证据和问题的相关度」——无关输入（如「你好」）也能召回一池噪声证据拿到虚高置信度。因此在加权分之后追加相关性缩放：
+
+```python
+if top_sim is not None:
+    confidence *= min(top_sim / relevance_full, 1.0)  # relevance_full 默认 0.75
+```
+
+同时在召回阶段加相关性下限：可测量证据（有当前版本向量的）cosine 相似度 < `relevance_floor`（默认 0.35）直接丢弃；无向量/旧版本向量的证据保留（相关性不可知，不误杀）。
+
+**豁免规则**：recall/summarize 意图（「上周我们聊了什么」）的 query 向量不携带话题，跳过下限与缩放，否则无主题回忆会被误杀。
+
+两个阈值均为 config 可调（`memory_agent_relevance_floor` / `memory_agent_relevance_full`），生产上按 `[memory_agent] answer:` 日志中的 `top_sim` 分布调参。
+
 ### 3.7 矛盾向上传播（二期）
 
 当一条 Fact 被新证据推翻（`correct_fact` 或 `contradict_fact`）时，不能只标记这条 Fact：

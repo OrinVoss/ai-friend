@@ -41,6 +41,8 @@
 | `db_path` | string | `"data/ai_friend.db"` | SQLite 数据库路径 |
 | `use_observation_fact` | bool | `false` | 记忆 Layer 1 生命周期开关：开启后合并时双写 Observation/FactV2（observe/promote/verify/contradict/decay/gc） |
 | `use_memory_agent` | bool | `false` | Memory Agent 灰度开关：开启后 Agent 1 用 `memory_agent.answer()` 替代旧检索（带置信度/证据链的记忆摘要），失败自动回退旧路径 |
+| `memory_agent_relevance_floor` | float | `0.35` | Memory Agent 相关性下限：可测量证据 cosine 相似度低于此值时丢弃；recall/summarize 意图豁免 |
+| `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
 | `db_backup_enabled` | bool | `true` | 数据库自动备份：检测到 schema 迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/` |
 | `db_backup_keep` | int | `5` | 备份滚动保留份数，超出时按最旧优先删除 |
 

@@ -31,7 +31,7 @@ def _fact(fid, key="最爱食物", value="披萨", confidence=0.9, status="activ
 
 
 def _agent(facts=None, observations=None, experiences=None, relationship=None,
-           qvec=None):
+           qvec=None, **agent_kwargs):
     """MemoryAgent over mocked ltm/lifecycle/embed. qvec = the vector every
     encode/encode_single call returns for the QUERY."""
     ltm = MagicMock()
@@ -54,8 +54,16 @@ def _agent(facts=None, observations=None, experiences=None, relationship=None,
     embed.encode.side_effect = lambda texts: np.stack([q] * len(texts))
     embed.health_check.return_value = True
 
-    agent = MemoryAgent(ltm, lifecycle, MagicMock(), embedding_engine=embed)
+    agent = MemoryAgent(ltm, lifecycle, MagicMock(), embedding_engine=embed,
+                        **agent_kwargs)
     return agent, ltm, lifecycle, embed
+
+
+def _strip_intent(embed):
+    """Make all intent anchors orthogonal to the query → intent=None."""
+    orthogonal = _unit([0, 1, 0, 0])
+    embed.encode.side_effect = lambda texts: np.stack(
+        [orthogonal] * len(texts))
 
 
 class TestParseTimeRanges(unittest.TestCase):
@@ -230,6 +238,84 @@ class TestIntentAnchors(unittest.TestCase):
 
         clues = asyncio.run(agent._extract_clues("今天天气怎么样"))
         self.assertIsNone(clues.intent)
+
+
+class TestRelevanceFloor(unittest.TestCase):
+    """MA-002: measurable evidences below the relevance floor are dropped and
+    confidence is scaled by top_sim/relevance_full."""
+
+    def test_irrelevant_query_drops_all_noise(self):
+        qvec = _unit([1, 0, 0, 0])
+        noise = _fact(1, qvec=_unit([0, 1, 0, 0]))  # sim 0.0 < floor
+        agent, _, _, embed = _agent(facts=[noise], qvec=qvec)
+        _strip_intent(embed)
+
+        result = asyncio.run(agent.answer("你好"))
+        self.assertEqual(result.answer, "没有找到相关记忆。")
+        self.assertEqual(result.confidence, 0.0)
+        self.assertEqual(result.evidences, [])
+        self.assertTrue(result.needs_more_evidence)
+
+    def test_relevant_fact_survives_full_confidence(self):
+        qvec = _unit([1, 0, 0, 0])
+        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fact = _fact(1, qvec=qvec, updated_at=today)  # sim 1.0 ≥ full
+        agent, _, _, embed = _agent(facts=[fact], qvec=qvec)
+        _strip_intent(embed)
+
+        result = asyncio.run(agent.answer("我最喜欢吃什么"))
+        self.assertEqual(len(result.evidences), 1)
+        self.assertGreater(result.confidence, 0.9)
+
+    def test_mid_similarity_scales_confidence(self):
+        qvec = _unit([1, 0, 0, 0])
+        today = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        half = _unit([0.5, 0.866, 0, 0])  # sim 0.5 → factor 0.5/0.75
+        agent_full, _, _, embed1 = _agent(
+            facts=[_fact(1, qvec=qvec, updated_at=today)], qvec=qvec)
+        _strip_intent(embed1)
+        agent_half, _, _, embed2 = _agent(
+            facts=[_fact(1, qvec=half, updated_at=today)], qvec=qvec)
+        _strip_intent(embed2)
+
+        full = asyncio.run(agent_full.answer("我最喜欢吃什么"))
+        mid = asyncio.run(agent_half.answer("我最喜欢吃什么"))
+        self.assertEqual(len(mid.evidences), 1)
+        self.assertLess(mid.confidence, full.confidence)
+        self.assertAlmostEqual(mid.confidence, round(full.confidence * 0.5 / 0.75, 2),
+                               delta=0.02)
+
+    def test_recall_intent_skips_floor(self):
+        q = _unit([1, 0, 0, 0])
+        noise = _fact(1, qvec=_unit([0, 1, 0, 0]))  # sim 0.0, normally dropped
+        agent, _, _, embed = _agent(facts=[noise], qvec=q)
+        anchor_vecs = {a: q for a in INTENT_ANCHORS["recall"]}
+        fallback = _unit([0, 0, 1, 0])
+        embed.encode.side_effect = lambda texts: np.stack(
+            [anchor_vecs.get(t, fallback) for t in texts])
+
+        result = asyncio.run(agent.answer("我们上次聊了什么"))
+        self.assertEqual(len(result.evidences), 1)
+
+    def test_unmeasurable_evidence_kept(self):
+        qvec = _unit([1, 0, 0, 0])
+        no_embed = _fact(1, value="没向量的事实")           # unmeasurable → kept
+        noise = _fact(2, value="噪声", qvec=_unit([0, 1, 0, 0]))  # dropped
+        agent, _, _, embed = _agent(facts=[no_embed, noise], qvec=qvec)
+        _strip_intent(embed)
+
+        result = asyncio.run(agent.answer("随便问点什么"))
+        self.assertEqual([e.source_id for e in result.evidences], [1])
+
+    def test_floor_configurable(self):
+        qvec = _unit([1, 0, 0, 0])
+        low = _fact(1, qvec=_unit([0.2, 0.98, 0, 0]))  # sim 0.2
+        agent, _, _, embed = _agent(facts=[low], qvec=qvec,
+                                    relevance_floor=0.1)
+        _strip_intent(embed)
+
+        result = asyncio.run(agent.answer("弱相关的问题"))
+        self.assertEqual(len(result.evidences), 1)
 
 
 if __name__ == "__main__":
