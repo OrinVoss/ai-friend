@@ -1,4 +1,6 @@
 """Tests for core/inner_drive.py"""
+import json
+import tempfile
 import unittest
 from unittest.mock import MagicMock
 
@@ -6,6 +8,7 @@ from core.inner_drive import (
     InnerDriveAgent, InnerDriveResult, ToolRequest,
     ProactiveIntent,
 )
+from core.inner_drive_state import InnerDriveState
 from tools.traits import EXTERNAL_TOOL_NAMES
 from tests.mocks import mock_tool_registry
 
@@ -365,6 +368,132 @@ class TestAssessProactive(unittest.TestCase):
         )
         intent = self.agent.assess_proactive(1800)
         self.assertEqual(intent.action, "silent")
+
+
+def _think_json(thought="我在想用户最近怎么样", recall_query="", action="chat",
+                topic="考试结果", reason="该关心一下用户了", care=None):
+    d = {"thought": thought, "recall_query": recall_query, "action": action,
+         "topic_hint": topic, "reasoning": reason}
+    if care is not None:
+        d["care_updates"] = care
+    return json.dumps(d, ensure_ascii=False)
+
+
+class TestProactiveThinkLoop(unittest.TestCase):
+    """Proactive think loop (proactive-think-loop.md): bounded reflection
+    rounds with recall and persistent care list."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.provider = MagicMock()
+        self.personality = MagicMock()
+        self.personality.config.traits = []
+        self.personality.config.name = "TestBot"
+        self.personality.config.interests = ["music"]
+        self.personality.emotion.to_prompt_summary.return_value = {
+            "dominant_emotion": "engaged", "mood": "投入", "primary_hint": "",
+            "valence": 0.6, "arousal": 0.5, "valence_desc": "积极",
+            "arousal_desc": "平衡", "behavior": "你心情平静。",
+        }
+        self.retriever = MagicMock()
+        self.retriever.retrieve_for_query.return_value = _make_memory_mock()
+        self.short_term = MagicMock()
+        self.short_term.format_for_prompt.return_value = "用户：今天天气真好"
+        self.state = InnerDriveState("thinktest", max_entries=5,
+                                     state_dir=self._tmp.name)
+        # registry whose recall tool returns a well-formed result
+        self.registry = MagicMock()
+        tool = MagicMock()
+        tool.execute.return_value = MagicMock(
+            success=True, output="回忆结果：用户上周提到过要考试")
+        self.registry.get.return_value = tool
+
+        self.agent = InnerDriveAgent(
+            provider=self.provider,
+            personality=self.personality,
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=self.short_term,
+            tool_registry=self.registry,
+            inner_drive_state=self.state,
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_single_round_when_no_recall(self):
+        self.provider.generate.return_value = _think_json()
+        intent = self.agent.assess_proactive(300)
+        self.assertEqual(intent.action, "chat")
+        self.assertEqual(intent.topic_hint, "考试结果")
+        self.assertEqual(intent.reasoning, "该关心一下用户了")
+        self.provider.generate.assert_called_once()
+
+    def test_recall_then_decide(self):
+        self.provider.generate.side_effect = [
+            _think_json(recall_query="用户最近提到的烦心事"),
+            _think_json(action="chat", topic="失眠近况", reason="查证后决定关心"),
+        ]
+        intent = self.agent.assess_proactive(600)
+        self.assertEqual(intent.action, "chat")
+        self.assertEqual(intent.topic_hint, "失眠近况")
+        self.assertEqual(self.provider.generate.call_count, 2)
+        # recall result was fed into round 2's messages
+        round2_messages = self.provider.generate.call_args_list[1][0][0]
+        self.assertTrue(any("回忆结果" in m["content"] for m in round2_messages))
+        self.registry.get.assert_called_with("recall")
+
+    def test_max_rounds_forced_termination(self):
+        self.provider.generate.return_value = _think_json(
+            recall_query="永远查不完的东西", action="silent", reason="查不到")
+        intent = self.agent.assess_proactive(600)
+        self.assertEqual(self.provider.generate.call_count, 3)  # 默认 3 轮封顶
+        self.assertEqual(intent.action, "silent")
+
+    def test_json_failure_regex_fallback(self):
+        self.provider.generate.return_value = (
+            "决策：聊天\n话题：旅行\n理由：上次聊到旅行很开心"
+        )
+        intent = self.agent.assess_proactive(300)
+        self.assertEqual(intent.action, "chat")
+        self.provider.generate.assert_called_once()
+
+    def test_invalid_action_falls_back_silent(self):
+        self.provider.generate.return_value = _think_json(action="dance")
+        intent = self.agent.assess_proactive(300)
+        self.assertEqual(intent.action, "silent")
+
+    def test_care_updates_persist_and_resurface(self):
+        # 第一次触发：留下挂念
+        self.provider.generate.return_value = _think_json(
+            care={"add": ["问问用户考试结果"], "remove": []})
+        self.agent.assess_proactive(300)
+        self.assertIn("问问用户考试结果", self.state.entries())
+        # 第二次触发：挂念进入 Round 1 的 system prompt
+        self.provider.generate.return_value = _think_json(
+            care={"add": [], "remove": ["问问用户考试结果"]})
+        self.agent.assess_proactive(300)
+        round1_messages = self.provider.generate.call_args_list[1][0][0]
+        self.assertIn("问问用户考试结果", round1_messages[0]["content"])
+        # remove 生效
+        self.assertNotIn("问问用户考试结果", self.state.entries())
+
+    def test_loop_disabled_legacy_single_shot(self):
+        agent = InnerDriveAgent(
+            provider=self.provider,
+            personality=self.personality,
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=self.short_term,
+            tool_registry=self.registry,
+            proactive_think_loop=False,
+        )
+        self.provider.generate.return_value = (
+            "决策：沉默\n理由：深夜了，不适合打扰"
+        )
+        intent = agent.assess_proactive(1800)
+        self.assertEqual(intent.action, "silent")
+        self.provider.generate.assert_called_once()
 
 
 if __name__ == "__main__":

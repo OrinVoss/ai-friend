@@ -130,6 +130,14 @@ class MessageHandler:
             if getattr(cfg, "use_memory_agent", False):
                 memory_agent = self._ensure_memory_agent()
                 logger.info("[msg] inner drive: memory agent enabled (use_memory_agent)")
+            # Proactive think loop: persistent care list (per-session file)
+            inner_drive_state = None
+            if getattr(cfg, "proactive_think_loop", True):
+                from core.inner_drive_state import InnerDriveState
+                inner_drive_state = InnerDriveState(
+                    session_id=getattr(a, "session_id", None) or "default",
+                    max_entries=getattr(cfg, "inner_drive_care_list_size", 20),
+                )
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,
                 personality=a.personality,
@@ -145,6 +153,9 @@ class MessageHandler:
                 # M-06: prompt 的工具规则/检查清单用全量 registry 生成，
                 # Agent 1 判断 needs_external_tools 需要看到外部工具
                 rule_tools_registry=a._tool_registry,
+                proactive_think_loop=getattr(cfg, "proactive_think_loop", True),
+                proactive_think_max_rounds=getattr(cfg, "proactive_think_max_rounds", 3),
+                inner_drive_state=inner_drive_state,
             )
 
     def _ensure_memory_agent(self):

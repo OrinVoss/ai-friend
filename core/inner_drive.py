@@ -96,6 +96,60 @@ INNER_DRIVE_SCHEMA = {
 }
 
 
+# Proactive think loop (proactive-think-loop.md): structured output for each
+# reflection round. recall_query non-empty → run internal recall and think
+# again; empty → the action field is the final decision. care_updates is the
+# loop's only allowed side effect (the AI's own care list).
+PROACTIVE_LOOP_SCHEMA = {
+    "type": "json_object",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "thought": {
+                "type": "string",
+                "description": "当前的想法，自由内容，带情绪色彩",
+            },
+            "recall_query": {
+                "type": "string",
+                "description": "想查证的记忆内容，如'用户最近提到的烦心事'；不需要查证则留空",
+            },
+            "action": {
+                "type": "string",
+                "enum": ["chat", "explore", "silent"],
+                "description": "最终决定。recall_query 非空时本字段忽略",
+            },
+            "topic_hint": {
+                "type": "string",
+                "description": "聊天或探索的话题方向",
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "决策理由，会作为 inner_drive_summary 传给 Agent 3",
+            },
+            "care_updates": {
+                "type": "object",
+                "description": "挂念清单更新，可选",
+                "properties": {
+                    "add": {"type": "array", "items": {"type": "string"}},
+                    "remove": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        "required": ["thought", "action", "reasoning"],
+    },
+}
+
+PROACTIVE_ACTIONS = {"chat", "explore", "silent"}
+
+
+def _positive_int(value, default: int) -> int:
+    """Coerce a config value to a positive int; bad types → default."""
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 class InnerDriveAgent:
     """Agent 1: Self-aware reasoning before any external tool execution."""
 
@@ -110,7 +164,10 @@ class InnerDriveAgent:
                  prompt_cache=None,
                  prompt_cache_ttl: float = 60.0,
                  memory_agent=None,
-                 rule_tools_registry=None):
+                 rule_tools_registry=None,
+                 proactive_think_loop: bool = True,
+                 proactive_think_max_rounds: int = 3,
+                 inner_drive_state=None):
         self._provider = provider
         self._personality = personality
         self._ltm = ltm
@@ -132,6 +189,12 @@ class InnerDriveAgent:
         # MA-001: when provided (use_memory_agent), memory comes from
         # memory_agent.answer() instead of retriever.retrieve_for_query()
         self._memory_agent = memory_agent
+        # Proactive think loop (proactive-think-loop.md): bounded reflection
+        # loop on the proactive path; inner_drive_state is the persistent
+        # care list read at Round 1 and updated via care_updates.
+        self._think_loop = proactive_think_loop
+        self._think_max_rounds = _positive_int(proactive_think_max_rounds, 3)
+        self._inner_drive_state = inner_drive_state
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
@@ -257,17 +320,98 @@ class InnerDriveAgent:
         """Decide whether and how to proactively engage the user.
 
         Called after ProactivityManager's cheap scoring triggers.
-        Replaces random topic selection and the 40/60 explore/chat split
-        with LLM-based reasoning about context, memory, and emotional state.
+        With proactive_think_loop on (default), runs a bounded reflection
+        loop (proactive-think-loop.md): think → optionally recall → decide,
+        with the persistent care list as Round-1 input and care_updates as
+        the only allowed side effect. Off → legacy single-shot decision.
         #177: recent_topics 来自 ProactivityManager 的去重队列，
         prompt 中告知 LLM 避开近期已聊话题。
         """
+        if not self._think_loop:
+            return self._assess_proactive_single(idle_duration, recent_topics)
+
         from datetime import datetime
         from prompts.system import build_inner_drive_proactive_prompt
+        from core.dispatcher import execute_tool_calls
 
         now = datetime.now()
         # M-04: 记忆上下文走 _context_summary_for（尊重 use_memory_agent），
         # query 与原逻辑一致为空字符串
+        cs = self._context_summary_for("")
+        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        care_list = (self._inner_drive_state.entries()
+                     if self._inner_drive_state is not None else [])
+
+        sys_prompt = build_inner_drive_proactive_prompt(
+            personality=self._personality.config,
+            emotion=self._personality.emotion,
+            memory_context=None,
+            conversation_history=conv_hist,
+            idle_duration=idle_duration,
+            current_time=now,
+            memory_context_summary=cs,
+            recent_topics=recent_topics,
+            care_list=care_list,
+            think_loop=True,
+        )
+
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": (
+                f"用户已经 {idle_duration:.0f} 秒没有说话。"
+                f"现在是 {now.strftime('%H:%M')}。\n"
+                "这是一段独处的时间。自由地想一想，输出本轮思考的 JSON。\n"
+                "如果想查证什么，先填 recall_query；"
+                "想清楚了，recall_query 留空并给出最终决定。"
+            )},
+        ]
+
+        logger.info(f"[inner_drive] proactive think loop start "
+                    f"idle={idle_duration:.0f}s care={len(care_list)}")
+        for round_num in range(1, self._think_max_rounds + 1):
+            logger.info(f"[inner_drive] think round={round_num}/{self._think_max_rounds}")
+            resp = self._provider.generate(
+                messages, stream=False, max_tokens=self._max_tokens_proactive,
+                response_format=PROACTIVE_LOOP_SCHEMA, source="proactive",
+            )
+            parsed = self._parse_proactive_json(resp)
+            if parsed is None:
+                logger.warning("[inner_drive] think JSON parse failed, regex fallback")
+                intent = self._parse_proactive_intent(resp)
+                logger.info(
+                    f"[inner_drive] proactive decision (fallback): action={intent.action} "
+                    f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+                )
+                return intent
+
+            self._apply_care_updates(parsed.get("care_updates"))
+            if parsed["thought"]:
+                logger.info(f"[inner_drive] thought: {parsed['thought'][:80]}")
+
+            recall_query = parsed["recall_query"]
+            if recall_query and round_num < self._think_max_rounds:
+                logger.info(f"[inner_drive] think recall: {recall_query[:60]}")
+                messages.append({"role": "assistant", "content": resp})
+                calls = [{"name": "recall", "arguments": {"query": recall_query}}]
+                exec_results = execute_tool_calls(self._full_registry, calls)
+                messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
+                continue
+            if recall_query:
+                # Last round still asking for recall — no rounds left; use
+                # its action if valid, otherwise _to_intent falls to silent.
+                logger.info("[inner_drive] think: max rounds reached with pending recall")
+            return self._to_proactive_intent(parsed)
+
+        # Unreachable (loop always returns), but keep a safe default.
+        return ProactiveIntent(action="silent", reasoning="沉思循环异常终止")
+
+    def _assess_proactive_single(self, idle_duration: float,
+                                 recent_topics: list | None = None) -> ProactiveIntent:
+        """Legacy single-shot proactive decision (proactive_think_loop=false)."""
+        from datetime import datetime
+        from prompts.system import build_inner_drive_proactive_prompt
+
+        now = datetime.now()
         cs = self._context_summary_for("")
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
 
@@ -299,6 +443,66 @@ class InnerDriveAgent:
             f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
         )
         return intent
+
+    def _to_proactive_intent(self, parsed: dict) -> ProactiveIntent:
+        """Convert a parsed think-loop round into the final ProactiveIntent."""
+        action = parsed["action"]
+        if action not in PROACTIVE_ACTIONS:
+            action = "silent"
+        intent = ProactiveIntent(
+            action=action,
+            topic_hint=parsed["topic_hint"][:100],
+            reasoning=parsed["reasoning"][:300],
+        )
+        logger.info(
+            f"[inner_drive] proactive decision: action={intent.action} "
+            f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+        )
+        return intent
+
+    def _apply_care_updates(self, care_updates) -> None:
+        """Apply care_updates to the persistent care list. This is the only
+        write action the think loop is allowed to have; failures are ignored
+        (the inner world degrades to in-memory for this trigger)."""
+        if not care_updates or self._inner_drive_state is None:
+            return
+        add = care_updates.get("add")
+        remove = care_updates.get("remove")
+        try:
+            self._inner_drive_state.apply_updates(
+                add=add if isinstance(add, list) else None,
+                remove=remove if isinstance(remove, list) else None,
+            )
+        except Exception as e:
+            logger.warning(f"[inner_drive] care updates failed: {e}")
+
+    def _parse_proactive_json(self, resp: str) -> dict | None:
+        """Parse one think-loop round's JSON output. None → caller falls back
+        to the legacy regex parser."""
+        import json
+        text = re.sub(r'<think>.*?</think>', '', resp.strip(), flags=re.DOTALL).strip()
+        data = None
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            brace_start = text.find('{')
+            brace_end = text.rfind('}')
+            if 0 <= brace_start < brace_end:
+                try:
+                    data = json.loads(text[brace_start:brace_end + 1])
+                except json.JSONDecodeError:
+                    data = None
+        if not isinstance(data, dict):
+            return None
+        care = data.get("care_updates")
+        return {
+            "thought": str(data.get("thought", "") or ""),
+            "recall_query": str(data.get("recall_query", "") or "").strip(),
+            "action": str(data.get("action", "") or "").strip(),
+            "topic_hint": str(data.get("topic_hint", "") or ""),
+            "reasoning": str(data.get("reasoning", "") or ""),
+            "care_updates": care if isinstance(care, dict) else None,
+        }
 
     def review(self, user_input: str, tool_records_text: str,
                round_num: int = 1, max_rounds: int = 3) -> InnerDriveResult:

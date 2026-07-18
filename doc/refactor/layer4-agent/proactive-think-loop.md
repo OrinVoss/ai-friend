@@ -2,7 +2,7 @@
 
 > 目标：给主动路径的 Agent 1 加一个有界思考循环，让「主动开口 / 自由探索」的决策从单次拍脑袋，升级为「想起 → 查证 → 决定」。
 > 核心：发挥 Agent 的主观能动性——思考内容**不设限**，由人格、情绪、记忆和它自己的挂念共同驱动。
-> 状态：设计文档，待实现。
+> 状态：✅ 一期已实现（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）。二期：循环内 recall 换 Memory Agent。
 > 归属：Layer 4（Agent Runtime）。只改 `InnerDriveAgent.assess_proactive()`，响应路径不动。
 
 ---

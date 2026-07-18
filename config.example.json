@@ -16,6 +16,9 @@
   "use_memory_agent": false,
   "memory_agent_relevance_floor": 0.35,
   "memory_agent_relevance_full": 0.75,
+  "proactive_think_loop": true,
+  "proactive_think_max_rounds": 3,
+  "inner_drive_care_list_size": 20,
   "db_backup_enabled": true,
   "db_backup_keep": 5
 }

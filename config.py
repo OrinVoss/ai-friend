@@ -90,6 +90,11 @@ class Config:
     # cosine similarity are dropped; confidence scales by top_sim/relevance_full
     memory_agent_relevance_floor: float = 0.35
     memory_agent_relevance_full: float = 0.75
+    # Proactive think loop (proactive-think-loop.md): bounded reflection loop
+    # on the proactive path; False = legacy single-shot decision
+    proactive_think_loop: bool = True
+    proactive_think_max_rounds: int = 3
+    inner_drive_care_list_size: int = 20
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5

@@ -186,6 +186,7 @@ class TestMessageHandlerWiring(unittest.TestCase):
         a.config.use_memory_agent = use_memory_agent
         a.config.prompt_cache_ttl_seconds = 60
         a.config.agent1_short_input_threshold = 20
+        a.config.proactive_think_loop = False
         a._tool_call_history = []
         a.consolidator._embed = None
         return MessageHandler(a)

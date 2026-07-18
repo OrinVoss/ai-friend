@@ -131,6 +131,7 @@ Phase 3（按需）：
 - [x] 魔法数字提取为类常量
 - [x] Agent 1/2 工具注册表隔离
 - [x] Agent 2 执行逻辑拆分
+- [x] 主动沉思循环（Proactive Think Loop）：`assess_proactive()` 3 轮有界循环 + JSON schema + 挂念清单一期（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）
 
 **待完成**：
 - [ ] 为 `Agent` 添加公开方法，避免直接访问内部属性

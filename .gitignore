@@ -25,6 +25,7 @@ Thumbs.db
 # Runtime
 .sleep_state
 .sleep_state.*
+.inner_drive_state.*
 
 # Logs
 *.log

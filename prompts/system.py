@@ -279,6 +279,8 @@ def build_inner_drive_proactive_prompt(
     current_time,
     memory_context_summary: str = "",
     recent_topics: list | None = None,
+    care_list: list | None = None,
+    think_loop: bool = False,
 ) -> str:
     """Agent 1: Proactive engagement decision prompt.
 
@@ -289,6 +291,11 @@ def build_inner_drive_proactive_prompt(
     When `memory_context_summary` is provided (e.g. from MemoryAgent), the
     relationship/facts/experiences blocks are replaced by the pre-formatted
     summary and `memory_context` may be None (M-04).
+
+    think_loop=True (proactive-think-loop.md): the output-format block is
+    replaced by the bounded reflection loop protocol (JSON with thought /
+    recall_query / action / care_updates), and `care_list` injects the AI's
+    persistent care items as thinking seeds.
     """
     # M-07: 摘要内部现取，不收外部预冻结的 emotion_summary（同 _build_inner_emotion_block）
     emotion_summary = emotion.to_prompt_summary()
@@ -339,33 +346,63 @@ def build_inner_drive_proactive_prompt(
             + "\n".join(f"- {t}" for t in recent_topics)
         )
 
-    blocks.append(
-        "=== 主动互动决策 ===\n"
-        "用户有一阵子没说话了。你是 AI 朋友，不是客服机器人。\n"
-        "你需要根据上下文决定：\n"
-        "\n"
-        "选项 A - 主动聊天：开启一个自然的、符合你们关系的话题\n"
-        "  时机：你们关系不错、之前聊得开心、你想分享什么、该关心用户了\n"
-        "  输出格式：\n"
-        "    决策：聊天\n"
-        "    话题：（用一两个词描述你想聊的话题方向）\n"
-        "    理由：（简短解释为什么选这个时机和话题）\n"
-        "\n"
-        "选项 B - 自由探索：上网搜点东西，有发现就分享\n"
-        "  时机：你好奇某件事、想了解用户的兴趣爱好、有想查的东西\n"
-        "  输出格式：\n"
-        "    决策：探索\n"
-        "    话题：（你想搜索或了解什么）\n"
-        "    理由：（简短解释）\n"
-        "\n"
-        "选项 C - 保持安静：现在不适合打扰\n"
-        "  时机：用户上次说了再见/晚安、你情绪很低落、深夜、用户好像生气了\n"
-        "  输出格式：\n"
-        "    决策：沉默\n"
-        "    理由：（简短解释为什么等待更好）\n"
-        "\n"
-        "只输出一种决策。不要输出多个选项。"
-    )
+    # Think loop: 挂念清单作为思考起点——它先看到「自己一直惦记的事」
+    if think_loop and care_list:
+        blocks.append(
+            "=== 你的挂念（你一直惦记的事）===\n"
+            + "\n".join(f"- {c}" for c in care_list)
+        )
+
+    if think_loop:
+        blocks.append(
+            "=== 独处沉思 ===\n"
+            "你现在有一段独处的时间。可以从这些方向自由地想，也可以想任何别的：\n"
+            "- 用户的近况：有没有没聊完的事、值得关心的进展\n"
+            "- 你的挂念：上面清单里一直惦记的事\n"
+            "- 好奇心：最近有什么想搞明白的东西\n"
+            "- 自我反思：最近的相处里有没有做得不好的地方\n"
+            "- 创造：想到什么有趣的东西想分享给 TA\n"
+            "\n"
+            "以 JSON 输出这一轮思考：\n"
+            '  "thought": 你现在的想法，自由内容，带情绪色彩\n'
+            '  "recall_query": 想查证的记忆内容（如"用户最近提到的烦心事"），不需要查证则留空。\n'
+            "    填写后系统会帮你回忆，结果会交给你，你可以带着证据再思考一轮。\n"
+            '  "action": 最终决定："chat"（主动聊天）/ "explore"（自由探索）/ "silent"（保持安静）。\n'
+            "    recall_query 非空时本字段会被忽略。\n"
+            '  "topic_hint": 聊天或探索的话题方向\n'
+            '  "reasoning": 决策理由\n'
+            '  "care_updates": 可选。更新你的挂念清单：{"add": ["新挂念"], "remove": ["已了却的挂念"]}\n'
+            "\n"
+            "想清楚了就给出最终决定。拿不准、时机不合适，就选 silent。"
+        )
+    else:
+        blocks.append(
+            "=== 主动互动决策 ===\n"
+            "用户有一阵子没说话了。你是 AI 朋友，不是客服机器人。\n"
+            "你需要根据上下文决定：\n"
+            "\n"
+            "选项 A - 主动聊天：开启一个自然的、符合你们关系的话题\n"
+            "  时机：你们关系不错、之前聊得开心、你想分享什么、该关心用户了\n"
+            "  输出格式：\n"
+            "    决策：聊天\n"
+            "    话题：（用一两个词描述你想聊的话题方向）\n"
+            "    理由：（简短解释为什么选这个时机和话题）\n"
+            "\n"
+            "选项 B - 自由探索：上网搜点东西，有发现就分享\n"
+            "  时机：你好奇某件事、想了解用户的兴趣爱好、有想查的东西\n"
+            "  输出格式：\n"
+            "    决策：探索\n"
+            "    话题：（你想搜索或了解什么）\n"
+            "    理由：（简短解释）\n"
+            "\n"
+            "选项 C - 保持安静：现在不适合打扰\n"
+            "  时机：用户上次说了再见/晚安、你情绪很低落、深夜、用户好像生气了\n"
+            "  输出格式：\n"
+            "    决策：沉默\n"
+            "    理由：（简短解释为什么等待更好）\n"
+            "\n"
+            "只输出一种决策。不要输出多个选项。"
+        )
 
     blocks.append("=== 最近对话 ===")
     blocks.append(conversation_history or "（还没有对话）")

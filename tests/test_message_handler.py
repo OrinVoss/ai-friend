@@ -52,6 +52,7 @@ class TestMessageHandler(unittest.TestCase):
         self.agent.config.prompt_cache_ttl_seconds = 60
         self.agent.config.conversation_examples_max_turns = 3
         self.agent.config.use_memory_agent = False
+        self.agent.config.proactive_think_loop = False
 
         self.handler = MessageHandler(self.agent)
 
