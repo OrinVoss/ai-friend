@@ -20,6 +20,7 @@ from prompts.templates import (
     REFLECTION_L2_PROMPT,
     REFLECTION_L3_PROMPT,
     EMOTION_ANALYSIS_PROMPT,
+    CARE_CLUE_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,14 @@ logger = logging.getLogger(__name__)
 class MemoryConsolidator:
     def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable,
                  embedding_engine=None, timeout: float = 60.0,
-                 config=None):
+                 config=None, inner_drive_state=None):
         self.ltm = ltm
         self.llm = llm_generate_fn
         self._timeout = timeout  # #184: independent timeout for LLM calls
         self._embed = embedding_engine
         self.config = config or {}
+        # 内驱状态二期：consolidation 对照解决 + 线索写入（inner-drive-state.md §5）
+        self._inner_drive_state = inner_drive_state
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
@@ -169,6 +172,22 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning(f"Embedding failed: {e}")
 
+        # Step 7: 内驱状态同步（二期，inner-drive-state.md 第 5 节）
+        # 对照解决：对话中提及的挂念标记 resolved；线索写入：发现未完成
+        # 的线索自动生成新条目。state 未接线时整步跳过。
+        if self._inner_drive_state is not None:
+            try:
+                resolved = self._inner_drive_state.resolve_matching(turn_text)
+                if resolved:
+                    logger.info(f"[consolidate] resolved {resolved} care item(s) "
+                                f"from conversation")
+            except Exception as e:
+                logger.warning(f"[consolidate] care resolve failed: {e}")
+            try:
+                self._extract_care_clues(turn_text)
+            except Exception as e:
+                logger.warning(f"[consolidate] care clue extraction failed: {e}")
+
         if errors:
             logger.warning(f"Consolidation partial: {len(errors)} step(s) failed: {errors}")
             # P1: clear buffer on any error to avoid re-processing already-extracted facts
@@ -179,6 +198,32 @@ class MemoryConsolidator:
         self._pending_buffer.clear()
         self._seen_ids.clear()
         logger.info("Consolidation complete.")
+
+    def _extract_care_clues(self, turn_text: str) -> None:
+        """内驱状态二期：从对话中提取「未完成的线索」写入挂念清单
+        （source=consolidation）。LLM 输出 JSON，解析失败静默跳过。"""
+        if not turn_text.strip():
+            return
+        prompt = safe_format(CARE_CLUE_PROMPT, text=turn_text[:3000])
+        result = self._call_llm(prompt, temperature=0.2)
+        if not result:
+            return
+        m = re.search(r'\{.*\}', result.strip(), re.DOTALL)
+        try:
+            data = json.loads(m.group(0) if m else result.strip())
+        except (json.JSONDecodeError, AttributeError):
+            logger.debug(f"[consolidate] care clue JSON parse failed: "
+                         f"{result[:100]}")
+            return
+        clues = data.get("clues")
+        if not isinstance(clues, list) or not clues:
+            return
+        valid = [c for c in clues
+                 if isinstance(c, dict) and str(c.get("content", "")).strip()]
+        if valid:
+            self._inner_drive_state.apply_updates(add=valid,
+                                                  source="consolidation")
+            logger.info(f"[consolidate] {len(valid)} care clue(s) added")
 
     def analyze_sentiment(self, text: str) -> tuple[float, bool, float]:
         """Returns (sentiment, personal_sharing, topic_energy).

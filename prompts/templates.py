@@ -14,6 +14,7 @@ FACT|分类|关键词|值|置信度|重要性|fact_type
   0.8~1.0 = 永久（如名字、身份、核心价值观）
 fact_type: user_fact / agent_fact / system_fact（事实主体类型，默认 user_fact）
 
+
 === 重要：只提取用户说的关于自己的信息 ===
 以下内容**不算用户事实，不要提取**：
 - AI 的行为（AI唱了歌、AI查了资料、AI发了通知）
@@ -30,6 +31,25 @@ fact_type: user_fact / agent_fact / system_fact（事实主体类型，默认 us
 {text}
 
 事实：
+"""
+
+
+# ── Care Clue Extraction（内驱状态二期：consolidation 自动写入挂念线索）──
+CARE_CLUE_PROMPT = """从这段对话中找出值得「惦记」的未完成线索——未来需要 follow-up 的事。
+输出 JSON：
+{"clues": [{"content": "一句话描述", "type": "care|curiosity|reflection|plan|idea", "expires_at": "YYYY-MM-DD 或空"}]}
+
+类型说明：
+- care：对用户的关心（用户最近失眠，问问好点没）
+- curiosity：想搞明白的事（用户推荐的那本书讲了什么）
+- plan：带时间点的约定/期待（用户明天面试，晚上问结果）——有明确时间的填 expires_at
+- idea：想分享的东西
+- reflection：自己行为上值得注意的点
+
+只提取对话中**明确提到**的线索，不要推测。没有值得惦记的就输出 {"clues": []}。
+
+对话：
+{text}
 """
 
 

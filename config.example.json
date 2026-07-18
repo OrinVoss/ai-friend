@@ -19,6 +19,10 @@
   "proactive_think_loop": true,
   "proactive_think_max_rounds": 3,
   "inner_drive_care_list_size": 20,
+  "inner_drive_surface_top_k": 8,
+  "inner_drive_surface_response_k": 3,
+  "inner_drive_decay_rate": 0.9,
+  "inner_drive_care_similarity_threshold": 0.7,
   "db_backup_enabled": true,
   "db_backup_keep": 5
 }

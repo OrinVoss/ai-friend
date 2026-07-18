@@ -95,6 +95,11 @@ class Config:
     proactive_think_loop: bool = True
     proactive_think_max_rounds: int = 3
     inner_drive_care_list_size: int = 20
+    # 内驱状态二期（inner-drive-state.md）：浮现规则与语义阈值
+    inner_drive_surface_top_k: int = 8        # 独处时每轮思考浮现条数
+    inner_drive_surface_response_k: int = 3   # 对话时相关浮现条数
+    inner_drive_decay_rate: float = 0.9       # 浮现未行动的 priority 衰减率
+    inner_drive_care_similarity_threshold: float = 0.7  # 语义浮现/对照解决阈值
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5

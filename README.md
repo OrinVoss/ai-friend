@@ -336,7 +336,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（613 用例，48 个测试文件）
+├── tests/                     单元测试（635 用例，48 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -378,7 +378,7 @@ ai-friend/
 │
 ├── core/                      核心引擎（20 模块，三层架构）
 │   ├── inner_drive.py          Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策 + 主动沉思循环
-│   ├── inner_drive_state.py   内驱状态：挂念清单（per-session 持久化，FIFO 淘汰，一期）
+│   ├── inner_drive_state.py   内驱状态：类型化挂念清单 + 生命周期 + 情绪联动浮现 + 语义浮现/对照解决（二期）
 │   ├── tool_agent.py           Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker
 │   ├── agent.py                核心引擎：Agent 3 Roleplay + ReAct 循环
 │   ├── message_handler.py     消息入口（process_message/proactive/explore + 公共构建）

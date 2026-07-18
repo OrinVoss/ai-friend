@@ -333,5 +333,52 @@ class TestEmbedNewItemsCoverage(unittest.TestCase):
             self.assertEqual(theirs[0]["embedding_version"], 0)
 
 
+class TestCareClueExtraction(unittest.TestCase):
+    """内驱状态二期：consolidation 线索写入 + 对照解决（inner-drive-state.md §5）。"""
+
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+        self.state = MagicMock()
+        self.consolidator = MemoryConsolidator(
+            self.ltm, self.llm, inner_drive_state=self.state)
+
+    def test_clues_written_with_consolidation_source(self):
+        self.llm.return_value = (
+            '{"clues": [{"content": "用户明天面试，晚上问结果", '
+            '"type": "plan", "expires_at": "2026-07-19"}]}'
+        )
+        self.consolidator._extract_care_clues("用户：我明天面试")
+        self.state.apply_updates.assert_called_once()
+        kwargs = self.state.apply_updates.call_args.kwargs
+        self.assertEqual(kwargs["source"], "consolidation")
+        self.assertEqual(kwargs["add"][0]["type"], "plan")
+
+    def test_empty_clues_no_write(self):
+        self.llm.return_value = '{"clues": []}'
+        self.consolidator._extract_care_clues("用户：今天天气不错")
+        self.state.apply_updates.assert_not_called()
+
+    def test_invalid_json_silently_skipped(self):
+        self.llm.return_value = "这不是 JSON"
+        self.consolidator._extract_care_clues("用户：随便聊聊")
+        self.state.apply_updates.assert_not_called()
+
+    def test_clue_without_content_filtered(self):
+        self.llm.return_value = (
+            '{"clues": [{"type": "care"}, {"content": "有效线索"}]}'
+        )
+        self.consolidator._extract_care_clues("用户：说点事")
+        kwargs = self.state.apply_updates.call_args.kwargs
+        self.assertEqual(len(kwargs["add"]), 1)
+        self.assertEqual(kwargs["add"][0]["content"], "有效线索")
+
+    def test_no_state_noop(self):
+        from memory.consolidation import MemoryConsolidator
+        c = MemoryConsolidator(self.ltm, self.llm)
+        self.assertIsNone(c._inner_drive_state)
+
+
 if __name__ == "__main__":
     unittest.main()

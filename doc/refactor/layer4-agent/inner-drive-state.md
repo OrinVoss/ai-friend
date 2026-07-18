@@ -1,7 +1,7 @@
 # 内驱状态（Inner Drive State）设计
 
 > 目标：给 Agent 一个跨触发持久的「内心世界」——它惦记什么、好奇什么、反思什么、计划什么，不会每次独处都从零开始。
-> 状态：一期（最小挂念清单）✅ 已实现（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）；本文档是完整设计，二期三期待实现。
+> 状态：一期（最小挂念清单）+ 二期（类型化/生命周期/浮现规则/响应路径注入/consolidation 合流）✅ 已实现（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`、`changes/2026-07-18-inner-drive-state-p2.md`）；三期（回馈闭环/memory_agent 来源/dreams）待实现。
 > 归属：Layer 4（Agent Runtime）；与 Layer 1（Memory）、Layer 6（Session 绑定）有接口。
 
 ---
@@ -176,7 +176,7 @@ class InnerDriveState:
 | 期 | 内容 | 依赖 |
 |----|------|------|
 | 一期 ✅（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`） | 最小挂念清单：扁平列表、20 条、FIFO，随 Proactive Think Loop 落地 | Think Loop |
-| 二期 | 类型化条目 + 生命周期（resolved/expired/decayed）+ 浮现规则 + consolidation 写入与对照解决 + **响应路径注入（surface_for_query）** | Layer 1 双写稳定 |
+| 二期 ✅（2026-07-18，`changes/2026-07-18-inner-drive-state-p2.md`） | 类型化条目 + 生命周期（resolved/expired/decayed）+ 浮现规则 + consolidation 写入与对照解决 + **响应路径注入（surface_for_query）** | Layer 1 双写稳定 |
 | 三期 | 回馈闭环 + `memory_agent` 来源 + 长期梦想（dreams：数周尺度的目标，如「陪用户把这本书读完」） | Memory Agent P0 |
 
 **dreams（三期）**是真正的长期内驱：比挂念大一个时间尺度，不因单次行动 resolved，而是持续影响思考方向。一期二期先不做，但条目模型预留了扩展空间（`type: "dream"`）。

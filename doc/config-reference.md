@@ -45,7 +45,11 @@
 | `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
 | `proactive_think_loop` | bool | `true` | 主动沉思循环开关：开启后主动路径走「想起 → 查证 → 决定」有界循环（默认 3 轮）；关闭退回单次决策 |
 | `proactive_think_max_rounds` | int | `3` | 沉思循环轮数硬上限 |
-| `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按 FIFO 淘汰最旧条目 |
+| `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按「先非活跃、再低 priority、最后旧活跃」淘汰（二期起非 FIFO） |
+| `inner_drive_surface_top_k` | int | `8` | 内驱状态二期：独处时每轮沉思浮现的挂念条数 |
+| `inner_drive_surface_response_k` | int | `3` | 内驱状态二期：对话时按语义相关浮现的挂念条数 |
+| `inner_drive_decay_rate` | float | `0.9` | 内驱状态二期：浮现未行动的 priority 衰减率，低于 0.2 自动归档 |
+| `inner_drive_care_similarity_threshold` | float | `0.7` | 内驱状态二期：语义浮现（surface_for_query）与对照解决（resolve_matching）的相似度阈值 |
 | `db_backup_enabled` | bool | `true` | 数据库自动备份：检测到 schema 迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/` |
 | `db_backup_keep` | int | `5` | 备份滚动保留份数，超出时按最旧优先删除 |
 

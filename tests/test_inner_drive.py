@@ -495,6 +495,48 @@ class TestProactiveThinkLoop(unittest.TestCase):
         self.assertEqual(intent.action, "silent")
         self.provider.generate.assert_called_once()
 
+    def test_typed_care_updates(self):
+        # 类型化 care_updates：plan + expires_at 写入状态
+        future = "2099-01-01T20:00:00"
+        self.provider.generate.return_value = _think_json(
+            care={"add": [{"content": "用户明天面试，晚上问结果",
+                           "type": "plan", "expires_at": future}],
+                  "remove": []})
+        self.agent.assess_proactive(300)
+        entries = self.state.active_entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].type, "plan")
+        self.assertEqual(entries[0].expires_at, future)
+        # 下次触发：带类型标签浮现
+        self.provider.generate.return_value = _think_json()
+        self.agent.assess_proactive(300)
+        round1_messages = self.provider.generate.call_args_list[1][0][0]
+        self.assertIn("[计划] 用户明天面试", round1_messages[0]["content"])
+
+    def test_assess_injects_care_block(self):
+        # 二期 4.2：用户消息命中挂念 → 注入 context_summary（同流到 Agent 3）
+        from core.inner_drive_state import DriveEntry
+        state = MagicMock()
+        state.surface_for_query.return_value = [
+            DriveEntry(id="c1", type="care", content="问问用户考试结果")]
+        agent = InnerDriveAgent(
+            provider=self.provider,
+            personality=self.personality,
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=self.short_term,
+            tool_registry=self.registry,
+            inner_drive_state=state,
+        )
+        self.provider.generate.return_value = (
+            '{"needs_external_tools": false, "reasoning": "闲聊", '
+            '"summary": "", "tool_requests": []}'
+        )
+        result = agent.assess("我考试成绩出来了")
+        state.surface_for_query.assert_called_once_with("我考试成绩出来了")
+        self.assertIn("你在意的事", result.context_summary)
+        self.assertIn("问问用户考试结果", result.context_summary)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -130,7 +130,31 @@ PROACTIVE_LOOP_SCHEMA = {
                 "type": "object",
                 "description": "挂念清单更新，可选",
                 "properties": {
-                    "add": {"type": "array", "items": {"type": "string"}},
+                    "add": {
+                        "type": "array",
+                        "items": {
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "content": {"type": "string"},
+                                        "type": {
+                                            "type": "string",
+                                            "enum": ["care", "curiosity",
+                                                     "reflection", "plan", "idea"],
+                                        },
+                                        "priority": {"type": "number"},
+                                        "expires_at": {
+                                            "type": "string",
+                                            "description": "ISO 时间，plan 类建议填写",
+                                        },
+                                    },
+                                    "required": ["content"],
+                                },
+                            ],
+                        },
+                    },
                     "remove": {"type": "array", "items": {"type": "string"}},
                 },
             },
@@ -212,6 +236,11 @@ class InnerDriveAgent:
         if not use_ma:
             mem_ctx = self._retriever.retrieve_for_query(user_input)
             cs = self._build_context_summary(mem_ctx)
+        # 二期 4.2：对话触发的挂念浮现——用户聊到的事和某条挂念相关时，
+        # 它自然浮上来，经 context_summary 链路同流到 Agent 3，调用侧零改动
+        care_block = self._surface_care_for(user_input)
+        if care_block:
+            cs = f"{cs}\n\n{care_block}" if cs else care_block
 
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
         sys_prompt = build_inner_drive_prompt(
@@ -273,6 +302,26 @@ class InnerDriveAgent:
             summary="",
             context_summary=cs,
         )
+
+    def _surface_care_for(self, user_input: str) -> str:
+        """响应路径的挂念浮现块（inner-drive-state.md 4.2）：相关度超过
+        阈值的活跃挂念注入上下文，可自然提及，不要硬塞。"""
+        if self._inner_drive_state is None or not user_input.strip():
+            return ""
+        try:
+            hits = self._inner_drive_state.surface_for_query(user_input)
+            if not hits:
+                return ""
+            from core.inner_drive_state import TYPE_LABELS
+            lines = "\n".join(
+                f"- [{TYPE_LABELS.get(e.type, e.type)}] {e.content}" for e in hits)
+        except Exception as e:
+            logger.debug(f"[inner_drive] care surface_for_query failed: {e}")
+            return ""
+        logger.info(f"[inner_drive] care surfaced on-topic: "
+                    f"{[e.content[:30] for e in hits]}")
+        return ("=== 你在意的事（与当前对话相关，可自然提及，不要硬塞）===\n"
+                + lines)
 
     def _build_context_summary(self, mem_ctx) -> str:
         """Format memory/relationship blocks for Agent 3 reuse."""
@@ -339,8 +388,18 @@ class InnerDriveAgent:
         # query 与原逻辑一致为空字符串
         cs = self._context_summary_for("")
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        care_list = (self._inner_drive_state.entries()
-                     if self._inner_drive_state is not None else [])
+        # 二期：按浮现规则（priority × 情绪类型权重 × 时效）取挂念，非全量倾倒
+        care_list: list[str] = []
+        if self._inner_drive_state is not None:
+            try:
+                from core.inner_drive_state import TYPE_LABELS
+                care_list = [
+                    f"[{TYPE_LABELS.get(e.type, e.type)}] {e.content}"
+                    for e in self._inner_drive_state.surface(
+                        emotion=self._personality.emotion)
+                ]
+            except Exception as e:
+                logger.warning(f"[inner_drive] care surface failed: {e}")
 
         sys_prompt = build_inner_drive_proactive_prompt(
             personality=self._personality.config,

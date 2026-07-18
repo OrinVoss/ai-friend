@@ -371,7 +371,10 @@ def build_inner_drive_proactive_prompt(
             "    recall_query 非空时本字段会被忽略。\n"
             '  "topic_hint": 聊天或探索的话题方向\n'
             '  "reasoning": 决策理由\n'
-            '  "care_updates": 可选。更新你的挂念清单：{"add": ["新挂念"], "remove": ["已了却的挂念"]}\n'
+            '  "care_updates": 可选。更新你的挂念清单：{"add": [...], "remove": ["已了却的挂念"]}\n'
+            "    add 元素可以是字符串，也可以是带类型的对象：\n"
+            '    {"content": "...", "type": "care/curiosity/reflection/plan/idea", '
+            '"expires_at": "ISO时间（plan 类建议填写）"}\n'
             "\n"
             "想清楚了就给出最终决定。拿不准、时机不合适，就选 silent。"
         )
