@@ -327,5 +327,57 @@ class TestCosineSimBatch(unittest.TestCase):
         self.assertEqual(float(sims[0]), 0.0)
 
 
+class TestContradictionVerifyFn(unittest.TestCase):
+    """Bug 3（2026-07-20）：embedding 候选矛盾经 verify_fn（LLM）复核。"""
+
+    def _fc(self):
+        mock_embed = MagicMock()
+        mock_embed.health_check.return_value = True
+        mock_embed.encode.side_effect = [
+            [[0.8, 0.6, 0.1]],
+            [[0.79, 0.61, 0.09]],
+        ]
+        return FactChecker(embedding_engine=mock_embed)
+
+    @staticmethod
+    def _args():
+        new = UserFact(category="preference", fact_key="最喜欢的音乐",
+                       fact_value="摇滚音乐", confidence=0.7)
+        existing = [UserFact(id=3, category="preference", fact_key="喜欢音乐类型",
+                             fact_value="古典音乐", confidence=0.8)]
+        return new, existing
+
+    def test_verify_reject_returns_none(self):
+        new, existing = self._args()
+        result = self._fc().detect_contradiction(
+            new, existing, verify_fn=lambda n, o: False)
+        self.assertIsNone(result)
+
+    def test_verify_accept_returns_candidate(self):
+        new, existing = self._args()
+        result = self._fc().detect_contradiction(
+            new, existing, verify_fn=lambda n, o: True)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, 3)
+
+    def test_verify_failure_keeps_original_verdict(self):
+        new, existing = self._args()
+        def _boom(n, o):
+            raise RuntimeError("llm down")
+        result = self._fc().detect_contradiction(new, existing, verify_fn=_boom)
+        self.assertIsNotNone(result)
+
+    def test_direct_pass_bypasses_verify_fn(self):
+        verify = MagicMock(return_value=False)
+        new = UserFact(category="preference", fact_key="最喜欢的食物",
+                       fact_value="寿司", confidence=0.8)
+        existing = [UserFact(id=1, category="preference", fact_key="最喜欢的食物",
+                             fact_value="意大利面", confidence=0.9)]
+        fc = FactChecker()  # 无 embedding → 直接第一 pass
+        result = fc.detect_contradiction(new, existing, verify_fn=verify)
+        self.assertIsNotNone(result)
+        verify.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

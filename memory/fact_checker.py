@@ -39,10 +39,14 @@ class FactChecker:
         self,
         new_fact: UserFact,
         existing_facts: list[UserFact],
+        verify_fn=None,
     ) -> Optional[UserFact]:
         """Check if a new fact semantically contradicts any existing fact.
 
         Returns the most likely contradictory fact, or None.
+        verify_fn(new_fact, candidate) -> bool：可选的二次复核（Bug 3，
+        2026-07-20）——只作用于 embedding 语义判定层；同键不同值的直接
+        判定（更新语义）不复核。返回 False 时候选被否掉（复述/近义）。
         """
         if not existing_facts:
             return None
@@ -59,7 +63,8 @@ class FactChecker:
 
         # Second pass: embedding-based semantic similarity check (FC-004 vectorised)
         if self._embed and self._embed.health_check():
-            return self._detect_embedding_contradiction(new_fact, existing_facts)
+            return self._detect_embedding_contradiction(
+                new_fact, existing_facts, verify_fn)
 
         # Third pass: keyword-overlap fallback (FC-005) when embedding is unavailable
         return self._detect_keyword_contradiction(new_fact, existing_facts)
@@ -68,6 +73,7 @@ class FactChecker:
         self,
         new_fact: UserFact,
         existing_facts: list[UserFact],
+        verify_fn=None,
     ) -> Optional[UserFact]:
         """FC-004 / FC-005: vectorised embedding similarity across all facts."""
         new_text = f"{new_fact.category} {new_fact.fact_key} {new_fact.fact_value}"
@@ -86,6 +92,19 @@ class FactChecker:
                 best_sim > SIMILARITY_THRESHOLD
                 and best_match.fact_value.strip() != new_fact.fact_value.strip()
             ):
+                # Bug 3（2026-07-20）：单一相似度分不出复述和矛盾，
+                # 候选先过 verify_fn（LLM 复核）；复核失败按原行为处理
+                if verify_fn is not None:
+                    try:
+                        if not verify_fn(new_fact, best_match):
+                            logger.info(
+                                f"[fact_check] LLM rejected contradiction "
+                                f"(paraphrase, sim={best_sim:.2f}): "
+                                f"'{best_match.fact_key}' kept")
+                            return None
+                    except Exception as e:
+                        logger.warning(f"[fact_check] contradiction verify "
+                                       f"failed, keep original verdict: {e}")
                 logger.info(
                     f"[fact_check] semantic contradiction sim={best_sim:.2f}: "
                     f"'{best_match.fact_key}': '{best_match.fact_value}' vs '{new_fact.fact_value}'"

@@ -20,6 +20,7 @@ fact_type: user_fact / agent_fact / system_fact（事实主体类型，默认 us
 - AI 的行为（AI唱了歌、AI查了资料、AI发了通知）
 - AI 的承诺（AI说"我记住了"、"我学会了"、"以后注意"）
 - AI 对用户的评价（"你真有趣"）
+- **AI 对用户的复述/画像/总结**——AI 回复里"你是…""你喜欢…""你有…"这类第二人称描述，是 AI 的转述，不是用户亲口说的。**只有用户本人说的（"用户:" 开头的行）才能提取**；即使 AI 的总结内容是对的，也不要从 AI 的回复里提取
 - 系统属性（"我有双阶段架构"、"代码有bug"）
 - 无法验证的推测（"用户电脑有600首歌"除非用户明确说过）
 - 对话中只有AI在说话、用户没提供新信息的轮次
@@ -49,10 +50,25 @@ COREFERENCE_REWRITE_PROMPT = """把用户的最后一句话改写成一个自足
 改写结果："""
 
 
+# ── Contradiction Verification（Bug 3，2026-07-20：LLM 复核候选矛盾）──
+CONTRADICTION_VERIFY_PROMPT = """判断两条关于用户的信息是否真正矛盾。
+
+已有记录：{old_key} = {old_value}
+新的信息：{new_key} = {new_value}
+
+判断标准：
+- 复述/近义/补充说明/更具体的描述 → NOT_CONTRADICT
+  例：「云指导」vs「自称云指导」、「喜欢吉森信」vs「喜欢吉森信的某首歌」
+- 真正互相排斥、不能同时成立 → CONTRADICT
+  例：「住北京」vs「住上海」、「喜欢」vs「讨厌」
+
+只输出一个词：CONTRADICT 或 NOT_CONTRADICT"""
+
+
 # ── Care Clue Extraction（内驱状态二期：consolidation 自动写入挂念线索）──
 CARE_CLUE_PROMPT = """从这段对话中找出值得「惦记」的未完成线索——未来需要 follow-up 的事。
 输出 JSON：
-{"clues": [{"content": "一句话描述", "type": "care|curiosity|reflection|plan|idea", "expires_at": "YYYY-MM-DD 或空"}]}
+{{"clues": [{{"content": "一句话描述", "type": "care|curiosity|reflection|plan|idea", "expires_at": "YYYY-MM-DD 或空"}}]}}
 
 类型说明：
 - care：对用户的关心（用户最近失眠，问问好点没）
@@ -61,7 +77,7 @@ CARE_CLUE_PROMPT = """从这段对话中找出值得「惦记」的未完成线�
 - idea：想分享的东西
 - reflection：自己行为上值得注意的点
 
-只提取对话中**明确提到**的线索，不要推测。没有值得惦记的就输出 {"clues": []}。
+只提取对话中**明确提到**的线索，不要推测。没有值得惦记的就输出 {{"clues": []}}。
 
 对话：
 {text}
@@ -76,6 +92,9 @@ TONE: <情感色调，如: 温暖/兴奋/忧伤/平静/幽默>
 SIGNIFICANCE: <0.0~1.0 重要程度>
 IMPORTANCE: <0.0~1.0 这条体验在多久后还有意义，0.0=转瞬即逝 0.5=几天 1.0=永远>
 TAGS: <逗号分隔的关键词>
+
+注意分清行为主体：「你:」开头的是 AI 的回复，「用户:」开头的才是用户说的。
+不要把 AI 做的事记到用户头上（例如 AI 总结了用户的特征，主体是 AI 不是用户）。
 
 对话：
 {text}
@@ -105,7 +124,7 @@ INSIGHT_GENERATION_PROMPT = """基于以下事实和体验，生成一个假设�
 - confidence 0.0~1.0
 - needs_more_evidence 如果证据不足则为 true
 - **R3: 只允许从列出的 evidence 可直接支持的内容推导，禁止心理学推测**
-- **R3: 本批是纯功能性操作（换歌/查询/指令）或无新信息时，输出 {"hypothesis": ""}**
+- **R3: 本批是纯功能性操作（换歌/查询/指令）或无新信息时，输出 {{"hypothesis": ""}}**
 
 事实：
 {facts}

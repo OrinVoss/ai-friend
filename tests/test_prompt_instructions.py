@@ -253,5 +253,39 @@ class TestInternalToolsBlock(unittest.TestCase):
         self.assertEqual(_build_internal_tools_block(None), "")
 
 
+class TestTemplateBraceSafety(unittest.TestCase):
+    """所有 prompt 模板必须能被 safe_format 正常格式化——JSON 字面量的
+    花括号必须 doubled（{{ }}），否则 format() 静默失败、LLM 拿到的是
+    未替换占位符的空模板（2026-07-20 生产事故：INSIGHT/CARE_CLUE 因此
+    失效）。"""
+
+    def test_all_templates_format_safely(self):
+        import string
+        import prompts.templates as T
+
+        checked = 0
+        for name in dir(T):
+            if not name.endswith("_PROMPT"):
+                continue
+            tpl = getattr(T, name)
+            if not isinstance(tpl, str):
+                continue
+            checked += 1
+            fields = set()
+            try:
+                for _, field, _, _ in string.Formatter().parse(tpl):
+                    if field:
+                        fields.add(field)
+            except ValueError as e:
+                self.fail(f"{name} 花括号非法（JSON 字面量需 doubled）: {e}")
+            kwargs = {f: f"@@{f}@@" for f in fields}
+            out = T.safe_format(tpl, **kwargs)
+            for f in fields:
+                self.assertIn(
+                    f"@@{f}@@", out,
+                    f"{name} 的 {{{f}}} 未被替换——模板里有未转义的 JSON 花括号")
+        self.assertGreater(checked, 3, "模板数量异常，测试可能没生效")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ from prompts.templates import (
     INSIGHT_L3_PROMPT,
     EMOTION_ANALYSIS_PROMPT,
     CARE_CLUE_PROMPT,
+    CONTRADICTION_VERIFY_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,24 @@ class MemoryConsolidator:
         self._seen_ids.clear()
         logger.info("Consolidation complete.")
 
+    def _verify_contradiction_llm(self, new_f, old_f) -> bool:
+        """Bug 3（2026-07-20）：LLM 复核 embedding 检出的候选矛盾。
+        True = 真矛盾（执行 decay）；False = 复述/近义/补充（保留旧事实）。
+        LLM 失败时返回 True（保持原行为），由 fact_checker 记 warning。"""
+        prompt = safe_format(
+            CONTRADICTION_VERIFY_PROMPT,
+            old_key=old_f.fact_key, old_value=old_f.fact_value,
+            new_key=new_f.fact_key, new_value=new_f.fact_value,
+        )
+        result = self._call_llm(prompt, temperature=0.0).upper()
+        # NOT_CONTRADICT 包含 CONTRADICT，顺序判断
+        if "NOT_CONTRADICT" in result:
+            return False
+        if "CONTRADICT" in result:
+            return True
+        # 输出不含明确判定词：按原行为处理（视为矛盾），保持向后兼容
+        return True
+
     def _extract_care_clues(self, turn_text: str) -> None:
         """内驱状态二期：从对话中提取「未完成的线索」写入挂念清单
         （source=consolidation）。LLM 输出 JSON，解析失败静默跳过。"""
@@ -290,11 +309,13 @@ class MemoryConsolidator:
             # FactChecker: check new facts against existing ones for contradictions.
             # 保持在写入前逐条检测：get_similar_facts 读 facts_v2，此时新事实
             # 尚未落库，检测语义与旧流程（先检测后批量写）一致。
+            # Bug 3（2026-07-20）：embedding 候选矛盾先过 LLM 复核，复述/近义不 decay
             if self._fact_checker and new_facts:
                 for cat, key, val, conf, _imp in new_facts:
                     similar = self.ltm.get_similar_facts(cat, key, limit=5)
                     new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
-                    old_f = self._fact_checker.detect_contradiction(new_f, similar)
+                    old_f = self._fact_checker.detect_contradiction(
+                        new_f, similar, verify_fn=self._verify_contradiction_llm)
                     if old_f:
                         self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
 
