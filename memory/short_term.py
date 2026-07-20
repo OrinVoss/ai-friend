@@ -60,14 +60,23 @@ class ConversationBuffer:
         """#ST-003: param is a token budget, not a char count — renamed from
         max_chars. Behavior preserved: the old max_chars=3000 with a *0.6
         multiplier yielded a ~1800-token budget, so callers now pass tokens
-        directly."""
+        directly.
+
+        2026-07-20: 睡眠/梦话轮（metadata.sleep=True）不占 prompt 预算——
+        它们对理解用户输入没有帮助，却会把真正的对话挤出 token 窗口；
+        连续重复消息（刷屏）只保留一条。睡眠轮仍在缓冲里，consolidation
+        等其他消费方不受影响。"""
         from core.context_manager import estimate_tokens
         with self._lock:
             lines = []
             total = 0
             for t in reversed(self._turns):
+                if t.metadata.get("sleep"):
+                    continue
                 label = "你" if t.role == "assistant" else "用户"
                 line = f"{label}: {t.content}"
+                if lines and lines[-1] == line:
+                    continue  # 连续重复刷屏合并为一条
                 # #187: use token count for accurate truncation
                 total += estimate_tokens(line)
                 if total > max_tokens:

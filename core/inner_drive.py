@@ -182,7 +182,7 @@ class InnerDriveAgent:
                  max_tokens_assess: int = 1024,
                  max_tokens_proactive: int = 256,
                  max_tokens_review: int = 1024,
-                 conv_hist_tokens: int = 1800,
+                 conv_hist_tokens: int = 3600,
                  tool_call_history: list | None = None,
                  session_id: str | None = None,
                  prompt_cache=None,
