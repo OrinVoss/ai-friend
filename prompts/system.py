@@ -120,7 +120,9 @@ def _build_inner_memory_block(memory_context: MemoryContext) -> str:
     if memory_context.experiences:
         parts.append("=== 你们的共同回忆 ===")
         for exp in memory_context.experiences[:3]:
-            parts.append(f"- [{exp.emotional_tone}] {exp.summary}")
+            # F4: 梦境标记，防止被当作真实事件
+            dream_prefix = "【梦境，非真实事件】" if ("dream" in (exp.tags or [])) else ""
+            parts.append(f"- {dream_prefix}[{exp.emotional_tone}] {exp.summary}")
     return "\n".join(parts)
 
 
@@ -337,7 +339,9 @@ def build_inner_drive_proactive_prompt(
         if memory_context.experiences:
             blocks.append("=== 共同回忆 ===")
             for exp in memory_context.experiences[:3]:
-                blocks.append(f"- [{exp.emotional_tone}] {exp.summary}")
+                # F4: 梦境标记，防止被当作真实事件
+                dream_prefix = "【梦境，非真实事件】" if ("dream" in (exp.tags or [])) else ""
+                blocks.append(f"- {dream_prefix}[{exp.emotional_tone}] {exp.summary}")
 
     # #177: 告知 LLM 近期已聊话题，避免重复开启相同话题
     if recent_topics:
@@ -376,7 +380,11 @@ def build_inner_drive_proactive_prompt(
             '    {"content": "...", "type": "care/curiosity/reflection/plan/idea", '
             '"expires_at": "ISO时间（plan 类建议填写）"}\n'
             "\n"
-            "想清楚了就给出最终决定。拿不准、时机不合适，就选 silent。"
+            "想清楚了就给出最终决定。拿不准、时机不合适，就选 silent。\n"
+            "\n"
+            "F2: 如果没有真正值得开口的事，第一轮就直接给 silent 决定，不要用 recall 凑轮次。\n"
+            "\n"
+            "F4: 标记【梦境】的内容是梦，不是真实发生的事，不要当作共同回忆展开或引用。"
         )
     else:
         blocks.append(
@@ -542,7 +550,9 @@ def _build_memory_block(memory_context: MemoryContext) -> str:
     if memory_context.experiences:
         parts.append("=== 你们的共同回忆 ===")
         for e in memory_context.experiences[:5]:
-            parts.append(f"- [{e.emotional_tone}] {e.summary}")
+            # F4: 梦境标记，防止被当作真实事件
+            dream_prefix = "【梦境，非真实事件】" if ("dream" in (e.tags or [])) else ""
+            parts.append(f"- {dream_prefix}[{e.emotional_tone}] {e.summary}")
     if memory_context.reflections:
         parts.append("=== 你的最近思考 ===")
         for r in memory_context.reflections[:3]:

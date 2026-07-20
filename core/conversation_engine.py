@@ -139,6 +139,20 @@ class ConversationEngine:
         """#177: 记录 LLM 主路径选用的话题（供去重与 prompt 提示）。"""
         self._agent.record_topic(topic)
 
+    # ── F1: silent 退避转发 ──
+
+    def record_silent(self) -> None:
+        """F1: 连续 silent 计数。"""
+        self._agent.record_silent()
+
+    def reset_silents(self) -> None:
+        """F1: 用户说话或主动消息发出后重置退避。"""
+        self._agent.reset_silents()
+
+    def silent_cooldown_seconds(self) -> float:
+        """F1: 按连续 silent 次数返回冷却秒数。"""
+        return self._agent.silent_cooldown_seconds()
+
     def persist_proactive_message(self, text: str, metadata: dict | None = None) -> None:
         """Persist an engine-initiated message (sleep/wake) to history."""
         self._agent.add_turn("assistant", text, metadata=metadata)

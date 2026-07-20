@@ -43,7 +43,7 @@
 | `memory_agent_relevance_floor` | float | `0.35` | Memory Agent 相关性下限：可测量证据 cosine 相似度低于此值时丢弃；recall/summarize 意图豁免 |
 | `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
 | `proactive_think_loop` | bool | `true` | 主动沉思循环开关：开启后主动路径走「想起 → 查证 → 决定」有界循环（默认 3 轮）；关闭退回单次决策 |
-| `proactive_think_max_rounds` | int | `3` | 沉思循环轮数硬上限 |
+| `proactive_think_max_rounds` | int | `2` | 沉思循环轮数硬上限（F2：默认 2 轮，沉默期首轮即 silent 无需第 3 轮） |
 | `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按「先非活跃、再低 priority、最后旧活跃」淘汰（二期起非 FIFO） |
 | `inner_drive_surface_top_k` | int | `8` | 内驱状态二期：独处时每轮沉思浮现的挂念条数 |
 | `inner_drive_surface_response_k` | int | `3` | 内驱状态二期：对话时按语义相关浮现的挂念条数 |

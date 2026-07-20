@@ -447,7 +447,7 @@ class TestProactiveThinkLoop(unittest.TestCase):
         self.provider.generate.return_value = _think_json(
             recall_query="永远查不完的东西", action="silent", reason="查不到")
         intent = self.agent.assess_proactive(600)
-        self.assertEqual(self.provider.generate.call_count, 3)  # 默认 3 轮封顶
+        self.assertEqual(self.provider.generate.call_count, 2)  # F2: 默认 2 轮封顶（原 3 轮）
         self.assertEqual(intent.action, "silent")
 
     def test_json_failure_regex_fallback(self):

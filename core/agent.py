@@ -332,6 +332,20 @@ class Agent:
         """#177: 记录 LLM 主路径选用的话题（供去重与 prompt 提示）。"""
         return self._proactive.record_topic(topic)
 
+    # ── F1: silent 退避转发 ──
+
+    def record_silent(self) -> None:
+        """F1: 连续 silent 计数。"""
+        self._proactive.record_silent()
+
+    def reset_silents(self) -> None:
+        """F1: 用户说话或主动消息发出后重置退避。"""
+        self._proactive.reset_silents()
+
+    def silent_cooldown_seconds(self) -> float:
+        """F1: 按连续 silent 次数返回冷却秒数。"""
+        return self._proactive.silent_cooldown_seconds()
+
     def _calculate_proactivity(self, idle_duration: float) -> float:
         return self._proactive.calculate_proactivity(idle_duration)
 

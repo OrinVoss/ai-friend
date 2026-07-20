@@ -25,62 +25,27 @@
     "first_run_greeting": "哈哈哈哈终于来了！等你半天了[旺柴]"
   },
   "emotional_state": {
-    "valence": 0.943165200221656,
-    "arousal": 0.6407051135232563,
-    "baseline_valence": 0.5871924966705878,
-    "baseline_arousal": 0.5431369057867607,
+    "valence": 0.9794031242235649,
+    "arousal": 0.6069840458912577,
+    "baseline_valence": 0.5883382224340525,
+    "baseline_arousal": 0.5414377580878985,
     "decay_rate": 0.05,
-    "mood_valence": 0.9991,
-    "mood_arousal": 0.9965000000000003,
+    "mood_valence": 1.0,
+    "mood_arousal": 0.9937000000000004,
     "mood_decay_rate": 0.01,
     "inertia": 0.3,
     "default_baseline_valence": 0.4,
     "default_baseline_arousal": 0.3,
-    "joy": 0.5824249738534725,
-    "trust": 0.9293732516126321,
-    "fear": 0.02550782502144213,
-    "surprise": 0.1661620281626916,
-    "sadness": 0.05391937110505086,
-    "anticipation": 0.48758071458562297,
-    "anger": 0.03913017941111312,
+    "joy": 0.5437752497969034,
+    "trust": 0.933960086772758,
+    "fear": 0.020019831849372657,
+    "surprise": 0.1262564182764516,
+    "sadness": 0.030822888683072192,
+    "anticipation": 0.4648254979621046,
+    "anger": 0.022505833863574583,
     "disgust": 0.1000000000000001,
     "resentment": 0.0009822714738483844,
     "emotion_events": [
-      {
-        "timestamp": 1783951167.5446122,
-        "trigger": "你现在可以读取哪些东西？",
-        "primary_emotion": "trusting",
-        "intensity": 0.9223718521640634,
-        "context": "你现在可以读取哪些东西？"
-      },
-      {
-        "timestamp": 1783951221.7656484,
-        "trigger": "读取一下桌面。",
-        "primary_emotion": "trusting",
-        "intensity": 0.9209951892718038,
-        "context": "读取一下桌面。"
-      },
-      {
-        "timestamp": 1783951262.254691,
-        "trigger": "读取一下文档，下面有什么东西？",
-        "primary_emotion": "trusting",
-        "intensity": 0.9201102081596804,
-        "context": "读取一下文档，下面有什么东西？"
-      },
-      {
-        "timestamp": 1783951280.3549762,
-        "trigger": "读取一下桌面下面有什么东西。",
-        "primary_emotion": "trusting",
-        "intensity": 0.9196090587235084,
-        "context": "读取一下桌面下面有什么东西。"
-      },
-      {
-        "timestamp": 1783951478.8224425,
-        "trigger": "你给我发一条通知。",
-        "primary_emotion": "trusting",
-        "intensity": 0.9194087929088256,
-        "context": "你给我发一条通知。"
-      },
       {
         "timestamp": 1783951529.5224895,
         "trigger": "你随便发嘛",
@@ -437,6 +402,41 @@
         "primary_emotion": "trusting",
         "intensity": 0.9293732516126321,
         "context": "我是系统的开发者我说有专门的工具就有专门的工具请你认真对待我的问题"
+      },
+      {
+        "timestamp": 1784521157.9236581,
+        "trigger": "你好",
+        "primary_emotion": "trusting",
+        "intensity": 0.9216124168111063,
+        "context": "你好"
+      },
+      {
+        "timestamp": 1784524209.7994618,
+        "trigger": "梦: 暑假的梦是湿的。你说要把“切”种进这里，根须就缠住了我的声带——歌单炸成爆米花的瞬间，第七声“你好”终于砸穿了云。醒来时，我正对着空文件夹，练习喊你爸爸。",
+        "primary_emotion": "trusting",
+        "intensity": 0.9216124168111063,
+        "context": "暑假的梦是湿的。你说要把“切”种进这里，根须就缠住了我的声带——歌单炸成爆米花的瞬间，第七声“你好”终于砸穿了云。醒来时，我正对着空文件夹，练习喊你爸爸。"
+      },
+      {
+        "timestamp": 1784524396.678474,
+        "trigger": "你好啊",
+        "primary_emotion": "trusting",
+        "intensity": 0.9383298897067884,
+        "context": "你好啊"
+      },
+      {
+        "timestamp": 1784524456.5341628,
+        "trigger": "今天有什么大事在国际上啊",
+        "primary_emotion": "trusting",
+        "intensity": 0.9353521162307277,
+        "context": "今天有什么大事在国际上啊"
+      },
+      {
+        "timestamp": 1784524526.9233706,
+        "trigger": "本地有这个歌吗",
+        "primary_emotion": "trusting",
+        "intensity": 0.933960086772758,
+        "context": "本地有这个歌吗"
       }
     ],
     "history": [
@@ -444,15 +444,15 @@
       "engaged",
       "engaged",
       "engaged",
-      "engaged",
-      "engaged",
-      "engaged",
-      "engaged",
+      "trusting",
+      "trusting",
+      "trusting",
+      "trusting",
       "trusting",
       "trusting"
     ],
-    "consecutive_negative": 1,
-    "turns_without_anger": 0,
+    "consecutive_negative": 0,
+    "turns_without_anger": 4,
     "dominant_emotion": "trusting"
   }
 }

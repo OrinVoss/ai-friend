@@ -21,6 +21,7 @@ class ProactivityManager:
         self._short_term = short_term
         self._last_explore_time: float = 0
         self._last_chat_time: float = 0
+        self._consecutive_silents: int = 0   # F1: 连续 silent 决策次数（退避用）
         self._recent_topics: deque = deque(maxlen=5)  # #265: topic dedup
         # M-11: 限速/话题状态按 session 持久化（参照 .sleep_state 模式），
         # Web session 重建后限速不再清零
@@ -39,6 +40,7 @@ class ProactivityManager:
                 data = json.load(f)
             self._last_explore_time = float(data.get("last_explore_time", 0))
             self._last_chat_time = float(data.get("last_chat_time", 0))
+            self._consecutive_silents = int(data.get("consecutive_silents", 0))
             topics = data.get("recent_topics", [])
             if isinstance(topics, list):
                 self._recent_topics.extend(str(t) for t in topics[-5:])
@@ -55,6 +57,7 @@ class ProactivityManager:
             data = {
                 "last_explore_time": self._last_explore_time,
                 "last_chat_time": self._last_chat_time,
+                "consecutive_silents": self._consecutive_silents,
                 "recent_topics": list(self._recent_topics),
             }
             with open(self._state_file, "w", encoding="utf-8") as f:
@@ -117,7 +120,9 @@ class ProactivityManager:
         goodbye = sum(1 for t in self._short_term.get_recent(6) if any(kw in t.content for kw in ["拜拜", "再见", "bye", "下次", "睡了", "晚安"]))
         short_c = sum(1 for t in user_turns if len(t.content) < 8)
         score = base + time_mod + emotion_mod + intimacy_mod + sentiment_mod - min(goodbye * 0.15, 0.3) - min(short_c * 0.08, 0.2)
-        score = max(0.0, min(0.8, score))
+        # F5: 长时间沉默疲劳——用户半小时以上没说话，逐步压低触发概率
+        fatigue = min(0.3, max(0.0, (idle_duration - 1800.0) / 1800.0) * 0.1)
+        score = max(0.0, min(0.8, score - fatigue))
         logger.debug(f"[proactive] score={score:.3f} idle={idle_duration:.0f}s emo={e.dominant_emotion} "
                      f"base={base:.3f} time={time_mod:.2f} emo={emotion_mod:+.2f} "
                      f"intimacy={intimacy_mod:+.2f} sentiment={sentiment_mod:+.2f} "
@@ -184,3 +189,22 @@ class ProactivityManager:
             self._last_chat_time = now
         # M-11: 状态变更后落盘，Web session 重建后可恢复
         self._save_state()
+
+    # ── F1: silent 退避 ──
+
+    def record_silent(self) -> None:
+        """F1: InnerDrive 决定沉默时调用，连续 silent 次数 +1。"""
+        self._consecutive_silents += 1
+        # 状态持久化让退避在 session 重建后延续
+        self._save_state()
+
+    def reset_silents(self) -> None:
+        """F1: 用户说话或主动消息真正发出后调用，退避清零。"""
+        self._consecutive_silents = 0
+        self._save_state()
+
+    def silent_cooldown_seconds(self) -> float:
+        """F1: 连续 n 次 silent 后的决策冷却秒数：60→120→240→…，封顶 1800s。"""
+        if self._consecutive_silents <= 0:
+            return 0.0
+        return min(60.0 * (2 ** (self._consecutive_silents - 1)), 1800.0)

@@ -157,7 +157,8 @@ class TestReviewReDecideMemoryAgent(unittest.TestCase):
 
         retriever.retrieve_for_query.assert_called_once_with("查一下披萨")
 
-    def test_assess_proactive_uses_memory_agent_when_enabled(self):
+    def test_assess_proactive_skips_memory_agent_for_empty_query(self):
+        """F3: 空 query 跳过 memory_agent，直接用 retriever 概览。"""
         ma = MagicMock()
         ma.answer = AsyncMock(return_value=_ma_answer())
         drive, provider, retriever = _make_drive(memory_agent=ma)
@@ -165,7 +166,18 @@ class TestReviewReDecideMemoryAgent(unittest.TestCase):
 
         drive.assess_proactive(300)
 
-        ma.answer.assert_awaited_once_with("")
+        ma.answer.assert_not_called()
+        retriever.retrieve_for_query.assert_called_once_with("")
+
+    def test_assess_uses_memory_agent_for_nonempty_query(self):
+        """非空 query 仍走 memory_agent。"""
+        ma = MagicMock()
+        ma.answer = AsyncMock(return_value=_ma_answer())
+        drive, provider, retriever = _make_drive(memory_agent=ma)
+
+        drive.assess("披萨")
+
+        ma.answer.assert_awaited_once_with("披萨")
         retriever.retrieve_for_query.assert_not_called()
         messages = provider.generate.call_args.args[0]
         self.assertIn("披萨", messages[0]["content"])

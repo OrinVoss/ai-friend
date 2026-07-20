@@ -14,6 +14,7 @@ import inspect
 import logging
 import random
 import threading
+import time
 from functools import partial
 from typing import Optional
 
@@ -55,6 +56,8 @@ class RuntimeDriver:
         self._tick_error = tick_error if tick_error is not None else self.TICK_ERROR
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # F1: silent 退避冷却——next LLM decision earliest timestamp
+        self._next_decision_after: float = 0.0
 
     # ── Main loop ──
 
@@ -87,6 +90,15 @@ class RuntimeDriver:
                 idle = engine.idle_seconds
                 if idle < self.IDLE_FLOOR_SECONDS or cooldown > 0:
                     cooldown = max(0, cooldown - 1)
+                    if idle < self.IDLE_FLOOR_SECONDS:
+                        # F1: 用户活跃期间清除 silent 退避冷却与计数
+                        self._next_decision_after = 0.0
+                        engine.reset_silents()
+                    await asyncio.sleep(self._tick_cooldown)
+                    continue
+
+                # F1: silent 退避冷却——冷却期内不触发 LLM 决策
+                if time.time() < self._next_decision_after:
                     await asyncio.sleep(self._tick_cooldown)
                     continue
 
@@ -104,12 +116,18 @@ class RuntimeDriver:
                         response = await self._run_blocking(partial(engine.handle_proactive, intent=intent))
                     else:
                         if intent.action == "silent":
+                            engine.record_silent()  # F1: 连续 silent 计数
+                            cd = engine.silent_cooldown_seconds()
+                            self._next_decision_after = time.time() + cd
                             logger.debug(f"[runtime] inner drive chose silent: {intent.reasoning[:80]}")
+                            logger.info(f"[runtime] silent cooldown={cd:.0f}s")
                         else:
                             logger.debug(f"[runtime] rate limit blocked action={intent.action}")
                     if response:
                         engine.touch()
                         engine.record_rate_limit(intent.action)
+                        engine.reset_silents()  # F1: 主动消息发出后重置退避
+                        self._next_decision_after = 0.0
                         cooldown = self.PROACTIVE_COOLDOWN_TICKS
                         await self._emit(self._fe.on_proactive, response)
 

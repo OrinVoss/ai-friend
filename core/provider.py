@@ -47,6 +47,11 @@ class LLMProvider(ABC):
 
 
 class DeepSeekProvider(LLMProvider):
+    # F6: circuit breaker — class-level counter shared across instances
+    # (single provider, so instance-level is fine too)
+    _circuit_failures: int = 0
+    _circuit_open_until: float = 0.0
+
     def __init__(self, endpoint: str, api_key: str, model: str,
                  temperature: float = 0.8, max_tokens: int = 512,
                  thinking: Optional[str] = None,
@@ -87,6 +92,12 @@ class DeepSeekProvider(LLMProvider):
                  source: str = "") -> str:
         chat_url = f"{self.endpoint}/v1/chat/completions"
 
+        # F6: circuit breaker — 连续 3 次完全失败后 60 秒内跳过 HTTP
+        if self._circuit_open_until > time.time():
+            logger.warning(f"[api] circuit breaker open ({self._circuit_open_until - time.time():.0f}s remaining), "
+                          f"skipping request")
+            raise ConnectionError(f"Circuit breaker open, last error: {getattr(self, '_circuit_last_error', 'unknown')}")
+
         payload = {
             "model": self.model,
             "messages": messages,
@@ -121,10 +132,13 @@ class DeepSeekProvider(LLMProvider):
                     response_format=response_format,
                     source=source,
                 )
+                # F6: circuit breaker — 成功时重置
+                self._circuit_failures = 0
+                self._circuit_open_until = 0.0
                 return resp_text
             except requests.exceptions.ConnectionError as e:
                 last_error = e
-                wait = 2 ** attempt
+                wait = min(2 ** attempt * 2, 15)  # F6: 2/4/8s (原 1/2/4s)
                 logger.warning(f"[api] connection error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
             except requests.exceptions.HTTPError as e:
@@ -142,17 +156,26 @@ class DeepSeekProvider(LLMProvider):
                             time.sleep(wait)
                             continue
                     raise
-                wait = 2 ** attempt
+                wait = min(2 ** attempt * 2, 15)  # F6: 2/4/8s (原 1/2/4s)
                 logger.warning(f"[api] http error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
             # #213: ReadTimeout 纳入重试；StreamConsumedError 在本路径不可达（死 catch），移除
             except (requests.exceptions.ChunkedEncodingError,
                     requests.exceptions.ReadTimeout) as e:
                 last_error = e
-                wait = 2 ** attempt
+                wait = min(2 ** attempt * 2, 15)  # F6: 2/4/8s (原 1/2/4s)
                 logger.warning(f"[api] stream error attempt={attempt+1}/3 retry_in={wait}s: {e}")
                 time.sleep(wait)
 
+        # F6: circuit breaker — 每次完全失败累加，连续 3 次后 60 秒跳过 HTTP
+        self._circuit_failures += 1
+        if self._circuit_failures >= 3:
+            self._circuit_open_until = time.time() + 60.0
+            self._circuit_last_error = str(last_error)
+            logger.warning(f"[api] circuit breaker tripped ({self._circuit_failures} consecutive failures, "
+                          f"open for 60s)")
+        else:
+            self._circuit_open_until = 0.0
         logger.error(f"[api] failed after 3 retries: {last_error}")
         raise ConnectionError(f"API request failed after 3 retries: {last_error}")
 

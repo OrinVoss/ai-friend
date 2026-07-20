@@ -190,7 +190,7 @@ class InnerDriveAgent:
                  memory_agent=None,
                  rule_tools_registry=None,
                  proactive_think_loop: bool = True,
-                 proactive_think_max_rounds: int = 3,
+                 proactive_think_max_rounds: int = 2,  # F2: 默认 2 轮
                  inner_drive_state=None):
         self._provider = provider
         self._personality = personality
@@ -217,7 +217,7 @@ class InnerDriveAgent:
         # loop on the proactive path; inner_drive_state is the persistent
         # care list read at Round 1 and updated via care_updates.
         self._think_loop = proactive_think_loop
-        self._think_max_rounds = _positive_int(proactive_think_max_rounds, 3)
+        self._think_max_rounds = _positive_int(proactive_think_max_rounds, 2)  # F2: 默认 2 轮
         self._inner_drive_state = inner_drive_state
 
     def assess(self, user_input: str) -> InnerDriveResult:
@@ -335,6 +335,11 @@ class InnerDriveAgent:
     def _context_summary_for(self, user_input: str) -> str:
         """context_summary via MemoryAgent when enabled; falls back to the
         classic retriever path on failure or empty result."""
+        # F3: 空 query（proactive 等无用户输入路径）不需要 MemoryAgent 的
+        # 置信度/证据链管线——空查询会得到"全部最近记忆 + 虚假高置信度"，
+        # 直接用 retriever 的概览即可
+        if not (user_input or "").strip():
+            return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
         if self._memory_agent is not None:
             try:
                 from core.async_utils import run_async

@@ -102,7 +102,9 @@ class MemoryRetriever:
         if experiences:
             parts.append("相关回忆：")
             for e in experiences:
-                parts.append(f"- [{e.emotional_tone}] {e.summary}")
+                # F4: 梦境标记，防止被当作真实事件
+                dream_prefix = "【梦境，非真实事件】" if ("dream" in (e.tags or [])) else ""
+                parts.append(f"- {dream_prefix}[{e.emotional_tone}] {e.summary}")
         if reflections:
             parts.append("相关反思：")
             for r in reflections:

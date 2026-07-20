@@ -91,7 +91,7 @@ class Config:
     # Proactive think loop (proactive-think-loop.md): bounded reflection loop
     # on the proactive path; False = legacy single-shot decision
     proactive_think_loop: bool = True
-    proactive_think_max_rounds: int = 3
+    proactive_think_max_rounds: int = 2  # F2: 默认 2 轮（原 3 轮，沉默期首轮即 silent 无需第 3 轮）
     inner_drive_care_list_size: int = 20
     # 内驱状态二期（inner-drive-state.md）：浮现规则与语义阈值
     inner_drive_surface_top_k: int = 8        # 独处时每轮思考浮现条数

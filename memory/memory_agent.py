@@ -390,9 +390,11 @@ class MemoryAgent:
                 has_similarity=_measurable(o.embedding, o.embedding_version),
             ))
         for e in experiences:
+            # F4: 梦境标记，防止被当作真实事件
+            dream_prefix = "【梦境，非真实事件】" if ("dream" in (e.tags or [])) else ""
             evidences.append(MemoryEvidence(
                 source_type="experience", source_id=e.id,
-                content=f"[{e.emotional_tone}] {e.summary}",
+                content=f"{dream_prefix}[{e.emotional_tone}] {e.summary}",
                 confidence=e.composite_score, timestamp=e.created_at,
                 similarity=self._sim(qvec, e.embedding, e.embedding_version),
                 has_similarity=_measurable(e.embedding, e.embedding_version),

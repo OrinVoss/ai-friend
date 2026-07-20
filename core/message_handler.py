@@ -162,7 +162,7 @@ class MessageHandler:
                 # Agent 1 判断 needs_external_tools 需要看到外部工具
                 rule_tools_registry=a._tool_registry,
                 proactive_think_loop=getattr(cfg, "proactive_think_loop", True),
-                proactive_think_max_rounds=getattr(cfg, "proactive_think_max_rounds", 3),
+                proactive_think_max_rounds=getattr(cfg, "proactive_think_max_rounds", 2),
                 inner_drive_state=inner_drive_state,
             )
 
