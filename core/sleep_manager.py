@@ -140,6 +140,17 @@ class SleepManager:
                 self._last_transition_time = time.time()
                 wake_kind = "forced"
 
+            # SL-012: general fail-safe — 睡到所有合法睡眠时段之外必须醒来。
+            # 合法时段：夜间 23:00→11:00（含晨醒与 10-11 强制窗口）、午睡 12:00→16:00。
+            # 进程在全部唤醒窗口内都没运行过（如 11:34 才启动）时，旧逻辑会睡到
+            # 下一个窗口才醒（甚至整天不醒），此处兜底立即唤醒。
+            in_night_period = hour >= 23 or hour < 11
+            in_nap_period = 12 <= hour < 16
+            if self._sleeping and not in_night_period and not in_nap_period:
+                self._sleeping = False; self._save_sleep_state()
+                self._last_transition_time = time.time()
+                wake_kind = "forced"
+
         # 锁外：生成梦境（await）并拼接唤醒消息
         if wake_kind is not None:
             dream = await self.generate_dream()

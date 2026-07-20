@@ -131,3 +131,60 @@ class TestSleepManager(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGeneralWakeFailsafe(unittest.TestCase):
+    """SL-012: 睡到所有合法睡眠时段之外时强制唤醒兜底。"""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(delete=False, mode='w')
+        self.tmp.write("1")  # 已睡着
+        self.tmp.close()
+        self.personality = MagicMock()
+        self.personality.emotion.dominant_emotion = "neutral"
+        self.personality.emotion.arousal = 0.5
+        self.personality.emotion.valence = 0.4
+        self.personality.emotion.resentment = 0.0
+        self.personality.emotion.record_emotion_event = MagicMock()
+        self.ltm = MagicMock()
+        self.ltm.get_all_active_facts.return_value = []
+        self.ltm.get_recent_experiences.return_value = []
+        self.provider = MagicMock()
+        self.provider.generate.return_value = "a dream"
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def _run_at(self, hour, minute=0):
+        sm = SleepManager(self.tmp.name, self.personality, self.ltm, self.provider)
+        with patch("core.sleep_manager.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 7, 20, hour, minute)
+            return sm, asyncio.run(sm.get_sleep_state())
+
+    def test_sleeping_at_1134_force_wakes(self):
+        # 11:34 错过晨醒(7-10)与强制窗口(10-11)，旧逻辑睡到 13:10 才醒
+        sm, (should_sleep, msg) = self._run_at(11, 34)
+        self.assertFalse(sm.is_sleeping)
+        self.assertFalse(should_sleep)
+        self.assertIsNotNone(msg)  # 唤醒消息
+        with open(self.tmp.name) as f:
+            self.assertEqual(f.read().strip(), "0")
+
+    def test_sleeping_at_1630_force_wakes(self):
+        # 16:30 午睡合法时段也已过
+        sm, (_, msg) = self._run_at(16, 30)
+        self.assertFalse(sm.is_sleeping)
+        self.assertIsNotNone(msg)
+
+    def test_sleeping_at_0130_stays_asleep(self):
+        # 凌晨 1:30 仍在夜间合法时段，不应被兜底唤醒
+        sm, (should_sleep, msg) = self._run_at(1, 30)
+        self.assertTrue(sm.is_sleeping)
+        self.assertIsNone(msg)
+
+    def test_sleeping_at_1330_stays_asleep(self):
+        # 13:30 在午睡合法时段内（午醒窗口 13.16-16 自行处理），兜底不触发
+        with patch("core.sleep_manager.random.random", return_value=1.0):
+            sm, (should_sleep, msg) = self._run_at(13, 30)
+        self.assertTrue(sm.is_sleeping)
+        self.assertIsNone(msg)

@@ -25,23 +25,27 @@ main.py / web_main.py
     │
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
-    ├── core/（16 模块）
+    ├── core/（19 模块）
     │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
     │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker + response_format JSON mode
     │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
+    │   ├── message_handler.py ── 消息入口（handle_message / proactive / explore 三层编排）
+    │   ├── conversation_engine.py ── 统一对话引擎 + Frontend 事件接口（unified-pipeline P1）
+    │   ├── runtime_driver.py ─── 共享时间驱动：睡眠/唤醒/主动搭话/探索（unified-pipeline P2）
+    │   ├── session_factory.py ── CLI/Web 共享会话装配（统一管线 P0）
     │   ├── context_manager.py ── 上下文窗口管理（token估算+压缩）
     │   ├── prompt_cache.py ───── Prompt 分层缓存（静态/慢变/动态块复用）(#160)
     │   ├── sleep_manager.py ──── 睡眠/唤醒系统（窗口判断+梦境）
     │   ├── proactivity.py ────── 主动行为引擎（评分+话题+限速）
-    │   ├── cli_controller.py ─── CLI 状态机（run + _on_* handlers）
-    │   ├── message_handler.py ── 消息入口（process_* 三方法）
+    │   ├── cli_controller.py ─── CLI 输入循环 + 命令层（ConversationEngine 前端）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
     │   ├── provider.py ───────── LLMProvider 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
     │   ├── monitor.py ────────── LLM API 调用监控（环形缓冲 200 条，开发调试用）
     │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
     │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
     │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
-    │   └── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 工具调度
+    │   ├── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 工具调度
+    │   └── inner_drive_state.py ─ 内驱状态池（二期：关注列表 / 沉思循环 / 响应线索）
     │
     ├── memory/（7 模块）
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
@@ -83,7 +87,7 @@ main.py / web_main.py
     │   └── display.py ────── 打字机效果 + 彩色输出
     │
     ├── web/
-    │   ├── server.py ─────── FastAPI + WebSocket + proactive_loop
+    │   ├── server.py ─────── FastAPI + WebSocket + RuntimeDriver 启动/生命周期
     │   ├── session.py ────── SessionManager + WebAgent
     │   ├── schemas.py ────── Pydantic 请求/响应模型
     │   ├── rate_limit.py ─── 内存滑动窗口限流中间件
@@ -94,27 +98,38 @@ main.py / web_main.py
 
 ### 1.2 双端架构
 
+统一管线（unified-pipeline P0-P3）已覆盖 CLI 与 Web，两端共享同一 `ConversationEngine` + `RuntimeDriver`，只有前端渲染不同。
+
 ```
 CLI 模式： main.py
     load_config() + setup_logging() + auto_start_embedding()  (#58 共享启动)
-    ConsoleInterface（非阻塞 stdin）
-        → Agent.run()（状态机循环）
-            → _on_idle → _on_perceive → _on_think → _on_act → _on_reflect
+    assemble_session() ── 统一装配（per-session Repository）
+    Agent.run()
+        → CliController.run()
+            ├── ConversationEngine(a)   # 统一对话引擎
+            ├── _CliFrontend(a.ui)      # 终端打字机渲染
+            └── RuntimeDriver(engine, frontend).start_in_thread()
+                └── 睡眠/唤醒/做梦/主动搭话/自由探索
 
 Web 模式： web_main.py → uvicorn
     load_config() + setup_logging() + auto_start_embedding()  (#58 共享启动)
     FastAPI + WebSocket
         → SessionManager.get_or_create(session_id)
-            → WebAgent.process_message() / process_proactive()
-                → Agent.process_message() → _react_loop()
+            → WebAgent
+                ├── assemble_session() ── 统一装配
+                ├── ConversationEngine(a)
+                ├── _WsProactiveFrontend(ws)  # WebSocket 分段气泡
+                └── RuntimeDriver(engine, frontend) as asyncio task
+                    └── 与 CLI 同一时间节奏
 ```
 
 ### 1.3 设计原则
 
 - **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行, temp=0.3，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
-- **单向依赖**：core → memory → storage，core → tools，层间无循环依赖（个别内部环靠 lazy import 维持）；main.py 与 web/session.py 双装配（各装一遍全栈）
+- **单向依赖**：core → memory → storage，core → tools，层间无循环依赖（个别内部环靠 lazy import 维持）
+- **统一装配**：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）
 - **接口隔离**：provider 抽象 LLM 调用，storage 抽象持久化，各层可独立替换
-- **双路径**：CLI 用状态机驱动，Web 用事件驱动，共享核心逻辑（_react_loop）
+- **统一管线 + 双前端**：CLI 与 Web 共享 `ConversationEngine` + `RuntimeDriver`，只有 Frontend 渲染不同
 
 ---
 
@@ -146,15 +161,15 @@ Web 模式： web_main.py → uvicorn
                                        └──────────┘
 ```
 
-| 状态 | 职责 | CLI | Web |
-|------|------|-----|-----|
-| BOOT | 加载人格、初始化、播放欢迎语 | 执行 | 跳过（process_message 直接可用） |
-| IDLE | 等待输入 / 主动发起检测 | 守护线程轮询 | WebSocket 协程等待 |
-| PERCEIVE | 存储对话、检索记忆 | 完整执行 | 合入 process_message |
-| THINK | 组装 prompt、调 LLM、解析 tool_call | _on_think | process_message → _react_loop |
-| ACT | 执行工具 / 输出回复 | 状态机处理 | process_message 返回 |
-| REFLECT | 情绪更新、记忆合并、保存 | 完整执行 | _react_loop 尾部 |
-| SHUTDOWN | 保存状态、关闭连接 | 执行 | 无（session 级别） |
+| 状态 | 职责 | 当前实现 |
+|------|------|----------|
+| BOOT | 加载人格、初始化、播放欢迎语 | CLI 启动时由 `CliController._on_boot()` 播放欢迎语；Web 端会话创建即就绪，不单独经历 BOOT |
+| IDLE | 等待输入 / 主动发起检测 | CLI 在 `CliController.run()` 中阻塞读 stdin；主动行为由 `RuntimeDriver` 在后台 tick |
+| PERCEIVE | 存储对话、检索记忆 | `MessageHandler.handle_message()` 内部执行 |
+| THINK | 组装 prompt、调 LLM、解析 tool_call | `Agent._react_loop()` / `MessageHandler` 处理 |
+| ACT | 执行工具 / 输出回复 | `dispatcher.execute_tool_calls()` 执行，结果回灌 `_react_loop()` |
+| REFLECT | 情绪更新、记忆合并、保存 | 每次回复后由 `MessageHandler` 触发；CLI 退出时额外执行一次 |
+| SHUTDOWN | 保存状态、关闭连接 | CLI 退出时保存；Web 端按 session 生命周期保存 |
 
 ### 2.2 ReAct 循环
 
@@ -622,12 +637,14 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 4. JSON 解析，参数别名归一化（search → query, text → content）
 5. 回退：尝试将整个响应作为单个 JSON 对象解析
 
-### 5.4 内置工具（10 个，三层分工）
+### 5.4 内置工具（CLI 10 个 / Web 9 个，三层分工）
 
 三层架构从根本上解决模型虚构工具调用内容的问题：
 - **Agent 1 (InnerDriveAgent)**：自主推理决策，内部使用 recall/remember。识别知识缺口，输出自然语言工具请求给 Agent 2。
-- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。8 个外部工具（EXTERNAL_TOOL_NAMES；file_tree 暂未注册到 Web 端 session）。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
+- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。共定义 8 个外部工具，其中 `file_tree` 仅在 CLI 注册（`session_factory.py` 的 `include_file_tree=True`），Web 端注册 7 个外部工具。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
 - **Agent 3 (Roleplay Agent)**：temperature=0.8，完整人格。接收 inner_drive_summary + tool_results。仅 recall/remember 两个内部工具（均为本地 SQLite 操作）。外部工具指令已完全移出 prompt。
+
+> 注册数量：`session_factory.py` 中 CLI 注册 10 个工具（8 外部 + 2 内部），Web 注册 9 个工具（7 外部 + 2 内部，无 `file_tree`）。
 
 | 工具 | 功能 | 参数 | 后端 | Agent |
 |------|------|------|------|------|
@@ -655,18 +672,20 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 
 ### 5.5 自主行为（作息 + 探索 + 聊天）
 
-所有自主行为由 `web/server.py:_proactive_loop` 后台协程驱动，15 秒轮询一次。
+所有自主行为由 `core/runtime_driver.py` 的 `RuntimeDriver` 驱动，15 秒一次 tick，CLI 与 Web 共用同一节奏：
+- **CLI**：`driver.start_in_thread()` 在守护线程中运行事件循环。
+- **Web**：`asyncio.create_task(driver.run())` 在服务端事件循环中运行。
 
-> 注：SL-010 之后 `_get_sleep_state()` 与 `_generate_dream()` 均为 `async`，
-> proactive_loop 直接 `await`，不再经 `run_in_executor` 阻塞线程池；
+> 注：`_get_sleep_state()` 与 `_generate_dream()` 均为 `async`，RuntimeDriver 直接 `await`；
 > `_sleeping` 过渡由 `SleepManager._lock`（asyncio.Lock）保护，避免并发 tick 竞态。
+> 旧 `web/server.py:_proactive_loop` 已被 `RuntimeDriver` 取代（unified-pipeline P2）。
 
 #### 完整决策流程
 
 ```
-_proactive_loop (15s tick)
+RuntimeDriver.run() (15s tick)
     │
-    ├──▶ _get_sleep_state()
+    ├──▶ engine.get_sleep_state()
     │    │ 检查当前时间是否在睡眠/醒来窗口
     │    │
     │    ├── 入睡窗口命中:
@@ -683,7 +702,7 @@ _proactive_loop (15s tick)
     │    │   │
     │    │   ├── self._sleeping = True
     │    │   ├── 消息: "我去午睡了…[困]" / "夜深了…晚安[月亮]"
-    │    │   └── _generate_dream()
+    │    │   └── engine.generate_dream()
     │    │       │ prompt: 事实+经历+情绪 → 碎片化梦境(1-2句)
     │    │       │ 存储: record_emotion_event("梦: {dream}")
     │    │
@@ -701,11 +720,11 @@ _proactive_loop (15s tick)
     │         ├── self._sleeping = False
     │         └── 消息: "睡醒了…做了个梦：{dream}" 或 "没做梦睡得挺香"
     │
-    ├── ag._sleeping? → skip + 用户消息 "zzz...💤"
+    ├── engine.is_sleeping? → skip + 用户消息 "zzz...💤"
     │
     ├── idle < 30s? → 绝对底线, continue
     │
-    ├── idle > 情绪阈值? → _calculate_proactivity(idle)
+    ├── idle > 情绪阈值? → engine.calculate_proactivity(idle)
     │    │
     │    │ 情绪阈值表:
     │    │   excited: 60s    joyful: 90s     engaged: 180s
@@ -750,6 +769,13 @@ _proactive_loop (15s tick)
 
 | 方法 | 位置 | 说明 |
 |------|------|------|
+| `RuntimeDriver.run()` | core/runtime_driver.py | 统一时间驱动：睡眠/唤醒/主动搭话/探索 tick，CLI 守护线程 / Web asyncio task |
+| `RuntimeDriver.start_in_thread()` | core/runtime_driver.py | CLI 入口：在独立事件循环的守护线程中启动驱动 |
+| `ConversationEngine.handle_message()` | core/conversation_engine.py | 统一消息处理入口（三层 Agent 管线） |
+| `ConversationEngine.handle_proactive()` | core/conversation_engine.py | 主动搭话执行入口 |
+| `ConversationEngine.handle_explore()` | core/conversation_engine.py | 自由探索执行入口 |
+| `ConversationEngine.get_sleep_state()` | core/conversation_engine.py | async；返回 (should_sleep, message_or_None) |
+| `ConversationEngine.generate_dream()` | core/conversation_engine.py | async；LLM 生成梦境 |
 | `InnerDriveAgent.perceive_and_decide()` | core/inner_drive.py | Agent 1 自主推理：检索记忆 → 识别缺口 → 决策 → 输出自然语言请求或跳过 |
 | `build_inner_drive_prompt()` | prompts/system.py | Agent 1 system prompt：当前时间 + 身份 + 记忆 + 工具列表 |
 | `ToolAgent.run_with_request()` | core/tool_agent.py | Agent 2 接收自然语言请求，执行外部工具，ToolAttemptTracker 重试 |
@@ -940,8 +966,10 @@ delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
 
 ### 7.4 自主行为循环
 
+由 `core/runtime_driver.py` 的 `RuntimeDriver` 统一驱动，Web 端每个 session 持有一个 `asyncio.Task`。
+
 ```
-_proactive_loop (15s tick)
+RuntimeDriver.run() (15s tick)
     │
     ├─ 入睡? → 发睡前消息 → 生成梦境
     ├─ 醒来? → 发梦境分享
@@ -1100,8 +1128,8 @@ conversation_turns  完整对话历史
 relationship_snapshots 关系指标历史快照
 session_roles       session_id → role_id 映射
 observations        原始观察（Layer 1 记忆生命周期，ML-001）
+user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写，数据保留）
 ```
-（旧 user_facts 于 schema v4 归档为 user_facts_archive，数据保留，代码不再读写）
 
 ### 9.2 WAL 模式
 
