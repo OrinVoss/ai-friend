@@ -40,6 +40,9 @@ class MemoryConsolidator:
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
+        # R3: 本批是否产出了新事实/新体验（L1 insight 短路的判据，
+        # 替代「全部用户轮 ≤4 字」的粗略启发式，2026-07-20）
+        self._batch_new_info = False
         self._fact_checker = FactChecker(embedding_engine)
         # ML-001: Layer 1 Memory lifecycle (Observation -> Fact)。
         # 2026-07-18 完整上线：无条件创建，use_observation_fact 开关已删除。
@@ -94,6 +97,7 @@ class MemoryConsolidator:
 
         turn_text = self._format_turns(self._pending_buffer)
         logger.info(f"Consolidating {len(self._pending_buffer)} turns...")
+        self._batch_new_info = False  # R3: 每批重置，供 L1 insight 短路判断
 
         # #136: step-by-step with error isolation — each step independent
         errors = []
@@ -313,6 +317,7 @@ class MemoryConsolidator:
                 except Exception as e:
                     logger.warning(f"[consolidate] promote fact failed: {e}")
             if new_facts:
+                self._batch_new_info = True  # R3: 本批有新事实
                 logger.debug(f"Promoted {len(new_facts)} facts to facts_v2")
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
@@ -355,6 +360,7 @@ class MemoryConsolidator:
                 self.ltm.store_experience(
                     summary, tone, significance, tags, start_id, end_id, importance
                 )
+                self._batch_new_info = True  # R3: 本批有新体验
                 logger.info(f"Stored experience ({significance:.2f}): {summary[:50]}")
         except Exception as e:
             logger.warning(f"Experience summarization failed: {e}")
@@ -366,6 +372,12 @@ class MemoryConsolidator:
 
     def _generate_reflection_l1(self, personality: Personality) -> None:
         """L1: 每次合并生成一条假设性 Insight（替代旧开放式 reflection）。"""
+        # R3: 短路——本批没有新事实也没有新体验时，说明是纯功能性/闲聊批次，
+        # 不发起 insight LLM 调用（判据从「用户轮 ≤4 字」改为提取结果，
+        # 短但重要的消息不再被误跳过，2026-07-20）
+        if not self._batch_new_info:
+            logger.debug("[consolidate] R3 short-circuit: no new facts/experience in batch, skip L1 insight")
+            return
         try:
             experiences = self.ltm.get_recent_experiences(limit=5)
             facts = self.ltm.get_all_active_facts(limit=10)
@@ -480,12 +492,17 @@ class MemoryConsolidator:
                     if digits:
                         evidence.append(int(digits[0]))
         insight_type = data.get("insight_type") or default_type
+        # R3: 强制规则——evidence 为空或 confidence < 0.7 时 needs_more_evidence=True
+        # （覆盖 LLM 自报值；验证：LLM 宽松自评纠正，2026-07-20）
+        needs_more = bool(data.get("needs_more_evidence", True))
+        if not evidence or confidence < 0.7:
+            needs_more = True
         run_async(self._lifecycle.create_insight(
             hypothesis=hypothesis,
             evidence_fact_ids=evidence,
             insight_type=str(insight_type) if insight_type else None,
             confidence=confidence,
-            needs_more_evidence=bool(data.get("needs_more_evidence", True)),
+            needs_more_evidence=needs_more,  # R3: 强制规则覆盖
             created_by="consolidation",
         ))
         logger.info(f"Stored {level} insight ({insight_type}): {hypothesis[:50]}")

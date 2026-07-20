@@ -15,6 +15,7 @@
   "use_memory_agent": false,
   "memory_agent_relevance_floor": 0.35,
   "memory_agent_relevance_full": 0.75,
+  "memory_agent_coreference_threshold": 0.78,
   "proactive_think_loop": true,
   "proactive_think_max_rounds": 2,
   "inner_drive_care_list_size": 20,

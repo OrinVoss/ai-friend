@@ -88,6 +88,7 @@ class Config:
     # cosine similarity are dropped; confidence scales by top_sim/relevance_full
     memory_agent_relevance_floor: float = 0.35
     memory_agent_relevance_full: float = 0.75
+    memory_agent_coreference_threshold: float = 0.78  # R2: 指代改写阈值（原 0.65 太松）
     # Proactive think loop (proactive-think-loop.md): bounded reflection loop
     # on the proactive path; False = legacy single-shot decision
     proactive_think_loop: bool = True

@@ -90,11 +90,12 @@ RECALL_LIKE_INTENTS = {"recall", "summarize"}
 # P2: 指代性问句的向量锚点（《国际歌》案例：「本地有这个歌吗」→「本地有《国际歌》吗」）。
 # 与 INTENT_ANCHORS 同机制：query 向量与锚点的最大余弦 ≥ 阈值 → 触发 LLM 改写，
 # 不做关键字匹配（# 指代检测与意图分类同一哲学：语义问题用向量，不用正则）。
+# R2: 锚点收紧为 4 个强指代句，阈值 0.65→0.78（原太松，短句也命中）。
 COREFERENCE_ANCHORS = [
     "这个是什么意思", "那首歌叫什么", "它在哪里",
-    "还有别的吗", "为什么是这样", "后来怎么样了",
+    "上面说的那个",
 ]
-COREFERENCE_THRESHOLD = 0.65
+COREFERENCE_THRESHOLD = 0.78
 
 
 def parse_time_ranges(query: str, today: Optional[datetime] = None) -> list[tuple[str, str]]:
@@ -200,6 +201,7 @@ class MemoryAgent:
                  fact_checker: Optional[FactChecker] = None,
                  relevance_floor: float = 0.35,
                  relevance_full: float = 0.75,
+                 coreference_threshold: float = 0.78,  # R2
                  llm_fn=None, history_fn=None):
         self.ltm = ltm
         self.lifecycle = lifecycle
@@ -211,6 +213,7 @@ class MemoryAgent:
         # are dropped; final confidence is scaled by top_sim/relevance_full.
         self._relevance_floor = relevance_floor
         self._relevance_full = relevance_full
+        self._coreference_threshold = coreference_threshold  # R2: 指代改写阈值
         # P2: LLM 版线索提取——llm_fn(prompt)->str 用于指代解析，
         # history_fn()->str 提供最近对话。两者缺一则回退纯规则路径。
         self._llm_fn = llm_fn
@@ -341,8 +344,8 @@ class MemoryAgent:
                     None, self._embed.encode, COREFERENCE_ANCHORS)
             qvec = EmbeddingEngine.bytes_to_vec(query_blob)
             sim = float(np.max(np.dot(self._coref_vecs, qvec)))
-            logger.debug(f"[memory_agent] coreference anchor sim={sim:.2f}")
-            return sim >= COREFERENCE_THRESHOLD
+            logger.debug(f"[memory_agent] coreference anchor sim={sim:.2f} threshold={self._coreference_threshold:.2f}")
+            return sim >= self._coreference_threshold
         except Exception as e:
             logger.debug(f"[memory_agent] coreference anchor check failed: {e}")
             return False
@@ -365,6 +368,9 @@ class MemoryAgent:
             if rewritten != query:
                 logger.info(f"[memory_agent] coreference: {query[:30]!r} "
                             f"-> {rewritten[:50]!r}")
+            else:
+                # R2: 空转统计——改写结果与原句相同只记 debug
+                logger.debug(f"[memory_agent] coreference rewrite no-op: {query[:30]!r}")
             return rewritten
         except Exception as e:
             logger.warning(f"[memory_agent] coreference resolve failed: {e}")

@@ -360,5 +360,33 @@ class TestMessageHandler(unittest.TestCase):
         self.assertTrue(kwargs.get("skip_post_process"))
 
 
+class TestR4DreamAndSleepFiltering(unittest.TestCase):
+    """R4：Agent 3 prompt 的梦境/睡眠残留过滤（2026-07-20）。"""
+
+    def test_build_messages_skips_sleep_turns(self):
+        agent = MagicMock()
+        t1 = MagicMock(role="user", content="你好", metadata={})
+        t2 = MagicMock(role="assistant", content="zzzz...（小声梦话）",
+                       metadata={"sleep": True})
+        t3 = MagicMock(role="assistant", content="我在呢", metadata={})
+        agent.short_term.get_all_reversed.return_value = [t3, t2, t1]
+        handler = MessageHandler(agent)
+        msgs = handler._build_messages("sys", "hi")
+        contents = [m["content"] for m in msgs]
+        self.assertIn("你好", contents)
+        self.assertIn("我在呢", contents)
+        self.assertNotIn("zzzz...（小声梦话）", contents)
+
+    def test_dreams_block_only_when_just_woke(self):
+        from prompts.system import _build_dreams_block
+        emotion = MagicMock()
+        emotion.emotion_events = [{"trigger": "梦见歌单炸成爆米花"}]
+        # R4: 非刚睡醒（idle ≤ 600）不注入梦境块
+        self.assertEqual(_build_dreams_block(emotion, idle_duration=300), "")
+        # 刚睡醒场景保留
+        self.assertIn("你刚睡醒",
+                      _build_dreams_block(emotion, idle_duration=1200))
+
+
 if __name__ == "__main__":
     unittest.main()

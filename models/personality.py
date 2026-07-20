@@ -30,6 +30,7 @@ FORGIVENESS_THRESHOLD = 10        # consecutive turns without anger to trigger f
 FORGIVENESS_HALVING = 0.5         # resentment cut factor on forgiveness
 MAX_EMOTION_EVENTS = 20           # PS-013: max stored emotion events
 BASELINE_ELASTIC_RATE = 2.0        # #267: recovery speed toward default baseline (mood_decay_rate * this = 0.02/turn)
+NEGATIVE_VALENCE_WEIGHT = 1.2      # R5: 负向偏移放大系数（抵消正向累积偏置）
 
 
 @dataclass
@@ -93,6 +94,8 @@ class EmotionalState:
     # PS-012 forgiveness counter — L-07: 改为 dataclass 字段随 to_dict/from_dict
     # 持久化，重启不再清零（旧文件缺字段时取默认值 0）
     turns_without_anger: int = 0
+    # R5: 连续停留在效价边界的 shift 次数，用于升级边界告警
+    _valence_boundary_count: int = 0
 
     @property
     def dominant_emotion(self) -> str:
@@ -201,14 +204,28 @@ class EmotionalState:
               primary_deltas: Optional[dict[str, float]] = None) -> None:
         """Apply emotional shift with inertia damping."""
         inertia_factor = 1.0 - self.inertia
+        # R5: 负向偏移放大——抵消正向累积偏置（decay 向 baseline 拉回不对称）
+        if delta_v < 0:
+            delta_v *= NEGATIVE_VALENCE_WEIGHT
         delta_v *= inertia_factor
         delta_a *= inertia_factor
 
+        old_valence = self.valence
         self.valence = max(-1.0, min(1.0, self.valence + delta_v))
         self.arousal = max(0.0, min(1.0, self.arousal + delta_a))
-        # #42: warn when emotion hits hard clamp — decay() will pull back naturally
+        # R5: 连续边界停留跟踪——5 次以上仍顶格则升级为 warning
         if abs(self.valence) >= 1.0 or self.arousal >= 1.0 or self.arousal <= 0.0:
-            logger.info(f"[emotion] hard clamp: v={self.valence:+.2f} a={self.arousal:.2f}")
+            self._valence_boundary_count += 1
+            if self._valence_boundary_count >= 5:
+                logger.warning(f"[emotion] valence at boundary for {self._valence_boundary_count} consecutive shifts: "
+                              f"v={self.valence:+.2f} a={self.arousal:.2f} "
+                              f"delta_v={delta_v:+.3f} delta_a={delta_a:+.3f}")
+            else:
+                logger.info(f"[emotion] hard clamp: v={self.valence:+.2f} a={self.arousal:.2f}")
+        else:
+            if self._valence_boundary_count > 0:
+                # 离开了边界，重置计数
+                self._valence_boundary_count = 0
 
         # Apply primary emotion deltas
         if primary_deltas:

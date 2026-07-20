@@ -352,6 +352,8 @@ class TestInsightGeneration(unittest.TestCase):
         self.consolidator._lifecycle = MagicMock()
         self.consolidator._lifecycle.create_insight = AsyncMock(
             return_value=MagicMock())
+        # R3: 直接调用 L1 时模拟「本批有新信息」，绕过无新内容短路
+        self.consolidator._batch_new_info = True
         self.personality = MagicMock()
         self.personality.emotion.dominant_emotion = "content"
         self.ltm.get_recent_experiences.return_value = []
@@ -477,6 +479,75 @@ class TestCareClueExtraction(unittest.TestCase):
         from memory.consolidation import MemoryConsolidator
         c = MemoryConsolidator(self.ltm, self.llm)
         self.assertIsNone(c._inner_drive_state)
+
+
+class TestInsightForcedRules(unittest.TestCase):
+    """R3：needs_more_evidence 强制规则 + 功能性批次短路（2026-07-20）。"""
+
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+        self.consolidator = MemoryConsolidator(self.ltm, self.llm)
+        self.consolidator._lifecycle = MagicMock()
+        self.consolidator._lifecycle.create_insight = AsyncMock(
+            return_value=MagicMock())
+
+    def _store(self, result: str):
+        def _drive(coro):
+            try:
+                coro.send(None)
+            except StopIteration:
+                pass  # AsyncMock 协程一步完成，返回值不需要
+        with patch("memory.consolidation.run_async", _drive):
+            self.consolidator._store_insight_from_json(
+                result, min_confidence=0.1, level="L1")
+        return self.consolidator._lifecycle.create_insight
+
+    def test_empty_evidence_forces_needs_more(self):
+        mock = self._store(
+            '{"hypothesis": "用户喜欢披萨", "evidence": [], '
+            '"confidence": 0.9, "needs_more_evidence": false}')
+        self.assertTrue(mock.call_args.kwargs["needs_more_evidence"])
+
+    def test_low_confidence_self_report_overridden(self):
+        mock = self._store(
+            '{"hypothesis": "用户寻求边界探索", "evidence": [3], '
+            '"confidence": 0.68, "needs_more_evidence": false}')
+        self.assertTrue(mock.call_args.kwargs["needs_more_evidence"])
+
+    def test_high_confidence_with_evidence_respects_self_report(self):
+        mock = self._store(
+            '{"hypothesis": "用户喜欢披萨", "evidence": [3], '
+            '"confidence": 0.85, "needs_more_evidence": false}')
+        self.assertFalse(mock.call_args.kwargs["needs_more_evidence"])
+
+    def test_no_new_info_batch_skips_l1_llm(self):
+        """R3 短路：本批无新事实且无新体验（_batch_new_info=False）→
+        不发起 insight LLM 调用。"""
+        self.consolidator._pending_buffer = [
+            MagicMock(role="user", content="换一批"),
+            MagicMock(role="assistant", content="好的，换一批新的"),
+            MagicMock(role="user", content="哈哈"),
+        ]
+        self.consolidator._generate_reflection_l1(MagicMock())
+        self.llm.assert_not_called()
+        self.consolidator._lifecycle.create_insight.assert_not_called()
+
+    def test_batch_with_new_info_not_short_circuited(self):
+        """本批产出了新事实/新体验（_batch_new_info=True）时不短路——
+        与用户消息长短无关。"""
+        self.consolidator._batch_new_info = True
+        self.consolidator._pending_buffer = [
+            MagicMock(role="user", content="我失恋了"),
+        ]
+        self.ltm.get_recent_experiences.return_value = []
+        self.ltm.get_all_active_facts.return_value = []
+        self.llm.return_value = '{"hypothesis": ""}'
+        with patch("memory.consolidation.run_async",
+                   lambda coro: coro.send(None)):
+            self.consolidator._generate_reflection_l1(MagicMock())
+        self.llm.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -561,22 +561,21 @@ def _build_memory_block(memory_context: MemoryContext) -> str:
 
 
 def _build_dreams_block(emotion: EmotionalState, idle_duration: float) -> str:
+    # R4: idle≤600（非刚睡醒场景）不展示梦境，避免无关对话时注入
+    if idle_duration <= 600:
+        return ""
+    # 从 emotion_events 中找含有「梦」trigger 的事件（旧版匹配，保留兼容）
     dreams = [e for e in getattr(emotion, 'emotion_events', []) if '梦' in e.get('trigger', '')]
     if not dreams:
         return ""
-    if idle_duration > 600:
-        latest = dreams[-1]
-        return (
-            f"=== 你刚睡醒 ===\n"
-            f"你刚才睡了{idle_duration/60:.0f}分钟，做了一个梦：\n"
-            f"{latest['trigger']}\n\n"
-            f"用户回来了——可以自然地把梦带到对话里，比如'我刚才做了个奇怪的梦...' "
-            f"或者如果噩梦的话可以说'刚做了个噩梦，看到你真好...'"
-        )
-    lines = ["=== 你最近的梦 ==="]
-    for d in dreams[-3:]:
-        lines.append(f"- {d['trigger']}")
-    return "\n".join(lines)
+    latest = dreams[-1]
+    return (
+        f"=== 你刚睡醒 ===\n"
+        f"你刚才睡了{idle_duration/60:.0f}分钟，做了一个梦：\n"
+        f"{latest['trigger']}\n\n"
+        f"用户回来了——可以自然地把梦带到对话里，比如'我刚才做了个奇怪的梦...' "
+        f"或者如果噩梦的话可以说'刚做了个噩梦，看到你真好...'"
+    )
 
 
 def _build_internal_tools_block(tools) -> str:

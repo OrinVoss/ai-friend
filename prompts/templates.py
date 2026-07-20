@@ -104,6 +104,8 @@ INSIGHT_GENERATION_PROMPT = """基于以下事实和体验，生成一个假设�
 - evidence 必须列出支持的事实 ID（数字列表，来自下方事实的 id）
 - confidence 0.0~1.0
 - needs_more_evidence 如果证据不足则为 true
+- **R3: 只允许从列出的 evidence 可直接支持的内容推导，禁止心理学推测**
+- **R3: 本批是纯功能性操作（换歌/查询/指令）或无新信息时，输出 {"hypothesis": ""}**
 
 事实：
 {facts}
@@ -136,6 +138,7 @@ INSIGHT_L2_PROMPT = """回顾你和用户最近的多次互动与近期洞察，
 - hypothesis 是跨多次对话的可验证模式假设，要具体不要笼统
 - evidence 列出支持的事实 ID（数字列表；若主要依据是体验/洞察而非事实，可留空 []）
 - confidence 0.0~1.0；证据不足时 needs_more_evidence 为 true
+- **R3: 禁止无证据的心理学推测；只从列出的 evidence 可直接支持的内容推导**
 """
 
 INSIGHT_L3_PROMPT = """基于你和用户的长期互动，提出一个**长期模式/深度动机**层面的假设性洞察。
@@ -165,6 +168,7 @@ INSIGHT_L3_PROMPT = """基于你和用户的长期互动，提出一个**长期�
 - hypothesis 是可验证的深层假设（动机/需求/关系本质），不是最终结论
 - evidence 列出支持的事实 ID（数字列表；若主要依据是 L2 模式而非事实，可留空 []）
 - confidence 0.0~1.0；证据不足时 needs_more_evidence 为 true
+- **R3: 禁止无证据的心理学推测；只从列出的 evidence 可直接支持的内容推导**
 """
 
 

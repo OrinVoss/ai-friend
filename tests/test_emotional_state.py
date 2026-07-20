@@ -16,6 +16,35 @@ def _make_default_state():
     )
 
 
+class TestR5NegativeWeightAndBoundary(unittest.TestCase):
+    """R5：负向效价偏移 ×1.2 + 边界停留告警升级（2026-07-20）。"""
+
+    def test_negative_delta_amplified(self):
+        e = EmotionalState(valence=0.0, arousal=0.5, inertia=0.0)
+        e.shift(-0.1, 0)
+        # -0.1 × 1.2（NEGATIVE_VALENCE_WEIGHT）× (1 - inertia=1.0)
+        self.assertAlmostEqual(e.valence, -0.12, places=4)
+
+    def test_positive_delta_not_amplified(self):
+        e = EmotionalState(valence=0.0, arousal=0.5, inertia=0.0)
+        e.shift(0.1, 0)
+        self.assertAlmostEqual(e.valence, 0.1, places=4)
+
+    def test_boundary_streak_escalates_to_warning(self):
+        e = EmotionalState(valence=1.0, arousal=0.5, inertia=0.0)
+        with self.assertLogs("models.personality", level="WARNING") as cm:
+            for _ in range(5):
+                e.shift(0.1, 0)  # 持续顶格
+        self.assertTrue(any("boundary" in line for line in cm.output))
+
+    def test_leaving_boundary_resets_streak(self):
+        e = EmotionalState(valence=1.0, arousal=0.5, inertia=0.0)
+        e.shift(0.1, 0)
+        self.assertEqual(e._valence_boundary_count, 1)
+        e.shift(-0.5, 0)  # 离开边界
+        self.assertEqual(e._valence_boundary_count, 0)
+
+
 class TestShift(unittest.TestCase):
     def setUp(self):
         self.e = _make_default_state()

@@ -42,6 +42,7 @@
 | `use_memory_agent` | bool | `false` | Memory Agent 灰度开关：开启后 Agent 1 用 `memory_agent.answer()` 替代旧检索（带置信度/证据链的记忆摘要），失败自动回退旧路径 |
 | `memory_agent_relevance_floor` | float | `0.35` | Memory Agent 相关性下限：可测量证据 cosine 相似度低于此值时丢弃；recall/summarize 意图豁免 |
 | `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
+| `memory_agent_coreference_threshold` | float | `0.78` | 指代改写触发阈值：query 与指代锚点的最大余弦达到此值才调用 LLM 改写（R2，原 0.65 太松导致空转） |
 | `proactive_think_loop` | bool | `true` | 主动沉思循环开关：开启后主动路径走「想起 → 查证 → 决定」有界循环（默认 3 轮）；关闭退回单次决策 |
 | `proactive_think_max_rounds` | int | `2` | 沉思循环轮数硬上限（F2：默认 2 轮，沉默期首轮即 silent 无需第 3 轮） |
 | `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按「先非活跃、再低 priority、最后旧活跃」淘汰（二期起非 FIFO） |

@@ -395,6 +395,21 @@ class TestCoreferenceRewrite(unittest.TestCase):
         clues = asyncio.run(agent._extract_clues("这个是什么"))
         self.assertEqual(clues.raw_query, "这个是什么")
 
+    def test_threshold_boundary(self):
+        """R2：阈值 0.78 时 sim=0.7 不触发；降到 0.65 触发。"""
+        qvec = _unit([1, 0, 0, 0])
+        anchor = _unit([0.7, 0.7141428, 0, 0])  # 与 qvec 的余弦 = 0.7
+        agent, llm_fn = self._agent_with_llm(anchor, qvec, "改写结果")
+        clues = asyncio.run(agent._extract_clues("这个是什么"))
+        llm_fn.assert_not_called()
+        self.assertEqual(clues.raw_query, "这个是什么")
+        # 阈值下调后命中
+        agent2, llm_fn2 = self._agent_with_llm(anchor, qvec, "改写结果")
+        agent2._coreference_threshold = 0.65
+        clues2 = asyncio.run(agent2._extract_clues("这个是什么"))
+        llm_fn2.assert_called_once()
+        self.assertEqual(clues2.raw_query, "改写结果")
+
 
 if __name__ == "__main__":
     unittest.main()

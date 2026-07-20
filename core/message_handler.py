@@ -184,6 +184,7 @@ class MessageHandler:
                 a.ltm, lifecycle, a.retriever, embedding_engine=embed,
                 relevance_floor=getattr(a.config, "memory_agent_relevance_floor", 0.35),
                 relevance_full=getattr(a.config, "memory_agent_relevance_full", 0.75),
+                coreference_threshold=getattr(a.config, "memory_agent_coreference_threshold", 0.78),  # R2
                 llm_fn=_clues_llm,
                 history_fn=lambda: a.short_term.format_for_prompt(max_tokens=800),
             )
@@ -702,6 +703,9 @@ class MessageHandler:
         for t in agent.short_term.get_all_reversed():
             # #130: skip turns with stage directions / fake tool claims
             if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
+                continue
+            # R4: skip sleep turns (zzzz, 我去午睡了, etc.) — 同 short_term.format_for_prompt 的过滤逻辑
+            if getattr(t, 'metadata', None) and t.metadata.get('sleep'):
                 continue
             if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
                 continue

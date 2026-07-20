@@ -219,6 +219,9 @@ class InnerDriveAgent:
         self._think_loop = proactive_think_loop
         self._think_max_rounds = _positive_int(proactive_think_max_rounds, 2)  # F2: 默认 2 轮
         self._inner_drive_state = inner_drive_state
+        # R1: 同一条消息内 _context_summary_for 的结果缓存，避免 assess/review/re_decide
+        # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实下条消息可见。
+        self._cs_memo: tuple[str, str] | None = None
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
@@ -335,11 +338,19 @@ class InnerDriveAgent:
     def _context_summary_for(self, user_input: str) -> str:
         """context_summary via MemoryAgent when enabled; falls back to the
         classic retriever path on failure or empty result."""
+        # R1: 同一条消息内 memo 缓存，避免 assess/review/re_decide
+        # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实
+        # 下条消息可见——同一条消息内的略微过期可接受。
+        if self._cs_memo and self._cs_memo[0] == user_input:
+            logger.debug(f"[inner_drive] context memo hit ({user_input[:30]})")
+            return self._cs_memo[1]
         # F3: 空 query（proactive 等无用户输入路径）不需要 MemoryAgent 的
         # 置信度/证据链管线——空查询会得到"全部最近记忆 + 虚假高置信度"，
         # 直接用 retriever 的概览即可
         if not (user_input or "").strip():
-            return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+            cs = self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+            self._cs_memo = (user_input, cs)
+            return cs
         if self._memory_agent is not None:
             try:
                 from core.async_utils import run_async
@@ -348,11 +359,14 @@ class InnerDriveAgent:
                 if formatted:
                     logger.debug(f"[inner_drive] context via memory agent "
                                  f"(confidence={ma.confidence})")
+                    self._cs_memo = (user_input, formatted)
                     return formatted
                 logger.debug("[inner_drive] memory agent empty, retriever fallback")
             except Exception as e:
                 logger.warning(f"[inner_drive] memory agent failed, retriever fallback: {e}")
-        return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+        cs = self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+        self._cs_memo = (user_input, cs)
+        return cs
 
     @staticmethod
     def _format_memory_answer(ma) -> str:

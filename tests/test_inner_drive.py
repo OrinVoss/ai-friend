@@ -2,7 +2,7 @@
 import json
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from core.inner_drive import (
     InnerDriveAgent, InnerDriveResult, ToolRequest,
@@ -536,6 +536,39 @@ class TestProactiveThinkLoop(unittest.TestCase):
         state.surface_for_query.assert_called_once_with("我考试成绩出来了")
         self.assertIn("你在意的事", result.context_summary)
         self.assertIn("问问用户考试结果", result.context_summary)
+
+
+class TestContextSummaryMemo(unittest.TestCase):
+    """R1：同一条消息内 _context_summary_for 结果 memo，assess/review
+    不再重复调用 memory_agent.answer()（2026-07-20）。"""
+
+    def setUp(self):
+        self.retriever = MagicMock()
+        self.retriever.retrieve_for_query.return_value = _make_memory_mock()
+        self.memory_agent = MagicMock()
+        ma_result = MagicMock(answer="记忆内容", confidence=0.9,
+                              contradictions=[], needs_more_evidence=False)
+        self.memory_agent.answer = AsyncMock(return_value=ma_result)
+        self.agent = InnerDriveAgent(
+            provider=MagicMock(),
+            personality=MagicMock(),
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=MagicMock(),
+            tool_registry=mock_tool_registry(),
+            memory_agent=self.memory_agent,
+        )
+
+    def test_same_query_memoized(self):
+        cs1 = self.agent._context_summary_for("本地有这个歌吗")
+        cs2 = self.agent._context_summary_for("本地有这个歌吗")
+        self.assertEqual(cs1, cs2)
+        self.memory_agent.answer.assert_called_once()
+
+    def test_different_query_not_memoized(self):
+        self.agent._context_summary_for("问题一")
+        self.agent._context_summary_for("问题二")
+        self.assertEqual(self.memory_agent.answer.call_count, 2)
 
 
 if __name__ == "__main__":
