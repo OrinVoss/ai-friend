@@ -287,10 +287,12 @@ if user_says_correction:
 
 ### P2：完整交叉验证与 GC
 
-- [ ] 集成 embedding 做语义相似度验证
-- [ ] 矛盾向上传播：Fact 被推翻时，依赖它的 Insight 标记为可疑
-- [ ] 完整 GC：merge / decay / obsolete / archive
-- [ ] `_extract_clues()` LLM 版本
+- [x] 集成 embedding 做语义相似度验证（verify_fact 内 FactChecker 语义矛盾检测）
+- [x] 矛盾向上传播：Fact 被推翻时，依赖它的 Insight 标记为可疑（needs_more_evidence + confidence 降权）✅ 2026-07-20
+- [x] 完整 GC：decay / obsolete / archive / expire_due_insights（merge 保持占位，语义近重复合并推迟）✅ 2026-07-20
+- [x] `_extract_clues()` LLM 版本（向量锚点检测指代 + LLM 改写自足查询）✅ 2026-07-20
+
+（以上三项见 `changes/2026-07-20-memory-agent-p2.md`）
 
 ### P3：完整睡眠巩固与可视化（优先级最低，按需）
 

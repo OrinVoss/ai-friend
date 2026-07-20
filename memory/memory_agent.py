@@ -21,6 +21,7 @@ from memory.lifecycle import MemoryLifecycleManager
 from memory.long_term import LongTermMemory
 from memory.retrieval import MemoryRetriever
 from models.memory import EMBEDDING_VERSION, FactV2, UserFact
+from prompts.templates import COREFERENCE_REWRITE_PROMPT, safe_format
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class MemoryClues:
 @dataclass
 class MemoryEvidence:
     """One piece of evidence with provenance."""
-    source_type: Literal["observation", "fact", "experience", "relationship"]
+    source_type: Literal["observation", "fact", "experience", "relationship", "insight"]
     source_id: int
     content: str
     confidence: float
@@ -65,7 +66,8 @@ class MemoryAnswer:
 
 # ── Verification constants (memory-agent-verification.md) ──
 
-SOURCE_QUALITY = {"fact": 1.0, "observation": 0.6, "experience": 0.5, "relationship": 0.3}
+SOURCE_QUALITY = {"fact": 1.0, "insight": 0.6, "observation": 0.6,
+                  "experience": 0.5, "relationship": 0.3}
 STABLE_CATEGORIES = {"preference", "identity", "relationship"}
 CONSISTENCY_SIM_THRESHOLD = 0.7
 WEIGHTS = {
@@ -84,6 +86,15 @@ INTENT_THRESHOLD = 0.65
 # Recall/summarize queries are topic-less ("上周我们聊了什么") — their query
 # embedding carries no topic, so the relevance floor must not apply.
 RECALL_LIKE_INTENTS = {"recall", "summarize"}
+
+# P2: 指代性问句的向量锚点（《国际歌》案例：「本地有这个歌吗」→「本地有《国际歌》吗」）。
+# 与 INTENT_ANCHORS 同机制：query 向量与锚点的最大余弦 ≥ 阈值 → 触发 LLM 改写，
+# 不做关键字匹配（# 指代检测与意图分类同一哲学：语义问题用向量，不用正则）。
+COREFERENCE_ANCHORS = [
+    "这个是什么意思", "那首歌叫什么", "它在哪里",
+    "还有别的吗", "为什么是这样", "后来怎么样了",
+]
+COREFERENCE_THRESHOLD = 0.65
 
 
 def parse_time_ranges(query: str, today: Optional[datetime] = None) -> list[tuple[str, str]]:
@@ -182,12 +193,14 @@ class MemoryAgent:
     FACTS_POOL = 50
     OBS_POOL = 50
     EXP_POOL = 30
+    INSIGHT_POOL = 20
 
     def __init__(self, ltm: LongTermMemory, lifecycle: MemoryLifecycleManager,
                  retriever: MemoryRetriever, embedding_engine=None,
                  fact_checker: Optional[FactChecker] = None,
                  relevance_floor: float = 0.35,
-                 relevance_full: float = 0.75):
+                 relevance_full: float = 0.75,
+                 llm_fn=None, history_fn=None):
         self.ltm = ltm
         self.lifecycle = lifecycle
         self.retriever = retriever
@@ -198,6 +211,11 @@ class MemoryAgent:
         # are dropped; final confidence is scaled by top_sim/relevance_full.
         self._relevance_floor = relevance_floor
         self._relevance_full = relevance_full
+        # P2: LLM 版线索提取——llm_fn(prompt)->str 用于指代解析，
+        # history_fn()->str 提供最近对话。两者缺一则回退纯规则路径。
+        self._llm_fn = llm_fn
+        self._history_fn = history_fn
+        self._coref_vecs: Optional[np.ndarray] = None  # lazy 指代锚点
 
     # ── Public API ──
 
@@ -292,9 +310,15 @@ class MemoryAgent:
     # ── Clue extraction (P1: time ranges + intent anchors) ──
 
     async def _extract_clues(self, query: str) -> MemoryClues:
-        clues = MemoryClues(raw_query=query)
-        clues.query_embedding = await self._encode_bytes(query)
-        clues.time_ranges = parse_time_ranges(query)
+        qvec_blob = await self._encode_bytes(query)
+        resolved = query
+        if await self._needs_coreference(qvec_blob):
+            resolved = await self._rewrite_query(query)
+            if resolved != query:
+                qvec_blob = await self._encode_bytes(resolved)
+        clues = MemoryClues(raw_query=resolved)
+        clues.query_embedding = qvec_blob
+        clues.time_ranges = parse_time_ranges(resolved)
         clues.intent = await self._classify_intent(clues.query_embedding)
         logger.debug(
             f"[memory_agent] clues: intent={clues.intent} "
@@ -302,6 +326,49 @@ class MemoryAgent:
             f"embed={'ok' if clues.query_embedding else 'none'}"
         )
         return clues
+
+    async def _needs_coreference(self, query_blob: Optional[bytes]) -> bool:
+        """P2: 指代性问句检测——向量锚点，不用关键字。锚点语义是「依赖上文
+        才能理解的问句」（这个/那首/它/后来呢），与 query 求最大余弦。"""
+        if not self._llm_fn or not self._history_fn:
+            return False
+        if not self._embed or query_blob is None:
+            return False
+        try:
+            if self._coref_vecs is None:
+                loop = asyncio.get_running_loop()
+                self._coref_vecs = await loop.run_in_executor(
+                    None, self._embed.encode, COREFERENCE_ANCHORS)
+            qvec = EmbeddingEngine.bytes_to_vec(query_blob)
+            sim = float(np.max(np.dot(self._coref_vecs, qvec)))
+            logger.debug(f"[memory_agent] coreference anchor sim={sim:.2f}")
+            return sim >= COREFERENCE_THRESHOLD
+        except Exception as e:
+            logger.debug(f"[memory_agent] coreference anchor check failed: {e}")
+            return False
+
+    async def _rewrite_query(self, query: str) -> str:
+        """结合最近对话用 LLM 把指代性 query 改写为自足查询。
+        历史为空、LLM 失败或输出异常（空/复读超长）一律回退原 query。"""
+        try:
+            history = self._history_fn() or ""
+            if not history.strip():
+                return query
+            prompt = safe_format(COREFERENCE_REWRITE_PROMPT,
+                                 history=history, query=query)
+            loop = asyncio.get_running_loop()
+            rewritten = await loop.run_in_executor(None, self._llm_fn, prompt)
+            # 只取第一行、去引号；过长（失控复读）则弃用
+            rewritten = (rewritten or "").strip().strip('"').split("\n")[0].strip()
+            if not rewritten or len(rewritten) > max(len(query) * 4, 50):
+                return query
+            if rewritten != query:
+                logger.info(f"[memory_agent] coreference: {query[:30]!r} "
+                            f"-> {rewritten[:50]!r}")
+            return rewritten
+        except Exception as e:
+            logger.warning(f"[memory_agent] coreference resolve failed: {e}")
+            return query
 
     async def _encode_bytes(self, text: str) -> Optional[bytes]:
         if not self._embed or not text.strip():
@@ -363,6 +430,9 @@ class MemoryAgent:
         observations = await repo.get_recent_observations(limit=self.OBS_POOL)
         experiences = await repo.get_recent_experiences(limit=self.EXP_POOL)
         relationship = await repo.get_all_relationships()
+        # Layer 1 二期（2026-07-20）：假设性 Insight 也进证据池；
+        # 待验证的（needs_more_evidence）在内容里显式标注
+        insights = await repo.get_active_insights(limit=self.INSIGHT_POOL)
 
         def _measurable(blob, version) -> bool:
             return (qvec is not None and blob is not None
@@ -398,6 +468,17 @@ class MemoryAgent:
                 confidence=e.composite_score, timestamp=e.created_at,
                 similarity=self._sim(qvec, e.embedding, e.embedding_version),
                 has_similarity=_measurable(e.embedding, e.embedding_version),
+            ))
+        for i in insights:
+            suspect = "（待验证）" if i.needs_more_evidence else ""
+            evidences.append(MemoryEvidence(
+                source_type="insight", source_id=i.id,
+                content=f"洞察[{i.insight_type or 'general'}]{suspect}：{i.hypothesis}",
+                confidence=i.confidence,
+                timestamp=i.updated_at or i.created_at,
+                verification_count=0 if i.needs_more_evidence else 1,
+                similarity=self._sim(qvec, i.embedding, i.embedding_version),
+                has_similarity=_measurable(i.embedding, i.embedding_version),
             ))
         if relationship:
             rel_text = "，".join(f"{k}={v:.2f}" for k, v in relationship.items())
@@ -445,7 +526,7 @@ class MemoryAgent:
         kept_sim = f"{kept[0].similarity:.2f}" if kept else "-"
         logger.debug(
             f"[memory_agent] retrieve: facts={len(facts)} obs={len(observations)} "
-            f"exp={len(experiences)} rel={bool(relationship)} "
+            f"exp={len(experiences)} ins={len(insights)} rel={bool(relationship)} "
             f"kept={len(kept)} top_sim={kept_sim}"
         )
         return kept, top_sim

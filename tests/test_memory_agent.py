@@ -10,7 +10,7 @@ from memory.embeddings import EmbeddingEngine
 from memory.memory_agent import (MemoryAgent, MemoryEvidence,
                                  check_freshness, check_timeline,
                                  parse_time_ranges, INTENT_ANCHORS)
-from models.memory import EMBEDDING_VERSION, FactV2
+from models.memory import EMBEDDING_VERSION, FactV2, InsightV2
 
 
 def _unit(vec):
@@ -31,7 +31,7 @@ def _fact(fid, key="最爱食物", value="披萨", confidence=0.9, status="activ
 
 
 def _agent(facts=None, observations=None, experiences=None, relationship=None,
-           qvec=None, **agent_kwargs):
+           qvec=None, insights=None, **agent_kwargs):
     """MemoryAgent over mocked ltm/lifecycle/embed. qvec = the vector every
     encode/encode_single call returns for the QUERY."""
     ltm = MagicMock()
@@ -39,6 +39,7 @@ def _agent(facts=None, observations=None, experiences=None, relationship=None,
     ltm.repo.get_recent_observations = AsyncMock(return_value=observations or [])
     ltm.repo.get_recent_experiences = AsyncMock(return_value=experiences or [])
     ltm.repo.get_all_relationships = AsyncMock(return_value=relationship or {})
+    ltm.repo.get_active_insights = AsyncMock(return_value=insights or [])
     ltm.repo.get_fact_v2_by_id = AsyncMock(return_value=None)
     ltm.repo.search_facts_v2 = AsyncMock(return_value=[])
     ltm.repo.decay_fact_v2 = AsyncMock()
@@ -64,6 +65,17 @@ def _strip_intent(embed):
     orthogonal = _unit([0, 1, 0, 0])
     embed.encode.side_effect = lambda texts: np.stack(
         [orthogonal] * len(texts))
+
+
+def _insight(iid, hypothesis="用户可能喜欢披萨", confidence=0.6,
+             needs_more_evidence=False, qvec=None):
+    return InsightV2(
+        id=iid, hypothesis=hypothesis, insight_type="pattern",
+        confidence=confidence, needs_more_evidence=needs_more_evidence,
+        created_at="2026-07-19 10:00:00", updated_at="2026-07-19 10:00:00",
+        embedding=EmbeddingEngine.vec_to_bytes(qvec) if qvec is not None else None,
+        embedding_version=EMBEDDING_VERSION if qvec is not None else 0,
+    )
 
 
 class TestParseTimeRanges(unittest.TestCase):
@@ -316,6 +328,72 @@ class TestRelevanceFloor(unittest.TestCase):
 
         result = asyncio.run(agent.answer("弱相关的问题"))
         self.assertEqual(len(result.evidences), 1)
+
+
+class TestInsightEvidence(unittest.TestCase):
+    """Layer 1 二期：Insight 进入 Memory Agent 证据池。"""
+
+    def test_insight_in_evidence_pool(self):
+        agent, *_ = _agent(insights=[_insight(5)])
+        result = asyncio.run(agent.answer("用户喜欢吃什么"))
+        ev = [e for e in result.evidences if e.source_type == "insight"]
+        self.assertEqual(len(ev), 1)
+        self.assertIn("用户可能喜欢披萨", ev[0].content)
+        self.assertNotIn("待验证", ev[0].content)
+        self.assertEqual(ev[0].verification_count, 1)
+
+    def test_suspect_insight_marked_unverified(self):
+        agent, *_ = _agent(insights=[_insight(5, needs_more_evidence=True)])
+        result = asyncio.run(agent.answer("随便问问"))
+        ev = [e for e in result.evidences if e.source_type == "insight"]
+        self.assertEqual(len(ev), 1)
+        self.assertIn("待验证", ev[0].content)
+        self.assertEqual(ev[0].verification_count, 0)
+
+
+class TestCoreferenceRewrite(unittest.TestCase):
+    """P2：向量锚点检测指代性问句 → LLM 改写为自足查询。"""
+
+    def _agent_with_llm(self, anchors_vec, qvec, llm_return):
+        embed = MagicMock()
+        embed.encode_single.return_value = qvec
+        embed.encode.side_effect = lambda texts: np.stack(
+            [anchors_vec] * len(texts))
+        embed.health_check.return_value = True
+        llm_fn = MagicMock(return_value=llm_return)
+        history_fn = lambda: "你: 要不我给您念段《国际歌》当BGM？\n用户: 本地有这个歌吗"
+        agent, _, _, _ = _agent(qvec=qvec, llm_fn=llm_fn,
+                                history_fn=history_fn)
+        agent._embed = embed  # 用可控锚点向量的 embed 替换工厂默认
+        return agent, llm_fn
+
+    def test_deictic_query_rewritten(self):
+        qvec = _unit([1, 0, 0, 0])
+        agent, llm_fn = self._agent_with_llm(qvec, qvec, "本地有《国际歌》吗")
+        clues = asyncio.run(agent._extract_clues("本地有这个歌吗"))
+        llm_fn.assert_called_once()
+        self.assertEqual(clues.raw_query, "本地有《国际歌》吗")
+
+    def test_non_deictic_query_no_llm_call(self):
+        qvec = _unit([1, 0, 0, 0])
+        orthogonal = _unit([0, 1, 0, 0])
+        agent, llm_fn = self._agent_with_llm(orthogonal, qvec, "不应被调用")
+        clues = asyncio.run(agent._extract_clues("今天天气怎么样"))
+        llm_fn.assert_not_called()
+        self.assertEqual(clues.raw_query, "今天天气怎么样")
+
+    def test_llm_failure_falls_back_to_original(self):
+        qvec = _unit([1, 0, 0, 0])
+        agent, llm_fn = self._agent_with_llm(qvec, qvec, None)
+        llm_fn.side_effect = RuntimeError("api down")
+        clues = asyncio.run(agent._extract_clues("这个是什么"))
+        self.assertEqual(clues.raw_query, "这个是什么")
+
+    def test_no_llm_fn_never_rewrites(self):
+        qvec = _unit([1, 0, 0, 0])
+        agent, _, _, _ = _agent(qvec=qvec)
+        clues = asyncio.run(agent._extract_clues("这个是什么"))
+        self.assertEqual(clues.raw_query, "这个是什么")
 
 
 if __name__ == "__main__":

@@ -175,10 +175,17 @@ class MessageHandler:
             embed = getattr(a.consolidator, "_embed", None)
             lifecycle = MemoryLifecycleManager(
                 a.ltm, config=a.config, embedding_engine=embed)
+            # P2: 指代解析用的 LLM 与对话历史（缺一则内部回退规则路径）
+            def _clues_llm(prompt: str) -> str:
+                return a.provider.generate(
+                    [{"role": "user", "content": prompt}],
+                    stream=False, max_tokens=128, source="memory_clues")
             self._memory_agent = MemoryAgent(
                 a.ltm, lifecycle, a.retriever, embedding_engine=embed,
                 relevance_floor=getattr(a.config, "memory_agent_relevance_floor", 0.35),
                 relevance_full=getattr(a.config, "memory_agent_relevance_full", 0.75),
+                llm_fn=_clues_llm,
+                history_fn=lambda: a.short_term.format_for_prompt(max_tokens=800),
             )
         return self._memory_agent
 

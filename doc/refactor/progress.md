@@ -65,11 +65,11 @@ Phase 1.5（Memory Agent P1，2026-07-16 完成）：
 - [x] `verify_fact()` 主动验证
 
 Phase 2：
-- [ ] Memory Agent 完整交叉验证（矛盾传播、LLM 线索提取）
+- [x] Memory Agent 完整交叉验证（矛盾传播、LLM 线索提取）（2026-07-20，`changes/2026-07-20-memory-agent-p2.md`：矛盾向上传播 + Insight 证据池 + 向量锚点指代解析）
 - [x] Memory Agent 接入 InnerDrive（`use_memory_agent` 灰度开关，默认 false，2026-07-16）
 - [x] Retrieval 切换到 `facts_v2` + `insights_v2`（facts_v2：2026-07-18；insights_v2：2026-07-20 经适配器）
-- [ ] 完整 GC：merge / decay / obsolete / archive
-- [ ] 旧数据迁移 + 删除旧表
+- [x] 完整 GC：decay / obsolete / archive / expire_due_insights（merge 保持占位，语义近重复合并推迟）（2026-07-20）
+- [x] 旧数据迁移 + 旧表归档（user_facts_archive / reflections_archive；物理 DROP 留待观察期后手动执行）（2026-07-18 / 2026-07-20）
 
 Phase 3（按需）：
 - [ ] 跨会话模式发现（完整睡眠巩固）

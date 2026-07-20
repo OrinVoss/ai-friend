@@ -34,6 +34,21 @@ fact_type: user_fact / agent_fact / system_fact（事实主体类型，默认 us
 """
 
 
+# ── Coreference Rewrite（Memory Agent P2：指代解析，2026-07-20）──
+COREFERENCE_REWRITE_PROMPT = """把用户的最后一句话改写成一个自足、明确的句子，用于记忆检索。
+要求：
+- 解析其中的指代（这个/那个/它/这首歌等），用最近对话里出现的具体名称替换
+- 不要回答问题，不要解释，只输出改写后的句子
+- 如果没有指代需要解析，原样输出
+
+最近对话：
+{history}
+
+用户最后一句话：{query}
+
+改写结果："""
+
+
 # ── Care Clue Extraction（内驱状态二期：consolidation 自动写入挂念线索）──
 CARE_CLUE_PROMPT = """从这段对话中找出值得「惦记」的未完成线索——未来需要 follow-up 的事。
 输出 JSON：

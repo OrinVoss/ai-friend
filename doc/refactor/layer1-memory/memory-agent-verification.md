@@ -209,6 +209,8 @@ if top_sim is not None:
 
 ### 3.7 矛盾向上传播（二期）
 
+✅ 已实现（2026-07-20，`changes/2026-07-20-memory-agent-p2.md`）：`lifecycle.contradict_fact` 标记 Fact contradicted 后扫描 active insights，`evidence_fact_ids` 含该 Fact 的一律 `mark_insight_suspect`（needs_more_evidence=1 + confidence ×0.5，保持 active 等待重评）。
+
 当一条 Fact 被新证据推翻（`correct_fact` 或 `contradict_fact`）时，不能只标记这条 Fact：
 
 ```

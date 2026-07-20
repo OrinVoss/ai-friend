@@ -160,5 +160,51 @@ class TestMemoryLifecycleManager(unittest.TestCase):
         return asyncio.run(coro)
 
 
+class TestContradictionPropagation(unittest.TestCase):
+    """矛盾向上传播（memory-agent-verification.md 3.7）：Fact 被推翻时，
+    引用它的 Insight 连带标记可疑。"""
+
+    def setUp(self):
+        self.ltm = MagicMock()
+        self.ltm.repo = MagicMock()
+        self.ltm.repo.session_id = "test-session"
+        self.ltm.repo.update_fact_v2_status = AsyncMock()
+        self.ltm.repo.mark_insight_suspect = AsyncMock()
+        self.manager = MemoryLifecycleManager(self.ltm)
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def test_citing_insights_marked_suspect(self):
+        from models.memory import InsightV2
+        citing = InsightV2(id=7, hypothesis="用户可能只吃意式",
+                           evidence_fact_ids=[3, 9], confidence=0.7)
+        unrelated = InsightV2(id=8, hypothesis="用户可能早睡",
+                              evidence_fact_ids=[42], confidence=0.6)
+        self.ltm.repo.get_active_insights = AsyncMock(
+            return_value=[citing, unrelated])
+
+        self._run(self.manager.contradict_fact(3, "user correction"))
+
+        self.ltm.repo.update_fact_v2_status.assert_awaited_once_with(
+            3, "contradicted")
+        # 只有引用 fact 3 的 insight 7 被标记
+        self.ltm.repo.mark_insight_suspect.assert_awaited_once_with(7)
+
+    def test_no_citing_insights_noop(self):
+        self.ltm.repo.get_active_insights = AsyncMock(return_value=[])
+        self._run(self.manager.contradict_fact(3))
+        self.ltm.repo.mark_insight_suspect.assert_not_called()
+
+    def test_propagation_failure_does_not_break_contradict(self):
+        self.ltm.repo.get_active_insights = AsyncMock(
+            side_effect=RuntimeError("db down"))
+        # 不抛异常——标记 fact contradicted 的主流程必须完成
+        self._run(self.manager.contradict_fact(3))
+        self.ltm.repo.update_fact_v2_status.assert_awaited_once_with(
+            3, "contradicted")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -118,9 +118,23 @@ class MemoryLifecycleManager:
         await self.ltm.repo.verify_fact_v2(fact_id)
 
     async def contradict_fact(self, fact_id: int, reason: str = "") -> None:
-        """Mark a fact as contradicted by new evidence."""
+        """Mark a fact as contradicted by new evidence.
+        矛盾向上传播（memory-agent-verification.md 3.7）：依赖该 Fact 的
+        Insight 连带质疑（needs_more_evidence + confidence 降权）——
+        前提倒了，结论不能继续作为有效记忆被检索。"""
         logger.info(f"[lifecycle] contradict_fact id={fact_id} reason={reason}")
         await self.ltm.repo.update_fact_v2_status(fact_id, "contradicted")
+        try:
+            citing = [
+                i for i in await self.ltm.repo.get_active_insights(limit=500)
+                if fact_id in (i.evidence_fact_ids or [])
+            ]
+            for insight in citing:
+                await self.ltm.repo.mark_insight_suspect(insight.id)
+                logger.info(f"[lifecycle] insight {insight.id} marked suspect "
+                            f"(cites contradicted fact {fact_id})")
+        except Exception as e:
+            logger.warning(f"[lifecycle] contradiction propagation failed: {e}")
 
     # ── Insight（Layer 1 二期，2026-07-20）──
 

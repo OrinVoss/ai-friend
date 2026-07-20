@@ -556,6 +556,21 @@ class Repository:
                                f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
+    async def mark_insight_suspect(self, insight_id: int, factor: float = 0.5) -> None:
+        """矛盾向上传播（memory-agent-verification.md 3.7）：依赖的 Fact 被
+        推翻时，Insight 连带质疑——needs_more_evidence=1 + confidence 降权，
+        保持 active 等待重新评估，不直接废弃。"""
+        logger.info(f"[db] mark_insight_suspect: id={insight_id} factor={factor}")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE insights_v2
+                SET needs_more_evidence = 1,
+                    confidence = MAX(0.0, ROUND(confidence * ?, 4)),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND session_id = ? AND status = 'active'
+            """, (factor, insight_id, self.session_id))
+            await self.db.commit()
+
     async def expire_due_insights(self) -> int:
         """GC：expires_at 已过的 active insight 置为 expired。返回过期条数。"""
         async with self.db.cursor() as c:
