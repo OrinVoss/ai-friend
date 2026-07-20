@@ -9,6 +9,8 @@ class TestConsolidationFactChecker(unittest.TestCase):
     def setUp(self):
         from memory.consolidation import MemoryConsolidator
         self.ltm = MagicMock()
+        # Layer 1 完整上线：写入路径 = lifecycle.promote_fact → repo.upsert_fact_v2
+        self.ltm.repo.upsert_fact_v2 = AsyncMock(return_value=1)
         self.llm = MagicMock()
         self.consolidator = MemoryConsolidator(self.ltm, self.llm)
 
@@ -33,19 +35,19 @@ class TestConsolidationFactChecker(unittest.TestCase):
         # Run extraction
         self.consolidator._extract_facts("用户说：我最爱吃披萨，最喜欢蓝色，名字是小明")
 
-        # #161: 3 条事实经一次批量 upsert 落库，不再逐条 store_fact
+        # 完整上线：不再写旧表 store_facts_bulk，3 条事实逐条 promote 到 facts_v2
         self.ltm.store_fact.assert_not_called()
-        self.ltm.store_facts_bulk.assert_called_once()
-        bulk_facts = self.ltm.store_facts_bulk.call_args.args[0]
-        self.assertEqual(len(bulk_facts), 3)
+        self.ltm.store_facts_bulk.assert_not_called()
+        self.assertEqual(self.ltm.repo.upsert_fact_v2.await_count, 3)
 
         # Should have called get_similar_facts for each new fact
         self.assertEqual(self.ltm.get_similar_facts.call_count, 3)
 
-        # #161: 逐条矛盾检测（顺序不变）先于末尾批量落库
+        # 逐条矛盾检测先于 promote 落库（先检测后写入，语义与旧流程一致）
         call_names = [c[0] for c in self.ltm.mock_calls]
         self.assertLess(max(i for i, n in enumerate(call_names) if n == "get_similar_facts"),
-                        call_names.index("store_facts_bulk"))
+                        min(i for i, n in enumerate(call_names)
+                            if n == "repo.upsert_fact_v2"))
 
     def test_extract_facts_low_confidence_skipped(self):
         """Facts with confidence <= 0.3 should not be stored."""
@@ -55,6 +57,7 @@ class TestConsolidationFactChecker(unittest.TestCase):
 
         self.ltm.store_fact.assert_not_called()
         self.ltm.store_facts_bulk.assert_not_called()
+        self.ltm.repo.upsert_fact_v2.assert_not_awaited()
 
     def test_extract_facts_contradiction_resolved(self):
         """When contradiction detected, old fact should be deactivated."""
@@ -68,9 +71,10 @@ class TestConsolidationFactChecker(unittest.TestCase):
 
         self.consolidator._extract_facts("用户说我叫小红")
 
-        # #161: 新事实经一次批量 upsert 落库
+        # 完整上线：新事实经 promote 落库 facts_v2
         self.ltm.store_fact.assert_not_called()
-        self.ltm.store_facts_bulk.assert_called_once()
+        self.ltm.store_facts_bulk.assert_not_called()
+        self.ltm.repo.upsert_fact_v2.assert_awaited_once()
         # The resolve should have called deactivate_fact on ltm (sync wrapper)
         self.ltm.deactivate_fact.assert_called_once_with(99)
 
@@ -175,32 +179,34 @@ class TestConsolidationRelationship(unittest.TestCase):
 
 
 class TestMemoryLifecycleIntegration(unittest.TestCase):
+    """Layer 1 完整上线（2026-07-18）：lifecycle 无条件创建，单写 facts_v2。"""
+
     def setUp(self):
         from memory.consolidation import MemoryConsolidator
         self.ltm = MagicMock()
         self.llm = MagicMock()
 
-    def test_lifecycle_disabled_by_default(self):
-        """By default use_observation_fact is False and lifecycle manager is None."""
+    def test_lifecycle_created_unconditionally(self):
+        """use_observation_fact 开关已删除，lifecycle manager 无条件创建。"""
         from memory.consolidation import MemoryConsolidator
         consolidator = MemoryConsolidator(self.ltm, self.llm)
-        self.assertIsNone(consolidator._lifecycle)
+        self.assertIsNotNone(consolidator._lifecycle)
 
-    def test_lifecycle_enabled_when_config_switches_on(self):
-        """When config.use_observation_fact=True, lifecycle manager is created."""
+    def test_lifecycle_created_regardless_of_stale_config(self):
+        """stale config.json 里的旧 key 无害：config 加载器忽略未知字段，
+        lifecycle 照样创建。"""
+        from config import Config
+        config = Config()
+        self.assertFalse(hasattr(config, "use_observation_fact"))
         from memory.consolidation import MemoryConsolidator
-        config = MagicMock()
-        config.use_observation_fact = True
         consolidator = MemoryConsolidator(self.ltm, self.llm, config=config)
         self.assertIsNotNone(consolidator._lifecycle)
 
-    def test_extract_facts_dual_writes_to_lifecycle(self):
-        """When observation_ids provided, extracted facts are also promoted to FactV2."""
+    def test_extract_facts_promotes_to_lifecycle(self):
+        """Extracted facts are promoted to FactV2 (single write path)."""
         from memory.consolidation import MemoryConsolidator
         from unittest.mock import patch
-        config = MagicMock()
-        config.use_observation_fact = True
-        consolidator = MemoryConsolidator(self.ltm, self.llm, config=config)
+        consolidator = MemoryConsolidator(self.ltm, self.llm)
         consolidator._lifecycle = MagicMock()
         consolidator._lifecycle.promote_fact = AsyncMock(return_value=MagicMock())
 
@@ -239,8 +245,9 @@ class TestReembedStaleVersions(unittest.TestCase):
 
         async def _insert():
             async with db.cursor() as c:
+                # Layer 1 完整上线：可嵌入事实表为 facts_v2（user_facts 已归档）
                 await c.execute(
-                    "INSERT INTO user_facts (category, fact_key, fact_value, confidence,"
+                    "INSERT INTO facts_v2 (category, fact_key, fact_value, confidence,"
                     " embedding, embedding_version, session_id) VALUES (?,?,?,?,?,?,?)",
                     ("preference", "颜色", "蓝", 0.9, old_blob,
                      EMBEDDING_VERSION + 99, "default"))

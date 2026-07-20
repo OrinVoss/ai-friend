@@ -41,7 +41,7 @@
 2. **万物有生命周期**：记忆（创建→验证→衰减→删除）、挂念（active→resolved/expired/decayed）——没有只增不减的存储
 3. **结构化输出替代关键词匹配**：JSON Schema 约束 LLM 输出（#ID-001 以来的一贯方向），向量模型替代关键词表（线索提取等语义召回场景）
 4. **确定性组件 + LLM 最后一步**：Memory Agent 本体不调 LLM；检索/验证/打分确定性可测，语言理解交给本来就存在的 Agent 3
-5. **灰度可回退**：双写并行、配置开关（`use_observation_fact` / `use_memory_agent` / `proactive_think_loop`），任何增强都能一键退回
+5. **灰度可回退**：双写并行、配置开关（`use_memory_agent` / `proactive_think_loop`），任何增强都能一键退回（`use_observation_fact` 已于 2026-07-18 完整上线后移除）
 6. **分期落地**：每期独立可上线，依赖关系显式标注，不憋大招
 
 ---
@@ -50,7 +50,7 @@
 
 ```
 Phase 1（当前）
-  ├── 开启 use_observation_fact 灰度，验证 facts_v2 数据质量
+  ├── ~~开启 use_observation_fact 灰度~~ 已直接完整上线（2026-07-18），线上观察 facts_v2 数据质量
   ├── Memory Agent P0（answer / correct_fact + 测试）
   └── Think Loop + 挂念清单最小版  ← 独处循环开始转
 

@@ -1,5 +1,10 @@
 """Tests for #UK-001: user_facts UNIQUE constraint migration to
-UNIQUE(session_id, category, fact_key)."""
+UNIQUE(session_id, category, fact_key).
+
+schema v4（2026-07-18，Layer 1 完整上线）后：新库不再创建 user_facts；
+老库升级时 UK-001 重建仍先于 v4 迁移执行，最终 user_facts 改名
+user_facts_archive，数据落在 facts_v2。本文件验证这条升级链路与
+facts_v2 的 session 隔离。"""
 import asyncio
 import os
 import tempfile
@@ -19,12 +24,13 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def _table_sql(self):
+    def _table_sql(self, name):
         async def _q():
             conn = await aiosqlite.connect(self.db_path)
             try:
                 cur = await conn.execute(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_facts'")
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                    (name,))
                 row = await cur.fetchone()
                 return row[0] if row else ""
             finally:
@@ -69,33 +75,39 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
             await conn.close()
         asyncio.run(_mk())
 
-    def test_fresh_db_has_session_scoped_constraint(self):
+    def test_fresh_db_has_no_user_facts(self):
+        """schema v4: 新库不创建 user_facts；facts_v2 带 session 级唯一约束。"""
         db = Database(self.db_path)
         asyncio.run(db.open())
         asyncio.run(db.close())
 
-        sql = self._table_sql()
-        self.assertIn("UNIQUE(session_id, category, fact_key)", sql)
+        self.assertEqual(self._table_sql("user_facts"), "")
+        self.assertEqual(self._table_sql("user_facts_archive"), "")
+        v2_sql = self._table_sql("facts_v2")
+        self.assertIn("UNIQUE(session_id, category, fact_key)", v2_sql)
 
     def test_old_schema_migrated_data_preserved(self):
+        """v2 老库升级：UK-001 重建（session 级约束）→ v4 数据迁入 facts_v2，
+        旧表改名 user_facts_archive，schema_version 升到 4。"""
         self._make_v2_db()
         db = Database(self.db_path)
         asyncio.run(db.open())
         asyncio.run(db.close())
 
-        sql = self._table_sql()
-        self.assertIn("UNIQUE(session_id, category, fact_key)", sql)
-        self.assertNotIn("UNIQUE(category, fact_key)", sql.replace(
+        # user_facts 已归档；归档表带有 UK-001 重建后的 session 级约束
+        self.assertEqual(self._table_sql("user_facts"), "")
+        archive_sql = self._table_sql("user_facts_archive")
+        self.assertIn("UNIQUE(session_id, category, fact_key)", archive_sql)
+        self.assertNotIn("UNIQUE(category, fact_key)", archive_sql.replace(
             "UNIQUE(session_id, category, fact_key)", ""))
 
-        repo = Repository(Database(self.db_path))
-        # reuse one connection for readback
         async def _read():
             conn = await aiosqlite.connect(self.db_path)
             conn.row_factory = aiosqlite.Row
             try:
                 cur = await conn.execute(
-                    "SELECT fact_key, fact_value, session_id FROM user_facts ORDER BY fact_key")
+                    "SELECT fact_key, fact_value, session_id, status, created_by"
+                    " FROM facts_v2 ORDER BY fact_key")
                 rows = await cur.fetchall()
                 cur2 = await conn.execute("SELECT MAX(version) FROM schema_version")
                 ver = (await cur2.fetchone())[0]
@@ -103,10 +115,12 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
             finally:
                 await conn.close()
         rows, version = asyncio.run(_read())
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
         by_key = {r["fact_key"]: r for r in rows}
         self.assertEqual(by_key["最爱食物"]["fact_value"], "披萨")
         self.assertEqual(by_key["最爱食物"]["session_id"], "sess_a")
+        self.assertEqual(by_key["最爱食物"]["status"], "active")
+        self.assertEqual(by_key["最爱食物"]["created_by"], "migration")
         self.assertEqual(by_key["名字"]["fact_value"], "小明")
 
     def test_same_key_two_sessions_coexist(self):

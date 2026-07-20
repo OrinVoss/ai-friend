@@ -12,7 +12,6 @@
   "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
   "conversation_examples_max_turns": 3,
-  "use_observation_fact": false,
   "use_memory_agent": false,
   "memory_agent_relevance_floor": 0.35,
   "memory_agent_relevance_full": 0.75,

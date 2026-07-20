@@ -81,8 +81,6 @@ class Config:
     # PC-001: hierarchical prompt cache settings (#160)
     prompt_cache_ttl_seconds: int = 60
     conversation_examples_max_turns: int = 3
-    # ML-001: Layer 1 Memory lifecycle switch
-    use_observation_fact: bool = False
     # MA-001: Memory Agent gray switch — InnerDrive uses memory_agent.answer()
     # for memory instead of retriever.retrieve_for_query() (memory-agent.md 7.1)
     use_memory_agent: bool = False

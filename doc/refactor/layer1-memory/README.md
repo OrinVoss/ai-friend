@@ -23,11 +23,7 @@
 
 ## 配置
 
-```json
-{
-  "use_observation_fact": false
-}
-```
+无开关——Layer 1 已于 2026-07-18 完整上线（单写 facts_v2，旧 user_facts 归档为 user_facts_archive），原 `use_observation_fact` 灰度开关已删除。
 
 ## 变更记录
 

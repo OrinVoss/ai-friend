@@ -287,8 +287,8 @@ get_or_create(sid, role_id)
       ├── (b) 记忆系统初始化
       │   ├── LongTermMemory(repo)       — SQLite
       │   ├── ConversationBuffer(maxlen)  — 从 DB 恢复最近 30 轮
-      │   └── MemoryConsolidator         — use_observation_fact=True 时
-      │       内部装配 MemoryLifecycleManager（Observation → Fact 生命周期，默认关闭）
+      │   └── MemoryConsolidator         — 内部装配 MemoryLifecycleManager
+      │       （Observation → Fact 生命周期，已正式上线，无条件创建）
       │
       ├── (c) LLM Provider（共享实例）
       │   └── DeepSeekProvider(endpoint, api_key) — HTTP 连接池复用

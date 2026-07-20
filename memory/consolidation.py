@@ -41,13 +41,12 @@ class MemoryConsolidator:
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
         self._fact_checker = FactChecker(embedding_engine)
-        # ML-001: Layer 1 Memory lifecycle (Observation -> Fact)
-        self._lifecycle = None
-        if getattr(self.config, "use_observation_fact", False):
-            from memory.lifecycle import MemoryLifecycleManager
-            self._lifecycle = MemoryLifecycleManager(
-                ltm, config=self.config, embedding_engine=embedding_engine
-            )
+        # ML-001: Layer 1 Memory lifecycle (Observation -> Fact)。
+        # 2026-07-18 完整上线：无条件创建，use_observation_fact 开关已删除。
+        from memory.lifecycle import MemoryLifecycleManager
+        self._lifecycle = MemoryLifecycleManager(
+            ltm, config=self.config, embedding_engine=embedding_engine
+        )
 
     def _call_llm(self, prompt: str, temperature: float = 0.2) -> str:
         """Call LLM with timeout protection. (#184)"""
@@ -101,22 +100,22 @@ class MemoryConsolidator:
 
         # ML-001: create a raw observation for this consolidation batch.
         # The same observation backs all facts extracted from this batch.
+        # 2026-07-18 完整上线：无条件创建（原 use_observation_fact 开关已删）。
         lifecycle_obs_ids: list[int] = []
-        if self._lifecycle:
-            try:
-                start_id = min((t.turn_id for t in self._pending_buffer), default=None)
-                end_id = max((t.turn_id for t in self._pending_buffer), default=None)
-                obs = run_async(self._lifecycle.observe(
-                    content=turn_text,
-                    source_turn=end_id,
-                    episode_turn_start=start_id,
-                    episode_turn_end=end_id,
-                    created_by="consolidation",
-                ))
-                if obs and obs.id:
-                    lifecycle_obs_ids.append(obs.id)
-            except Exception as e:
-                logger.warning(f"[consolidate] observation creation failed: {e}")
+        try:
+            start_id = min((t.turn_id for t in self._pending_buffer), default=None)
+            end_id = max((t.turn_id for t in self._pending_buffer), default=None)
+            obs = run_async(self._lifecycle.observe(
+                content=turn_text,
+                source_turn=end_id,
+                episode_turn_start=start_id,
+                episode_turn_end=end_id,
+                created_by="consolidation",
+            ))
+            if obs and obs.id:
+                lifecycle_obs_ids.append(obs.id)
+        except Exception as e:
+            logger.warning(f"[consolidate] observation creation failed: {e}")
 
         # Step 1: Extract user facts
         try:
@@ -159,8 +158,8 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning(f"Pruning failed: {e}")
 
-        # Step 5.5: Layer 1 Memory lifecycle GC (if enabled)
-        if self._lifecycle and self._consolidation_count % 5 == 0:
+        # Step 5.5: Layer 1 Memory lifecycle GC — 完整上线后无条件执行
+        if self._consolidation_count % 5 == 0:
             try:
                 run_async(self._lifecycle.garbage_collect())
             except Exception as e:
@@ -279,30 +278,12 @@ class MemoryConsolidator:
                             category = category.strip()
                             key = key.strip()
                             value = value.strip()
-                            # #161: 先收集，末尾 store_facts_bulk 一次落库，
-                            # 不再逐条 upsert+commit
                             new_facts.append((category, key, value, confidence, importance))
                             logger.debug(f"Extracted fact: {key} = {value} (imp={importance})")
 
-                            # ML-001: dual-write to the new Observation -> Fact lifecycle.
-                            if observation_ids and self._lifecycle:
-                                try:
-                                    run_async(self._lifecycle.promote_fact(
-                                        observation_ids=observation_ids,
-                                        category=category,
-                                        key=key,
-                                        value=value,
-                                        confidence=confidence,
-                                        stability=0.5,
-                                        freshness=1.0,
-                                        importance=importance,
-                                        created_by="consolidation",
-                                    ))
-                                except Exception as e:
-                                    logger.warning(f"[consolidate] promote fact failed: {e}")
-
-            # FactChecker: check new facts against existing ones for contradictions
-            # （#161: 保持逐条顺序检测，仅写入改为末尾批量）
+            # FactChecker: check new facts against existing ones for contradictions.
+            # 保持在写入前逐条检测：get_similar_facts 读 facts_v2，此时新事实
+            # 尚未落库，检测语义与旧流程（先检测后批量写）一致。
             if self._fact_checker and new_facts:
                 for cat, key, val, conf, _imp in new_facts:
                     similar = self.ltm.get_similar_facts(cat, key, limit=5)
@@ -311,15 +292,26 @@ class MemoryConsolidator:
                     if old_f:
                         self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
 
-            # #161: N 次 upsert+commit 降为一次批量 upsert（含 #217 复活语义）
+            # ML-001 完整上线（2026-07-18）：单写 facts_v2 —— 每条 fact 经
+            # lifecycle promote 落库（替代 #161 的 store_facts_bulk 旧表批量写；
+            # 每批事实数量小，逐条写可接受）。upsert ON CONFLICT 自带 #217 复活语义。
+            for cat, key, val, conf, imp in new_facts:
+                try:
+                    run_async(self._lifecycle.promote_fact(
+                        observation_ids=observation_ids or [],
+                        category=cat,
+                        key=key,
+                        value=val,
+                        confidence=conf,
+                        stability=0.5,
+                        freshness=1.0,
+                        importance=imp,
+                        created_by="consolidation",
+                    ))
+                except Exception as e:
+                    logger.warning(f"[consolidate] promote fact failed: {e}")
             if new_facts:
-                self.ltm.store_facts_bulk([
-                    {"category": cat, "key": key, "value": val,
-                     "confidence": conf, "importance": imp,
-                     "fact_type": "user_fact"}  # #127
-                    for cat, key, val, conf, imp in new_facts
-                ])
-                logger.debug(f"Bulk stored {len(new_facts)} facts")
+                logger.debug(f"Promoted {len(new_facts)} facts to facts_v2")
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
 
@@ -575,16 +567,16 @@ class MemoryConsolidator:
             logger.info(f"Pruned: {pruned_f} facts, {pruned_e} experiences, {pruned_r} reflections")
 
     def _embed_new_items(self) -> None:
-        """Batch encode rows lacking embeddings across the five memory tables."""
+        """Batch encode rows lacking embeddings across the embeddable memory tables."""
         if not self._embed or not self._embed.health_check():
             return
 
         try:
             async def _do_embed():
                 all_updates = []
-                # H-08: 五张可嵌入表共用一份清单（#285: 补 facts_v2 / observations）
+                # H-08: 可嵌入表清单（#285: 补 facts_v2 / observations；
+                # 2026-07-18 Layer 1 完整上线：user_facts 已归档，移除）
                 tables = [
-                    ("user_facts", ["category", "fact_key", "fact_value"]),
                     ("experiences", ["summary", "emotional_tone", "tags"]),
                     ("reflections", ["content"]),
                     ("facts_v2", ["category", "fact_key", "fact_value"]),

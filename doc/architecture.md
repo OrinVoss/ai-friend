@@ -217,9 +217,9 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆共 9 张表，已按 `session_id` 隔离：`user_facts`、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 新增的 `observations`（原始观察）和 `facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
+长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，代码不再读写。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
 
-记忆生命周期（一期，双写阶段）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（二期规划）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2。配置开关 `use_observation_fact`（默认 false）控制双写。
+记忆生命周期（一期，已正式上线 2026-07-18）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（二期规划）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
 
 ---
 

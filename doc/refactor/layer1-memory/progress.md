@@ -19,7 +19,8 @@
   - [x] `archive_old_observations()`
   - [x] `garbage_collect()`
 - [x] `MemoryConsolidator` 双写 Observation + FactV2
-- [x] 新增配置开关 `use_observation_fact`（默认 false）
+- [x] ~~新增配置开关 `use_observation_fact`（默认 false）~~（2026-07-18 完整上线后删除）
+- [x] **Layer 1 完整上线（2026-07-18）**：跳过灰度——数据迁移（schema v4）+ 读路径切换（repository 适配器）+ 单写 facts_v2 + 旧表归档 user_facts_archive
 - [x] 测试覆盖
   - `tests/test_memory_lifecycle.py`
   - 扩展 `tests/test_consolidation.py`
@@ -32,7 +33,7 @@
 - [ ] 新增 `insights_v2` 表 + `InsightV2` 模型
 - [ ] 用 Insight 替换 Reflection（双写过渡）
 - [ ] Memory Agent P0：`answer()` 基础版 + `correct_fact()` + 测试
-- [ ] 开启 `use_observation_fact=true` 灰度，验证 `facts_v2` 数据质量
+- [x] ~~开启 `use_observation_fact=true` 灰度，验证 `facts_v2` 数据质量~~（2026-07-18：跳过灰度，直接完整上线）
 - [ ] 批量验证旧 Fact（最小版睡眠式巩固）
 
 ### Phase 2
@@ -54,7 +55,7 @@
 
 - [ ] 同一喜好重复 3 次后，`verification_count >= 3` 且 `confidence` 上升
 - [ ] 用户更正信息后，旧 FactV2 被标记为 `contradicted`
-- [ ] 开启 `use_observation_fact=true` 运行一段时间，确认 `facts_v2` 数据质量
+- [x] ~~开启 `use_observation_fact=true` 运行一段时间，确认 `facts_v2` 数据质量~~（2026-07-18 已直接完整上线，改为线上观察）
 
 ## 阻塞项
 

@@ -66,8 +66,9 @@ def make_embedding_sampler(repo: Repository):
 
         async def _q():
             async with repo.db.cursor() as c:
+                # Layer 1 完整上线（2026-07-18）：user_facts 已归档，改采样 facts_v2
                 await c.execute(
-                    "SELECT embedding FROM user_facts "
+                    "SELECT embedding FROM facts_v2 "
                     "WHERE embedding IS NOT NULL LIMIT 1")
                 row = await c.fetchone()
                 return row["embedding"] if row else None

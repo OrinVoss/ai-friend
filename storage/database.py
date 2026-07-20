@@ -36,7 +36,9 @@ class Database:
     # pre-migration backup is needed (version behind => migrations will run).
     # v2: observations / facts_v2 (ML-001). v3: user_facts session-scoped
     # UNIQUE(session_id, category, fact_key) (#UK-001).
-    CURRENT_SCHEMA_VERSION = 3
+    # v4: Layer 1 完整上线 — user_facts 数据迁入 facts_v2，旧表改名
+    # user_facts_archive 归档（2026-07-18）。
+    CURRENT_SCHEMA_VERSION = 4
 
     def __init__(self, db_path: str, backup_enabled: bool = True, backup_keep: int = 5):
         self.db_path = db_path
@@ -114,25 +116,9 @@ class Database:
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE TABLE IF NOT EXISTS user_facts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    category TEXT NOT NULL,
-                    fact_key TEXT NOT NULL,
-                    fact_value TEXT NOT NULL,
-                    confidence REAL DEFAULT 1.0,
-                    importance REAL DEFAULT 0.5,
-                    source_turn INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    recall_count INTEGER DEFAULT 0,
-                    is_active INTEGER DEFAULT 1,
-                    composite_score REAL DEFAULT 1.0,
-                    fact_type TEXT DEFAULT 'user_fact',
-                    embedding BLOB,
-                    embedding_version INTEGER DEFAULT 0,
-                    session_id TEXT DEFAULT 'default',
-                    UNIQUE(session_id, category, fact_key)
-                );
+                -- Layer 1 完整上线（schema v4，2026-07-18）：新库不再创建
+                -- user_facts；老库的 user_facts 由下方 v4 迁移块迁入 facts_v2
+                -- 并改名 user_facts_archive。
 
                 CREATE TABLE IF NOT EXISTS experiences (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -242,6 +228,12 @@ class Database:
             current_version = row[0] if row and row[0] else 0
             logger.info(f"[db] schema version: {current_version}")
 
+            # schema v4 兼容守卫：新库不再创建 user_facts，凡引用该表的
+            # 迁移步骤（alterations / #UK-001 / #SR-002）都先查 sqlite_master
+            # 确认表存在，不存在则跳过而不是报错。
+            await c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing_tables = {r[0] for r in await c.fetchall()}
+
             alterations = [
                 ("user_facts", "importance", "REAL", "0.5"),
                 ("experiences", "importance", "REAL", "0.5"),
@@ -265,6 +257,8 @@ class Database:
                 # #215: whitelist validation — reject unknown alterations
                 if (table, column) not in ALLOWED_ALTERATIONS:
                     raise ValueError(f"Unauthorized schema alteration: {table}.{column}")
+                if table not in existing_tables:
+                    continue  # schema v4: 新库无 user_facts，跳过其列补全
                 await c.execute(f"PRAGMA table_info({table})")
                 rows = await c.fetchall()
                 columns = [row[1] for row in rows]
@@ -364,9 +358,12 @@ class Database:
             # old session with the most conversation turns as the canonical data
             # and move it to session_id = role_id; discard data from stale sessions.
             async def _move_session_data(old_sid: str, rid: str) -> None:
+                # schema v4: 新库无 user_facts，按 sqlite_master 过滤表清单
                 tables = [
-                    "user_facts", "experiences", "reflections",
-                    "conversation_turns", "relationship_snapshots",
+                    t for t in (
+                        "user_facts", "experiences", "reflections",
+                        "conversation_turns", "relationship_snapshots",
+                    ) if t in existing_tables
                 ]
                 for table in tables:
                     await c.execute(f"UPDATE {table} SET session_id = ? WHERE session_id = ?", (rid, old_sid))
@@ -410,15 +407,42 @@ class Database:
                 for stale in others:
                     logger.warning(f"[db] dropping stale session {stale} for role {rid}")
                     for table in ["user_facts", "experiences", "reflections", "conversation_turns", "relationship_snapshots"]:
+                        if table not in existing_tables:
+                            continue  # schema v4: 新库无 user_facts
                         await c.execute(f"DELETE FROM {table} WHERE session_id = ?", (stale,))
                     await c.execute("DELETE FROM relationship_metrics WHERE session_id = ?", (stale,))
                     await c.execute("DELETE FROM session_roles WHERE session_id = ?", (stale,))
+
+            # schema v4（2026-07-18，Layer 1 完整上线）：user_facts 数据迁入
+            # facts_v2，旧表改名 user_facts_archive 归档（数据保留，代码不再
+            # 使用，可手动 DROP）。只迁 fact_type='user_fact' 的行；与 facts_v2
+            # 既有数据冲突（UNIQUE(session_id, category, fact_key)）时跳过——
+            # 双写期间 facts_v2 的数据更新鲜。幂等：二次 open 时 user_facts
+            # 已不存在，整块跳过。
+            if current_version < 4 and "user_facts" in existing_tables:
+                logger.warning("[db] migrating user_facts -> facts_v2, "
+                               "renaming old table to user_facts_archive")
+                await c.executescript("""
+                    INSERT OR IGNORE INTO facts_v2 (category, fact_key, fact_value,
+                        confidence, stability, freshness, importance, status,
+                        verification_count, last_verified_at, created_by,
+                        created_at, updated_at, session_id, embedding, embedding_version)
+                    SELECT category, fact_key, fact_value, confidence, 0.5, 1.0,
+                           COALESCE(importance, 0.5),
+                           CASE WHEN is_active = 1 THEN 'active' ELSE 'obsolete' END,
+                           1, NULL, 'migration', created_at, updated_at, session_id,
+                           embedding, COALESCE(embedding_version, 0)
+                    FROM user_facts WHERE fact_type = 'user_fact';
+
+                    ALTER TABLE user_facts RENAME TO user_facts_archive;
+                """)
 
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
             # current schema version so subsequent initialize() runs can detect/
             # version-gate new migrations.
             # ML-001: version 2 adds observations / facts_v2 tables.
+            # v4: user_facts -> facts_v2 数据迁移 + 旧表归档。
             if current_version < self.CURRENT_SCHEMA_VERSION:
                 await c.execute(
                     "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
@@ -427,8 +451,8 @@ class Database:
                 logger.info(f"[db] schema migrated from {current_version} to {self.CURRENT_SCHEMA_VERSION}")
 
             # #157: create indexes for frequently-queried columns
+            # schema v4: user_facts 已归档，其索引不再创建
             await c.executescript("""
-                CREATE INDEX IF NOT EXISTS idx_user_facts_session ON user_facts(session_id, is_active, composite_score);
                 CREATE INDEX IF NOT EXISTS idx_experiences_session ON experiences(session_id, is_archived, composite_score);
                 CREATE INDEX IF NOT EXISTS idx_reflections_session ON reflections(session_id, is_active);
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, id);

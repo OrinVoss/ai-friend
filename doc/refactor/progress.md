@@ -37,9 +37,10 @@ Layer 6: Personality / Session / 记忆绑定
 - [x] 新增 `Observation` / `FactV2` 数据模型
 - [x] 实现 `MemoryLifecycleManager`（observe / promote / verify / contradict / decay / gc）
 - [x] `MemoryConsolidator` 双写 Observation + FactV2
-- [x] 新增配置开关 `use_observation_fact`（默认 false）
+- [x] ~~新增配置开关 `use_observation_fact`（默认 false）~~（2026-07-18 完整上线后删除）
 - [x] 测试覆盖（19 个新测试 + 全量 401 passed）
 - [x] Changes 文档：`changes/2026-07-14-memory-layer1-observation-fact.md`
+- [x] **Layer 1 完整上线（2026-07-18）**：跳过灰度直接上线——user_facts 数据迁移至 facts_v2（schema v4），读路径经 repository 适配器全部切到 facts_v2，单写 promote，旧表归档为 user_facts_archive，开关删除。见 `changes/2026-07-18-memory-layer1-full-launch.md`
 
 **已完成（文档）**：
 - [x] 完整实施方案：`layer1-memory/plan.md`
@@ -54,7 +55,7 @@ Phase 1（下一步）：
 - [ ] `insights_v2` 表 + `InsightV2` 模型
 - [ ] 用 Insight 替换 Reflection（双写过渡）
 - [x] Memory Agent P0 实现（answer / correct_fact + 测试）（2026-07-16）
-- [ ] 开启 `use_observation_fact=true` 灰度验证 `facts_v2` 数据质量
+- [x] ~~开启 `use_observation_fact=true` 灰度验证 `facts_v2` 数据质量~~（2026-07-18：跳过灰度，直接完整上线）
 - [x] 批量验证旧 Fact（最小版睡眠巩固，`batch_verify_facts`，2026-07-16）
 
 Phase 1.5（Memory Agent P1，2026-07-16 完成）：
@@ -183,7 +184,7 @@ Phase 3（按需）：
 
 ## 近期待办
 
-1. 运行 `use_observation_fact=true` 一段时间，验证 `facts_v2` 数据质量
+1. ~~运行 `use_observation_fact=true` 一段时间，验证 `facts_v2` 数据质量~~（2026-07-18 已直接完整上线，改为线上观察 facts_v2 数据质量）
 2. 同一喜好重复 3 次后，确认 `verification_count >= 3` 且 `confidence` 上升
 3. 用户更正信息后，确认旧 FactV2 被标记为 `contradicted`
 4. 监控 Prompt Cache 实际命中率与 token 节省效果

@@ -387,7 +387,7 @@ THINK ─── 解析出 <tool_call> {"name": "recall", "arguments": {...}}
     ▼
 ACT: execute_tool_calls(registry, calls)
     │  tools/memory_tools.py → ltm.store_fact(...)
-    │  → SQLite user_facts
+    │  → SQLite facts_v2（旧方法名适配，user_facts 已归档）
     ▼
 结果格式化为 <tool_result name="recall">
     │  \n找到 2 条：\n- 名字: 小陈\n- 摄影: 街拍\n
@@ -457,12 +457,11 @@ _send_segments(): 整条回复作为单个 segment 发送
     │       ├── ▶ LLM 抽取 facts (#127)         │
     │       │    → FACT|cat|key|val|conf|imp|type │
     │       │    → 只存 user_fact，跳过非用户事实│
-    │       │    → upsert user_facts             │
+    │       │    → 单写 facts_v2（已上线）        │
     │       │    → FactChecker 矛盾检测 (#6)     │
     │       │      同 key 不同 value → 衰减旧事实│
     │       │      语义相似 >0.65 → 矛盾处理   │
-    │       │    ※ use_observation_fact=true 时  │
-    │       │      双写 Layer 1 (ML-001):        │
+    │       │    ※ Layer 1 (ML-001) 已正式上线:  │
     │       │      整批文本→Observation,         │
     │       │      fact→promote 为 FactV2        │
     │       │                                  │
@@ -562,10 +561,10 @@ _send_segments(): 整条回复作为单个 segment 发送
 | 存储 | 位置 | 生命周期 | 内容 |
 |------|------|----------|------|
 | ConversationBuffer | 内存 deque | 进程级别 | 最近 500 轮 |
-| SQLite user_facts | data/ai_friend.db | 永久 | 用户事实 |
+| SQLite facts_v2 | data/ai_friend.db | 永久 | 用户事实（Layer 1，旧 user_facts 已归档为 user_facts_archive） |
 | SQLite experiences | data/ai_friend.db | 永久 | 共享体验 |
 | SQLite reflections | data/ai_friend.db | 永久 | 反思洞察 |
 | SQLite relationship_metrics | data/ai_friend.db | 永久 | 关系指标 |
 | SQLite conversation_turns | data/ai_friend.db | 永久 | 对话历史 |
-| SQLite observations / facts_v2 | data/ai_friend.db | 永久 | Layer 1 记忆生命周期（use_observation_fact=true 时双写，默认关） |
+| SQLite observations / facts_v2 | data/ai_friend.db | 永久 | Layer 1 记忆生命周期（已正式上线 2026-07-18：单写 facts_v2） |
 | EmotionalState | 内存 + personalities/{role_id}.json | 进程 + 持久化 | 当前情绪 |

@@ -184,7 +184,7 @@ class MemoryLifecycleManager:
 - React（Agent 3）默认不读取 Insight；只有 InnerDrive/Planner 在需要时检索。
 - 每日 GC：合并重复、衰减 confidence、删除 noise、压缩 episode、重建过期 insight。
 
-**状态**：一期已完成。新增 `observations` / `facts_v2` 表、`MemoryLifecycleManager`、双写逻辑、配置开关 `use_observation_fact`。二期将实现 Insight 替换 Reflection。
+**状态**：一期已正式上线（2026-07-18）。新增 `observations` / `facts_v2` 表、`MemoryLifecycleManager`；跳过灰度直接完整上线：user_facts 数据迁入 facts_v2（schema v4）、读路径经 repository 适配器切到 facts_v2、单写 promote、旧表归档为 `user_facts_archive`、开关 `use_observation_fact` 已删除。二期将实现 Insight 替换 Reflection。
 
 ### Layer 2: Context & Prompt Budget —— Token 是有限资源
 
@@ -473,7 +473,8 @@ class BaseLLMProvider(ABC):
 - [x] 新增 `Observation` / `FactV2` 数据模型和表
 - [x] 实现 `MemoryLifecycleManager`
 - [x] `MemoryConsolidator` 双写 Observation + FactV2
-- [x] 配置开关 `use_observation_fact`
+- [x] ~~配置开关 `use_observation_fact`~~（2026-07-18 完整上线后删除）
+- [x] 完整上线（2026-07-18）：数据迁移 schema v4 + 读路径切 facts_v2 + 旧表归档 user_facts_archive
 - [ ] 二期：新增 `InsightV2` 表，替换 Reflection
 - [ ] 二期：Retrieval 切换到新表
 - [ ] 二期：完整 GC（merge / decay / obsolete）
@@ -563,7 +564,7 @@ class BaseLLMProvider(ABC):
 
 当前实际推进顺序：
 
-1. **Layer 1 验证**：开启 `use_observation_fact=true` 运行一段时间，验证 `facts_v2` 数据质量
+1. ~~**Layer 1 验证**：开启 `use_observation_fact=true` 运行一段时间，验证 `facts_v2` 数据质量~~（2026-07-18 已直接完整上线，改为线上观察 facts_v2 数据质量）
 2. **Layer 2 短输入过滤优化**：实现语义相似度版 `_should_skip_llm`
 3. **Layer 1 二期**：Insight 替换 Reflection
 4. **Layer 3 完整状态机**：`CognitiveStateMachine` + 依赖注入 + 全局超时

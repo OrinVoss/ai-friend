@@ -15,7 +15,7 @@ class TestRepositoryFacts(unittest.TestCase):
         # Clean: delete all facts between tests
         async def _clean():
             async with self.db.cursor() as c:
-                await c.execute("DELETE FROM user_facts")
+                await c.execute("DELETE FROM facts_v2")
         asyncio.run(_clean())
 
     def tearDown(self):
@@ -191,7 +191,9 @@ class TestRepositoryFacts(unittest.TestCase):
         facts = asyncio.run(other.get_active_facts(limit=10))
         self.assertEqual(len(facts), 1)
         self.assertEqual(facts[0].confidence, 0.9)          # unchanged
-        self.assertEqual(facts[0].recall_count, 0)          # unchanged
+        # facts_v2 首次写入即 verification_count=1（promote 即首次验证），
+        # 跨 session 的 increment_fact_recall 不得再 +1
+        self.assertEqual(facts[0].recall_count, 1)          # unchanged
         self.assertGreater(facts[0].composite_score, 0.5)   # unchanged
 
     def test_facts_v2_writes_other_session_noop(self):
@@ -307,7 +309,7 @@ class TestBulkUpdateEmbeddings(unittest.TestCase):
         self.repo = Repository(self.db)
         async def _clean():
             async with self.db.cursor() as c:
-                await c.execute("DELETE FROM user_facts")
+                await c.execute("DELETE FROM facts_v2")
         asyncio.run(_clean())
 
     def tearDown(self):
@@ -330,13 +332,13 @@ class TestBulkUpdateEmbeddings(unittest.TestCase):
             "preference", "颜色", "蓝", confidence=0.9))
 
         # 本 session 拿着 other session 的行 id 回写 → 必须无效
-        asyncio.run(self.repo.bulk_update_embeddings("user_facts", [(other_fid, blob)]))
+        asyncio.run(self.repo.bulk_update_embeddings("facts_v2", [(other_fid, blob)]))
         facts = asyncio.run(other.get_active_facts(limit=10))
         self.assertIsNone(facts[0].embedding)
         self.assertEqual(facts[0].embedding_version, 0)
 
         # other session 自己回写 → 生效
-        asyncio.run(other.bulk_update_embeddings("user_facts", [(other_fid, blob)]))
+        asyncio.run(other.bulk_update_embeddings("facts_v2", [(other_fid, blob)]))
         facts = asyncio.run(other.get_active_facts(limit=10))
         self.assertIsNotNone(facts[0].embedding)
         self.assertEqual(facts[0].embedding_version, EMBEDDING_VERSION)
@@ -349,7 +351,7 @@ class TestBulkUpdateEmbeddings(unittest.TestCase):
 
         spy = AsyncMock(wraps=self.db.commit)
         self.db.commit = spy
-        asyncio.run(self.repo.bulk_update_embeddings("user_facts", [(fid, self._blob())]))
+        asyncio.run(self.repo.bulk_update_embeddings("facts_v2", [(fid, self._blob())]))
         spy.assert_awaited()
 
     def test_bulk_update_empty_noop(self):
@@ -357,7 +359,7 @@ class TestBulkUpdateEmbeddings(unittest.TestCase):
         from unittest.mock import AsyncMock
         spy = AsyncMock(wraps=self.db.commit)
         self.db.commit = spy
-        asyncio.run(self.repo.bulk_update_embeddings("user_facts", []))
+        asyncio.run(self.repo.bulk_update_embeddings("facts_v2", []))
         spy.assert_not_awaited()
 
 
@@ -370,7 +372,7 @@ class TestStoreFactsBulk(unittest.TestCase):
         self.repo = Repository(self.db)
         async def _clean():
             async with self.db.cursor() as c:
-                await c.execute("DELETE FROM user_facts")
+                await c.execute("DELETE FROM facts_v2")
         asyncio.run(_clean())
 
     def tearDown(self):

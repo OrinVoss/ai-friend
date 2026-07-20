@@ -39,7 +39,6 @@
 | `max_experiences` | int | `100` | 最大共享体验数，超量修剪 |
 | `max_reflections` | int | `50` | 最大反思数，超量修剪 |
 | `db_path` | string | `"data/ai_friend.db"` | SQLite 数据库路径 |
-| `use_observation_fact` | bool | `false` | 记忆 Layer 1 生命周期开关：开启后合并时双写 Observation/FactV2（observe/promote/verify/contradict/decay/gc） |
 | `use_memory_agent` | bool | `false` | Memory Agent 灰度开关：开启后 Agent 1 用 `memory_agent.answer()` 替代旧检索（带置信度/证据链的记忆摘要），失败自动回退旧路径 |
 | `memory_agent_relevance_floor` | float | `0.35` | Memory Agent 相关性下限：可测量证据 cosine 相似度低于此值时丢弃；recall/summarize 意图豁免 |
 | `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
@@ -148,8 +147,7 @@
   ],
   "monitor_enabled": true,
   "prompt_cache_ttl_seconds": 60,
-  "conversation_examples_max_turns": 3,
-  "use_observation_fact": false
+  "conversation_examples_max_turns": 3
 }
 ```
 

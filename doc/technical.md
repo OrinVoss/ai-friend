@@ -376,15 +376,15 @@ prompt 注入：
     │ 每轮对话直接追加
     ▼
 长期记忆（SQLite 9 张表）
-    ├── user_facts          用户事实（评分 + 置信度 + 重要性）
+    ├── facts_v2            经验证的事实（confidence/stability/freshness/importance）
     ├── experiences         共享体验（情感色调 + 重要性）
     ├── reflections         反思洞察（类型 + 重要性）
     ├── conversation_turns  完整对话历史
     ├── relationship_metrics 关系指标（按 session 隔离）
     ├── relationship_snapshots 关系指标历史快照
     ├── session_roles       session_id → role_id 映射
-    ├── observations        原始观察（记忆生命周期 Layer 1，双写中）
-    └── facts_v2            经验证的事实（confidence/stability/freshness/importance）
+    ├── observations        原始观察（记忆生命周期 Layer 1）
+    └── user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写）
 ```
 
 ### 4.2 三层检索
@@ -419,14 +419,14 @@ prompt 注入：
 ```
 pending_turns
     │
-    ├ Step 0: 双写 Observation（ML-001，use_observation_fact=true 时）
+    ├ Step 0: 写入 Observation（ML-001，已正式上线 2026-07-18）
     │   → 整批对话文本直接存一条 Observation（无新增 LLM 调用）
     │   → 本批提取的 fact 以其为来源 promote 为 FactV2
     │
     ├ Step 1: LLM 抽取 facts（#127 只提取 user_fact）
     │   → FACT|category|key|value|confidence|importance|fact_type
     │   → 跳过 agent_fact / system_fact（AI 行为/系统属性不入库）
-    │   → upsert user_facts（UNIQUE(category, key)）；双写开启时同步 promote FactV2
+    │   → 单写 facts_v2（UNIQUE(session_id, category, key)，逐条 promote）
     │   → FactChecker 矛盾检测 (#6)：
     │       同 (category, key) 不同 value → 直接矛盾
     │       嵌入相似度 > 0.65 且 value 不同 → 语义矛盾
@@ -447,26 +447,26 @@ pending_turns
     │   → intimacy: personal_sharing +0.03 / content·engaged·trusting +0.02
     │   → playfulness: 积极情绪 +0.02 / 负面情绪 −0.02
     │
-    ├ Step 5: 修剪（见 4.4）+ 每 5 次执行一次 lifecycle GC（双写开启时）
+    ├ Step 5: 修剪（见 4.4）+ 每 5 次执行一次 lifecycle GC
     │
     └ Step 6: _embed_new_items() 自动嵌入编码（见 4.6）
 ```
 
 ### 4.4 记忆生命周期
 
-**旧三表（user_facts / experiences / reflections）**：
+**事实与旧三表（facts_v2 / experiences / reflections）**：
 
 ```
 修剪（每次 consolidation 执行，按 session 隔离）：
-  user_facts     ≤ 200   超出部分 composite_score × 0.1 降级（最低分优先）
+  facts_v2       ≤ 200   超出部分 freshness/confidence × 0.1 降级（最低 composite 优先）
   experiences    ≤ 100   按 composite_score ASC 归档（is_archived=1）
   reflections    ≤ 50    按 significance ASC 软删除（is_active=0）
 
 矛盾衰减（FactChecker，见 4.7）：
-  confidence × 0.4 → 衰减后 < 0.2 → 软删除（is_active=0, composite_score=0）
+  confidence × 0.4 → 衰减后 < 0.2 → 软删除（facts_v2 status='contradicted'）
 ```
 
-**Layer 1 新生命周期（ML-001，use_observation_fact=true 时双写）**：
+**Layer 1 新生命周期（ML-001，已正式上线 2026-07-18：单写 facts_v2，读走 facts_v2，user_facts 归档为 user_facts_archive）**：
 
 ```
 Observation（原始观察，整批对话文本，低置信）
@@ -529,7 +529,7 @@ GC（每 5 次 consolidation 执行一次）：
 
 **嵌入存储**：
 
-每次 consolidation 完成后，`_embed_new_items()` 扫描 `user_facts`、`experiences`、`reflections` 三表中 `embedding IS NULL` 的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。
+每次 consolidation 完成后，`_embed_new_items()` 扫描 `facts_v2`、`observations`、`experiences`、`reflections` 四张可嵌入表中 `embedding IS NULL` 或版本过期的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。（2026-07-18：user_facts 归档后移出清单）
 
 **维度校验**（2026-07-16 修复）：
 
@@ -1091,8 +1091,8 @@ verification_count: int
 ### 9.1 SQLite Schema
 
 ```sql
--- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=2）
-user_facts          用户事实（UNIQUE category+fact_key）
+-- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=4）
+facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，Layer 1）
 experiences         共享体验（tags 存 JSON）
 reflections         反思洞察（related_experience_ids 存 JSON）
 relationship_metrics 关系指标（key-value，PK (session_id, dimension)）
@@ -1100,8 +1100,8 @@ conversation_turns  完整对话历史
 relationship_snapshots 关系指标历史快照
 session_roles       session_id → role_id 映射
 observations        原始观察（Layer 1 记忆生命周期，ML-001）
-facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，ML-001）
 ```
+（旧 user_facts 于 schema v4 归档为 user_facts_archive，数据保留，代码不再读写）
 
 ### 9.2 WAL 模式
 
@@ -1183,7 +1183,6 @@ class Database:
   "embedding_cache_size": 1000,
   "prompt_cache_ttl_seconds": 60,
   "conversation_examples_max_turns": 3,
-  "use_observation_fact": false,
   "allowed_origins": []
 }
 ```

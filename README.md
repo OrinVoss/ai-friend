@@ -44,18 +44,18 @@
     │ deque, 线程安全, 重启从 DB 恢复最近 30 轮
     ▼
 长期记忆（SQLite 9 表）
-    ├── user_facts          用户事实（评分 + 置信度 + 重要性）
+    ├── facts_v2            经验证的事实（confidence/stability/freshness/importance）
     ├── experiences         共享体验（情感色调 + 重要性，软删除）
     ├── reflections         反思洞察（类型 + 重要性，软删除）
     ├── conversation_turns  完整对话历史
     ├── relationship_metrics 关系指标（按 session_id 隔离）
     ├── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
     ├── session_roles       session_id → role_id 映射
-    ├── observations        原始观察（记忆生命周期 Layer 1，双写中）
-    └── facts_v2            经验证的事实（confidence/stability/freshness/importance）
+    ├── observations        原始观察（记忆生命周期 Layer 1）
+    └── user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写）
 ```
 
-记忆生命周期（一期，双写阶段）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ Insight（二期规划）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc，配置开关 `use_observation_fact`（默认 false）控制双写。
+记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ Insight（二期规划）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
 
@@ -194,7 +194,7 @@ Emotion → Memory consolidation → Reflection（后处理，不变）
 - **对话示例可配置** — `config.json` 的 `conversation_examples` 可自定义系统提示词中的对话风格示例
 - **共享 embedding 启动** — CLI/Web 双端统一调用 `core/embedding_server.py`，消除启动代码重复
 - **Prompt 分层缓存** — system prompt 拆为静态/慢变/动态块，静态块跨调用复用，减少重复 token 消耗（#160）
-- **记忆生命周期（双写中）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（`use_observation_fact` 开关）
+- **记忆生命周期（已上线）** — Observation → Fact 显式生命周期，事实带置信度/稳定性/新鲜度/重要性四维评分（单写 facts_v2，旧 user_facts 已归档）
 - **语义检索维度自适应** — 向量按 BLOB 实际维度解码，维度不匹配时日志告警而非静默降级
 - **数据库自动备份** — 检测到 schema 迁移将执行时自动 `VACUUM INTO` 快照到 `data/backups/`，滚动保留最近 5 份（`db_backup_enabled` / `db_backup_keep`）
 - **统一管线** — CLI 与 Web 共用同一 ConversationEngine + RuntimeDriver（统一管线 P0-P3 完成；情绪、睡眠、主动行为两端一致）

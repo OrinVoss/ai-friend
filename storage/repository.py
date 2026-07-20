@@ -21,78 +21,63 @@ class Repository:
     def get_recent_turns_sync(self, *a, **kw): return run_async(self.get_recent_turns(*a, **kw))
 
     # ── User Facts ──
+    # Layer 1 完整上线（2026-07-18，schema v4）：以下方法保留旧签名与 UserFact
+    # 返回形状（retrieval/tools/prompts/long_term 零改动），SQL 全部重定向到
+    # facts_v2。旧表 user_facts 已归档为 user_facts_archive，不再读写。
+    # UserFact 适配映射：
+    #   composite_score = 0.5*confidence + 0.3*importance + 0.2*freshness（SQL 计算）
+    #   recall_count = verification_count；is_active = (status=='active')；
+    #   fact_type 固定 'user_fact'；source_turn 无对应列，返回 None。
+
+    # facts_v2 行 → UserFact 兼容视图用的计算列（排序语义同旧 composite 降序）
+    _FACT_COMPOSITE_SQL = (
+        "ROUND(0.5 * confidence + 0.3 * importance + 0.2 * freshness, 4)"
+    )
 
     async def upsert_fact(self, category: str, key: str, value: str,
                           confidence: float = 1.0, source_turn: Optional[int] = None,
                           importance: float = 0.5,
                           fact_type: str = "user_fact",
                           embedding: Optional[bytes] = None) -> int:
-        logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f} type={fact_type}")
-        # #217: 冲突更新时复活被软删的事实（deactivate_fact 会把 is_active/composite_score
-        # 清零，否则用户重新陈述同名事实也永久不可见）。composite_score 取 excluded 值——
-        # INSERT 列清单不含该列，excluded 即列默认值 1.0。
-        async with self.db.cursor() as c:
-            if embedding is not None:
-                await c.execute(f"""
-                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
-                                           source_turn, embedding, embedding_version, session_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, {EMBEDDING_VERSION}, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
-                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
-                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
-                        confidence = MAX(user_facts.confidence, excluded.confidence),
-                        importance = MAX(user_facts.importance, excluded.importance),
-                        recall_count = user_facts.recall_count + 1,
-                        is_active = 1,
-                        composite_score = excluded.composite_score,
-                        embedding = excluded.embedding,
-                        embedding_version = {EMBEDDING_VERSION},
-                        updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, fact_type, confidence, importance, source_turn, embedding, self.session_id))
-            else:
-                await c.execute("""
-                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
-                                           source_turn, session_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
-                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
-                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
-                        confidence = MAX(user_facts.confidence, excluded.confidence),
-                        importance = MAX(user_facts.importance, excluded.importance),
-                        recall_count = user_facts.recall_count + 1,
-                        is_active = 1,
-                        composite_score = excluded.composite_score,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (category, key, value, fact_type, confidence, importance, source_turn, self.session_id))
-            await self.db.commit()
-            return c.lastrowid
+        # 适配器：转 upsert_fact_v2 语义（stability=0.5, freshness=1.0）。
+        # fact_type / source_turn 在 facts_v2 无对应列，保留参数仅为兼容签名。
+        logger.info(f"[db] upsert_fact: {category}/{key} confidence={confidence:.2f} imp={importance:.2f}")
+        return await self.upsert_fact_v2(
+            category, key, value, confidence=confidence, stability=0.5,
+            freshness=1.0, importance=importance,
+            created_by="consolidation", embedding=embedding)
 
     async def store_facts_bulk(self, facts: list[dict]) -> int:
-        """#161: 单 cursor 单事务批量 upsert（末尾一次 commit），消除 _extract_facts
-        的 N+1 写入。SQL 与 upsert_fact 非 embedding 分支一致（含 #217 复活语义）；
-        consolidation 新提取的事实不带向量，embedding 由 _embed_new_items 统一回写。
-        facts 元素键：category/key/value 必填，confidence/importance/fact_type/source_turn 可选。"""
+        """#161: 单 cursor 单事务批量 upsert（末尾一次 commit）。
+        Layer 1 完整上线：目标表改为 facts_v2，SQL 与 upsert_fact_v2 非
+        embedding 分支一致（含 #217 复活语义 status='active'）。consolidation
+        新提取的事实不带向量，embedding 由 _embed_new_items 统一回写。
+        facts 元素键：category/key/value 必填，confidence/importance/fact_type/source_turn 可选
+        （fact_type/source_turn 无对应列，忽略）。"""
         if not facts:
             return 0
         logger.info(f"[db] store_facts_bulk: {len(facts)} facts")
         async with self.db.cursor() as c:
             for f in facts:
                 await c.execute("""
-                    INSERT INTO user_facts (category, fact_key, fact_value, fact_type, confidence, importance,
-                                           source_turn, session_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    INSERT INTO facts_v2 (category, fact_key, fact_value, confidence, stability,
+                                          freshness, importance, verification_count,
+                                          last_verified_at, created_by, session_id)
+                    VALUES (?, ?, ?, ?, 0.5, 1.0, ?, 1, CURRENT_TIMESTAMP, 'consolidation', ?)
                     ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
-                        fact_value = CASE WHEN excluded.confidence >= user_facts.confidence
-                                         THEN excluded.fact_value ELSE user_facts.fact_value END,
-                        confidence = MAX(user_facts.confidence, excluded.confidence),
-                        importance = MAX(user_facts.importance, excluded.importance),
-                        recall_count = user_facts.recall_count + 1,
-                        is_active = 1,
-                        composite_score = excluded.composite_score,
+                        fact_value = CASE WHEN excluded.confidence >= facts_v2.confidence
+                                          THEN excluded.fact_value ELSE facts_v2.fact_value END,
+                        confidence = MAX(facts_v2.confidence, excluded.confidence),
+                        stability = MAX(facts_v2.stability, excluded.stability),
+                        freshness = excluded.freshness,
+                        importance = MAX(facts_v2.importance, excluded.importance),
+                        status = 'active',
+                        verification_count = facts_v2.verification_count + 1,
+                        last_verified_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                """, (f["category"], f["key"], f["value"], f.get("fact_type", "user_fact"),
+                """, (f["category"], f["key"], f["value"],
                       f.get("confidence", 1.0), f.get("importance", 0.5),
-                      f.get("source_turn"), self.session_id))
+                      self.session_id))
             await self.db.commit()
             return len(facts)
 
@@ -100,24 +85,22 @@ class Repository:
         logger.debug(f"[db] search_facts: query='{query[:40]}' limit={limit}")
         async with self.db.cursor() as c:
             if query:
-                await c.execute("""
-                    SELECT * FROM user_facts
-                    WHERE is_active = 1
+                await c.execute(f"""
+                    SELECT *, {self._FACT_COMPOSITE_SQL} AS composite_score FROM facts_v2
+                    WHERE status = 'active'
                       AND confidence >= 0.2
-                      AND fact_type = 'user_fact'
                       AND session_id = ?
                       AND (fact_key LIKE ? OR fact_value LIKE ? OR category LIKE ?)
-                    ORDER BY composite_score DESC, recall_count DESC
+                    ORDER BY composite_score DESC, verification_count DESC
                     LIMIT ?
                 """, (self.session_id, f"%{query}%", f"%{query}%", f"%{query}%", limit))
             else:
-                await c.execute("""
-                    SELECT * FROM user_facts
-                    WHERE is_active = 1
+                await c.execute(f"""
+                    SELECT *, {self._FACT_COMPOSITE_SQL} AS composite_score FROM facts_v2
+                    WHERE status = 'active'
                       AND confidence >= 0.2
-                      AND fact_type = 'user_fact'
                       AND session_id = ?
-                    ORDER BY composite_score DESC, recall_count DESC
+                    ORDER BY composite_score DESC, verification_count DESC
                     LIMIT ?
                 """, (self.session_id, limit))
             return [self._row_to_fact(r) for r in await c.fetchall()]
@@ -125,58 +108,55 @@ class Repository:
     async def get_active_facts(self, limit: int = 50) -> list[UserFact]:
         logger.debug(f"[db] get_active_facts: limit={limit}")
         async with self.db.cursor() as c:
-            await c.execute("""
-                SELECT * FROM user_facts
-                WHERE is_active = 1
+            await c.execute(f"""
+                SELECT *, {self._FACT_COMPOSITE_SQL} AS composite_score FROM facts_v2
+                WHERE status = 'active'
                   AND confidence >= 0.2
-                  AND fact_type = 'user_fact'
                   AND session_id = ?
-                ORDER BY composite_score DESC, recall_count DESC
+                ORDER BY composite_score DESC, verification_count DESC
                 LIMIT ?
             """, (self.session_id, limit))
             return [self._row_to_fact(r) for r in await c.fetchall()]
 
     async def update_fact_score(self, fact_id: int, score: float) -> None:
+        """Layer 1 完整上线：facts_v2 无 composite_score 列。把目标分映射为
+        相对当前 composite 的衰减系数走 decay_fact_v2（freshness/confidence
+        等比缩放）——旧调用语义均为降级/衰减，比例映射最接近原语义。
+        当前 composite 为 0 时无法按比例映射，直接跳过。"""
         logger.debug(f"[db] update_fact_score: id={fact_id} score={score:.2f}")
-        async with self.db.cursor() as c:
-            await c.execute("UPDATE user_facts SET composite_score = ? WHERE id = ? AND session_id = ?",
-                            (score, fact_id, self.session_id))
-            if c.rowcount == 0:
-                logger.warning(f"[db] update_fact_score id={fact_id}: no matching row in session "
-                               f"'{self.session_id}' (missing or cross-session)")
-            await self.db.commit()
+        fact = await self.get_fact_v2_by_id(fact_id)
+        if fact is None:
+            logger.warning(f"[db] update_fact_score id={fact_id}: no matching row in session "
+                           f"'{self.session_id}' (missing or cross-session)")
+            return
+        current = 0.5 * fact.confidence + 0.3 * fact.importance + 0.2 * fact.freshness
+        if current <= 0:
+            return
+        factor = max(0.0, min(1.0, score / current))
+        await self.decay_fact_v2(fact_id, factor)
 
     async def increment_fact_recall(self, fact_id: int) -> None:
+        """recall_count 映射为 facts_v2.verification_count，复用 verify_fact_v2。"""
         logger.debug(f"[db] increment_fact_recall: id={fact_id}")
-        async with self.db.cursor() as c:
-            await c.execute("UPDATE user_facts SET recall_count = recall_count + 1 WHERE id = ? AND session_id = ?",
-                            (fact_id, self.session_id))
-            if c.rowcount == 0:
-                logger.warning(f"[db] increment_fact_recall id={fact_id}: no matching row in session "
-                               f"'{self.session_id}' (missing or cross-session)")
-            await self.db.commit()
+        await self.verify_fact_v2(fact_id)
 
     async def deactivate_fact(self, fact_id: int) -> None:
-        """Soft-delete a fact (set is_active=0). Used when a fact is contradicted.
+        """Soft-delete a fact. Used when a fact is contradicted.
+        Layer 1 完整上线：映射为 facts_v2 status='contradicted'（FactChecker
+        软删语义；#217 复活由 upsert ON CONFLICT 的 status='active' 保证）。
         Session-scoped: an id belonging to another session is a no-op."""
         logger.info(f"[db] deactivate_fact id={fact_id}")
-        async with self.db.cursor() as c:
-            await c.execute(
-                "UPDATE user_facts SET is_active = 0, composite_score = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
-                (fact_id, self.session_id))
-            if c.rowcount == 0:
-                logger.warning(f"[db] deactivate_fact id={fact_id}: no matching row in session "
-                               f"'{self.session_id}' (missing or cross-session)")
-            await self.db.commit()
+        await self.update_fact_v2_status(fact_id, "contradicted")
 
     async def update_fact_confidence(self, fact_id: int, new_confidence: float) -> None:
         """Lower a fact's confidence (unlike upsert which only takes MAX).
+        facts_v2 的 composite 是读取时计算的，无需像旧表一样同步写回。
         Session-scoped like every other by-id write in this class."""
         logger.info(f"[db] update_fact_confidence id={fact_id} confidence={new_confidence:.2f}")
         async with self.db.cursor() as c:
             await c.execute(
-                "UPDATE user_facts SET confidence = ?, composite_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
-                (new_confidence, new_confidence * 0.7, fact_id, self.session_id))
+                "UPDATE facts_v2 SET confidence = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?",
+                (new_confidence, fact_id, self.session_id))
             if c.rowcount == 0:
                 logger.warning(f"[db] update_fact_confidence id={fact_id}: no matching row in session "
                                f"'{self.session_id}' (missing or cross-session)")
@@ -186,9 +166,9 @@ class Repository:
         """Find facts with similar category or key for contradiction checking.
         Session-scoped like every other query in this class."""
         async with self.db.cursor() as c:
-            await c.execute("""
-                SELECT * FROM user_facts
-                WHERE is_active = 1
+            await c.execute(f"""
+                SELECT *, {self._FACT_COMPOSITE_SQL} AS composite_score FROM facts_v2
+                WHERE status = 'active'
                   AND session_id = ?
                   AND (category = ? OR fact_key LIKE ?)
                 ORDER BY composite_score DESC
@@ -356,6 +336,8 @@ class Repository:
                              source_observation_ids: Optional[list[int]] = None,
                              created_by: str = "consolidation",
                              embedding: Optional[bytes] = None) -> int:
+        # #217: ON CONFLICT 里的 status='active' 即复活语义——被软删
+        # （contradicted/decayed）的同名事实在用户重述时恢复可见。
         logger.info(f"[db] upsert_fact_v2: {category}/{key} confidence={confidence:.2f}")
         source_ids = json.dumps(source_observation_ids or [])
         async with self.db.cursor() as c:
@@ -377,7 +359,8 @@ class Repository:
                         last_verified_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP,
                         embedding = excluded.embedding,
-                        embedding_version = {EMBEDDING_VERSION}
+                        embedding_version = {EMBEDDING_VERSION},
+                        status = 'active'
                 """, (category, key, value, confidence, stability, freshness, importance,
                       source_ids, created_by, self.session_id, embedding))
             else:
@@ -396,7 +379,8 @@ class Repository:
                         importance = MAX(facts_v2.importance, excluded.importance),
                         verification_count = facts_v2.verification_count + 1,
                         last_verified_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at = CURRENT_TIMESTAMP,
+                        status = 'active'
                 """, (category, key, value, confidence, stability, freshness, importance,
                       source_ids, created_by, self.session_id))
             await self.db.commit()
@@ -595,8 +579,11 @@ class Repository:
     # ── Pruning ──
 
     async def prune_facts(self, max_count: int) -> int:
+        # Layer 1 完整上线：COUNT 与溢出降级都改打 facts_v2。溢出行的
+        # composite_score × 0.1 降级映射为 decay_fact_v2(id, 0.1) 语义
+        # （freshness/confidence × 0.1），单条 UPDATE 一次完成，避免逐条 commit。
         async with self.db.cursor() as c:
-            await c.execute("SELECT COUNT(*) FROM user_facts WHERE is_active = 1 AND session_id = ?", (self.session_id,))
+            await c.execute("SELECT COUNT(*) FROM facts_v2 WHERE status = 'active' AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
             count = row[0]
             if count <= max_count:
@@ -604,10 +591,14 @@ class Repository:
             excess = count - max_count
             logger.info(f"[db] prune_facts: degrading {excess} of {count}")
             await c.execute("""
-                UPDATE user_facts SET composite_score = composite_score * 0.1
+                UPDATE facts_v2
+                SET freshness = MAX(0.0, freshness * 0.1),
+                    confidence = MAX(0.0, confidence * 0.1),
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id IN (
-                    SELECT id FROM user_facts WHERE is_active = 1 AND session_id = ?
-                    ORDER BY composite_score ASC, recall_count ASC
+                    SELECT id FROM facts_v2 WHERE status = 'active' AND session_id = ?
+                    ORDER BY (0.5 * confidence + 0.3 * importance + 0.2 * freshness) ASC,
+                             verification_count ASC
                     LIMIT ?
                 )
             """, (self.session_id, excess))
@@ -658,17 +649,28 @@ class Repository:
     # ── Helpers ──
 
     def _row_to_fact(self, r) -> UserFact:
+        """facts_v2 行 → UserFact 适配（Layer 1 完整上线）。调用方查询需带
+        _FACT_COMPOSITE_SQL 计算的 composite_score 列；缺失时按公式现算。"""
+        keys = r.keys()
+        if "composite_score" in keys and r["composite_score"] is not None:
+            composite = r["composite_score"]
+        else:
+            composite = round(0.5 * r["confidence"] + 0.3 * r["importance"]
+                              + 0.2 * r["freshness"], 4)
         return UserFact(
             id=r["id"], category=r["category"], fact_key=r["fact_key"],
             fact_value=r["fact_value"],
-            fact_type=r["fact_type"] if "fact_type" in r.keys() else "user_fact",
+            fact_type="user_fact",
             confidence=r["confidence"],
             importance=r["importance"],
-            source_turn=r["source_turn"], created_at=r["created_at"],
-            updated_at=r["updated_at"], recall_count=r["recall_count"],
-            is_active=bool(r["is_active"]), composite_score=r["composite_score"],
-            embedding=r["embedding"] if "embedding" in r.keys() else None,
-            embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
+            source_turn=None,
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
+            recall_count=r["verification_count"],
+            is_active=(r["status"] == "active"),
+            composite_score=composite,
+            embedding=r["embedding"] if "embedding" in keys else None,
+            embedding_version=r["embedding_version"] if "embedding_version" in keys else 0,
         )
 
     def _row_to_experience(self, r) -> Experience:
