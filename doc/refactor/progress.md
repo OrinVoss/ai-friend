@@ -19,7 +19,7 @@ Layer 6: Personality / Session / 记忆绑定
 
 | Layer | 主题 | 代码状态 | 文档状态 | 负责人 |
 |-------|------|----------|----------|--------|
-| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | 一期（Fact）+ 二期 Insight 已上线（2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
+| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | ✅ 全部完成（一期 Fact + 二期 Insight + Memory Agent P0~P2，2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
 | Layer 2 | Prompt 分层与静态化 | 大部分已完成 | 完整（含短输入过滤优化方案） | Kimi |
 | Layer 3 | 多阶段 Retrieval | 未开始 | 设计完成 | Kimi |
 | Layer 4 | Agent Runtime 解耦 | 部分已完成 | 完整 | Kimi |

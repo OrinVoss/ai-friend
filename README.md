@@ -336,7 +336,7 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（635 用例，48 个测试文件）
+├── tests/                     单元测试（672 用例，52 个测试文件）
 │   ├── mocks.py                Mock 工厂
 │   ├── test_emotional_state.py EmotionalState 测试（41 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
@@ -359,13 +359,13 @@ ai-friend/
 │   ├── test_cli_controller.py  CLI 控制器测试（8 用例）
 │   ├── test_agent_proactive.py Agent 主动行为测试（8 用例）
 │   ├── test_rate_limit.py      限流测试（7 用例）
-│   ├── test_memory_lifecycle.py 记忆生命周期（Observation→Fact）测试（7 用例）
+│   ├── test_memory_lifecycle.py 记忆生命周期（Observation→Fact→Insight）测试（12 用例）
 │   ├── test_database_backup.py 数据库自动备份测试（6 用例）
 │   ├── test_user_facts_unique_migration.py 唯一约束迁移测试（3 用例）
 │   ├── test_session_factory.py 统一装配测试（5 用例）
 │   ├── test_unified_pipeline.py 统一管线引擎测试（13 用例）
 │   ├── test_runtime_driver.py 时间驱动循环测试（9 用例）
-│   ├── test_memory_agent.py    Memory Agent 测试（21 用例）
+│   ├── test_memory_agent.py    Memory Agent 测试（33 用例）
 │   ├── test_add_turn_metadata.py add_turn metadata 回归测试（4 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_session_manager.py 会话管理测试（6 用例）
@@ -405,7 +405,7 @@ ai-friend/
 │   ├── lifecycle.py            MemoryLifecycleManager（Observation→Fact 生命周期：observe/promote/verify/contradict/decay/gc）
 │   ├── fact_checker.py         矛盾检测 + 置信度衰减 + 用户纠正（语义相似度→衰减→软删除）
 │   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
-│   ├── memory_agent.py         Memory Agent：向量召回 + 交叉验证 + 置信度回答（确定性管道，P0/P1）
+│   ├── memory_agent.py         Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 指代解析（确定性管道，P0~P2）
 │   └── consolidation.py        记忆合并（事实/体验/反思/分层反思L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）

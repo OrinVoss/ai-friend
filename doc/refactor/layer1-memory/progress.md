@@ -38,11 +38,13 @@
 
 ### Phase 2
 
-- [ ] `_extract_clues()` LLM 版本
-- [ ] `_cross_verify()` 完整版（矛盾传播、分类型时间线）
-- [ ] Retrieval 切换到新表
-- [ ] 完整 GC：merge / decay / obsolete / archive
-- [ ] 旧数据迁移脚本 + 删除旧表写入逻辑
+- [x] `_extract_clues()` LLM 版本（2026-07-20：向量锚点检测指代 + LLM 改写自足查询）
+- [x] `_cross_verify()` 完整版（2026-07-20：矛盾向上传播——Fact 被推翻时引用它的 Insight 标记可疑；分类型时间线 P1 已完成）
+- [x] Retrieval 切换到新表（facts_v2：2026-07-18；insights_v2：2026-07-20 经适配器；Insight 进 Memory Agent 证据池：2026-07-20）
+- [x] 完整 GC：decay / obsolete / archive / expire_due_insights（2026-07-20；merge 保持占位，语义近重复合并推迟）
+- [x] 旧数据迁移 + 旧表归档（user_facts_archive / reflections_archive；物理 DROP 留待观察期后）
+
+（以上见 `changes/2026-07-20-memory-agent-p2.md`）
 
 ### Phase 3（按需）
 
