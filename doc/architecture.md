@@ -107,7 +107,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   ├── retrieval.py     (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
     │   ├── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码 + 双写 Observation/FactV2)
     │   ├── fact_checker.py  (矛盾检测 + 置信度衰减 + 用户纠正)
-    │   └── lifecycle.py     (MemoryLifecycleManager: Observation→Fact 生命周期)
+    │   └── lifecycle.py     (MemoryLifecycleManager: Observation→Fact→Insight 生命周期)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
     ├── storage/             (aiosqlite 异步, WAL, 版本化迁移；session_roles 记录 session→role 映射)
@@ -115,7 +115,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     └── models/              (EmotionalState / Turn / UserFact / Observation / FactV2 等)
 
 后处理（不变）:
-    Emotion → Memory consolidation → Reflection
+    Emotion → Memory consolidation → Insight（2026-07-20 起，原 Reflection）
 ```
 
 ### 模块依赖
@@ -167,7 +167,7 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 | 类型 | 内容 | 缓存策略 |
 |------|------|----------|
 | 静态块 | 身份定义、对话示例、内驱指令、工具说明 | 无 TTL，personality 文件变更时失效 |
-| 慢变块 | 关系指标、长期记忆（facts/experiences/reflections） | TTL 可配置（默认 60 秒） |
+| 慢变块 | 关系指标、长期记忆（facts/experiences/insights） | TTL 可配置（默认 60 秒） |
 | 动态块 | 当前时间、情绪状态、工具历史、最近对话、破防状态、指令 | 不缓存 |
 
 缓存键为 `(session_id, personality_version, component_name)`。`personality_version` 取 personality 文件的 `mtime:size:path`，因此编辑角色文件会自动让静态块失效。
@@ -217,9 +217,9 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`reflections`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，代码不再读写。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
+长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，旧 `reflections` 表已于 schema v5（2026-07-20）迁移数据后归档为 `reflections_archive`，代码均不再读写。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
 
-记忆生命周期（一期，已正式上线 2026-07-18）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（二期规划）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
+记忆生命周期（一期 Fact 上线 2026-07-18，二期 Insight 上线 2026-07-20）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（假设 + 证据链 + confidence + expires_at）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / create_insight / verify_insight / expire_insight / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2；分层 L1/L2/L3 生成结构化 Insight（LLM 输出 JSON：hypothesis/insight_type/evidence/confidence/needs_more_evidence，解析失败静默跳过），单写 insights_v2。读路径全部走 facts_v2 / insights_v2（repository 旧方法名适配，Reflection 返回形状不变：content=hypothesis、significance=confidence）；旧 `user_facts` / `reflections` 表数据已迁移并归档（schema v4 / v5）。
 
 ---
 

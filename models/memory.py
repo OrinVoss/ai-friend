@@ -149,3 +149,37 @@ class FactV2:
                 setattr(self, field_name, max(0.0, min(1.0, value)))
         if not self.category or not self.fact_key:
             raise ValueError("FactV2.category and fact_key cannot be empty")
+
+
+# Layer 1 二期（2026-07-20）：结构化 Insight 替换 Reflection（plan.md §3.1）
+InsightV2Status = Literal["active", "expired", "verified", "rejected"]
+
+
+@dataclass
+class InsightV2:
+    """A hypothesis-level insight inferred from facts, with an evidence chain.
+
+    Unlike Reflection (free-form conclusion), an Insight is a verifiable
+    hypothesis carrying evidence fact ids, confidence and an expiry, so that
+    garbage collection can expire unverified speculation over time.
+    """
+    id: Optional[int] = None
+    hypothesis: str = ""
+    evidence_fact_ids: list[int] = field(default_factory=list)
+    insight_type: Optional[str] = None
+    confidence: float = 0.5
+    needs_more_evidence: bool = True
+    expires_at: Optional[str] = None
+    status: InsightV2Status = "active"
+    created_by: str = "consolidation"
+    created_at: str = ""
+    updated_at: str = ""
+    session_id: str = ""
+    embedding: Optional[bytes] = None
+    embedding_version: int = 0
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.confidence <= 1.0:
+            self.confidence = max(0.0, min(1.0, self.confidence))
+        if not self.hypothesis or not self.hypothesis.strip():
+            raise ValueError("InsightV2.hypothesis cannot be empty")

@@ -79,7 +79,7 @@ main.py / web_main.py
     │
     ├── models/
     │   ├── personality.py ── EmotionalState + PersonalityConfig
-    │   ├── memory.py ─────── UserFact + Experience + Reflection + Observation + FactV2
+    │   ├── memory.py ─────── UserFact + Experience + Reflection + Observation + FactV2 + InsightV2
     │   └── conversation.py ─ Turn + MemoryContext
     │
     ├── ui/
@@ -393,7 +393,7 @@ prompt 注入：
 长期记忆（SQLite 9 张表）
     ├── facts_v2            经验证的事实（confidence/stability/freshness/importance）
     ├── experiences         共享体验（情感色调 + 重要性）
-    ├── reflections         反思洞察（类型 + 重要性）
+    ├── insights_v2         假设性洞察（hypothesis + evidence + confidence，二期替换 reflections）
     ├── conversation_turns  完整对话历史
     ├── relationship_metrics 关系指标（按 session 隔离）
     ├── relationship_snapshots 关系指标历史快照
@@ -409,7 +409,8 @@ prompt 注入：
     │
     ├ Layer 1: Hot Memory ──────────────────────────┐
     │  每轮必取：活跃 facts 候选（≤50 条）+ 最新 5       │
-    │  experiences + 当前关系状态 + 最新 3 reflections  │
+    │  experiences + 当前关系状态 + 最新 3 insights      │
+    │  （insights_v2，经适配器返回 Reflection 形状）      │
     │                                                 │
     ├ Layer 2: Query-Guided ─────────────────────────┤
     │  Step A — 混合评分                               │
@@ -452,9 +453,9 @@ pending_turns
     │   → SUMMARY|TONE|SIGNIFICANCE|IMPORTANCE|TAGS
     │   → insert experiences
     │
-    ├ Step 3: 分层反思（#5）
-    │   → L1 基础反思（每次）/ L2 行为模式（每 3 次）/ L3 深度洞察（每 10 次）
-    │   → insert reflections
+    ├ Step 3: 分层洞察（#5，二期 2026-07-20 替代反思）
+    │   → L1 基础洞察（每次）/ L2 行为模式（每 3 次）/ L3 深度洞察（每 10 次）
+    │   → LLM 输出 JSON（hypothesis/evidence/confidence）→ insert insights_v2
     │
     ├ Step 4: 更新 relationship
     │   → familiarity += 0.02
@@ -469,13 +470,13 @@ pending_turns
 
 ### 4.4 记忆生命周期
 
-**事实与旧三表（facts_v2 / experiences / reflections）**：
+**事实与旧三表（facts_v2 / experiences / insights_v2）**：
 
 ```
 修剪（每次 consolidation 执行，按 session 隔离）：
   facts_v2       ≤ 200   超出部分 freshness/confidence × 0.1 降级（最低 composite 优先）
   experiences    ≤ 100   按 composite_score ASC 归档（is_archived=1）
-  reflections    ≤ 50    按 significance ASC 软删除（is_active=0）
+  insights_v2    ≤ 50    按 confidence ASC 过期（status='expired'，二期替代旧 reflections 软删除）
 
 矛盾衰减（FactChecker，见 4.7）：
   confidence × 0.4 → 衰减后 < 0.2 → 软删除（facts_v2 status='contradicted'）
@@ -544,7 +545,7 @@ GC（每 5 次 consolidation 执行一次）：
 
 **嵌入存储**：
 
-每次 consolidation 完成后，`_embed_new_items()` 扫描 `facts_v2`、`observations`、`experiences`、`reflections` 四张可嵌入表中 `embedding IS NULL` 或版本过期的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。（2026-07-18：user_facts 归档后移出清单）
+每次 consolidation 完成后，`_embed_new_items()` 扫描 `facts_v2`、`observations`、`experiences`、`insights_v2` 四张可嵌入表中 `embedding IS NULL` 或版本过期的行，批量编码后写入 `embedding` BLOB 列（`float32 × dim` 原始字节）。（2026-07-18：user_facts 归档后移出清单；2026-07-20：reflections 归档，换 insights_v2）
 
 **维度校验**（2026-07-16 修复）：
 
@@ -880,9 +881,9 @@ Agent 1 检索后通过 `drive_result.context_summary` 把记忆/关系摘要直
 |------|------|----------|
 | FACT_EXTRACTION | 从对话抽取用户事实 | text |
 | EXPERIENCE_SUMMARIZATION | 总结共享体验 | text |
-| REFLECTION | L1 基础反思（每次 consolidation） | experiences, reflections, facts, relationship |
-| REFLECTION_L2 | L2 行为模式反思（每 3 次） | facts, experiences |
-| REFLECTION_L3 | L3 深度心理洞察（每 10 次） | facts, experiences, relationship, patterns |
+| INSIGHT_GENERATION | L1 假设性洞察（每次 consolidation，二期替代 REFLECTION） | facts, experiences |
+| INSIGHT_L2 | L2 行为模式归纳（每 3 次） | facts, experiences, insights |
+| INSIGHT_L3 | L3 长期模式/深度动机（每 10 次） | facts, experiences, relationship, current_emotion, patterns |
 | EMOTION_ANALYSIS | 分析用户消息情感 | text |
 | MEMORY_RERANK | 记忆候选重排序 | query, candidates |
 | CONTEXT_COMPRESS | 对话摘要生成（prompts/system.py） | conversation |
@@ -1078,13 +1079,26 @@ importance: float       # 0~1
 tags: list[str]
 ```
 
-### 8.4 Reflection
+### 8.4 Reflection（读路径兼容形状，数据来自 insights_v2）
 
 ```python
-content: str
-insight_type: str       # user_discovery（L1, LLM TYPE）/ l2_pattern / l3_deep_insight
-significance: float     # 0~1
+content: str            # 适配：= insights_v2.hypothesis
+insight_type: str       # pattern / emotion / user_discovery / ...
+significance: float     # 适配：= insights_v2.confidence
 level: int              # 1/2/3（MM-006）
+```
+
+### 8.4b InsightV2（Layer 1 二期，2026-07-20）
+
+```python
+hypothesis: str         # 可验证的假设（非空）
+evidence_fact_ids: list[int]  # 证据链（facts_v2 id 列表）
+insight_type: str       # pattern / contradiction / connection / emotion / prediction / ...
+confidence: float       # 0~1
+needs_more_evidence: bool
+expires_at: str | None  # 过期时间，GC 到期置 status='expired'
+status: str             # active / expired / verified / rejected
+created_by: str         # consolidation / migration / ...
 ```
 
 ### 8.5 Observation（ML-001）
@@ -1119,10 +1133,10 @@ verification_count: int
 ### 9.1 SQLite Schema
 
 ```sql
--- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=4）
+-- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=5）
 facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，Layer 1）
 experiences         共享体验（tags 存 JSON）
-reflections         反思洞察（related_experience_ids 存 JSON）
+insights_v2         假设性洞察（evidence_fact_ids 存 JSON，二期替代 reflections）
 relationship_metrics 关系指标（key-value，PK (session_id, dimension)）
 conversation_turns  完整对话历史
 relationship_snapshots 关系指标历史快照

@@ -2,6 +2,8 @@
 
 > 目标：把当前"直接存 fact/reflection"的模型，改造为 **Observation → Fact → Insight** 三层生命周期模型，让记忆可验证、可衰减、可遗忘、可追溯来源。
 
+> **实施状态**：一期 Observation → Fact 已于 2026-07-18 完整上线（schema v4，直接切换，未走双写）；二期 Insight 替换 Reflection 已于 2026-07-20 上线（schema v5，同样直接切换：reflections 数据迁入 insights_v2 并归档为 reflections_archive，读路径经 repository 适配器切新表）。见 `changes/2026-07-18-memory-layer1-full-launch.md`、`changes/2026-07-20-insight-replaces-reflection.md`。
+
 ---
 
 ## 1. 当前问题

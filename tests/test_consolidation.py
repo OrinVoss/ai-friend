@@ -340,6 +340,98 @@ class TestEmbedNewItemsCoverage(unittest.TestCase):
             self.assertEqual(theirs[0]["embedding_version"], 0)
 
 
+class TestInsightGeneration(unittest.TestCase):
+    """Layer 1 二期（2026-07-20）：_generate_reflection_l1/l2/l3 输出结构化
+    Insight（JSON → lifecycle.create_insight 落 insights_v2）。"""
+
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+        self.consolidator = MemoryConsolidator(self.ltm, self.llm)
+        self.consolidator._lifecycle = MagicMock()
+        self.consolidator._lifecycle.create_insight = AsyncMock(
+            return_value=MagicMock())
+        self.personality = MagicMock()
+        self.personality.emotion.dominant_emotion = "content"
+        self.ltm.get_recent_experiences.return_value = []
+        self.ltm.get_all_active_facts.return_value = []
+        self.ltm.get_recent_reflections.return_value = []
+        self.ltm.get_relationship.return_value = {"trust": 0.5}
+
+    def _run_l1(self):
+        # 与 test_extract_facts_promotes_to_lifecycle 相同的 run_async 桥接：
+        # 驱动协程一步完成（StopIteration 携带返回值，被业务 try 吞掉）
+        with patch("memory.consolidation.run_async",
+                   lambda coro: coro.send(None)):
+            self.consolidator._generate_reflection_l1(self.personality)
+
+    def test_valid_json_creates_insight(self):
+        """LLM 返回合法 JSON → create_insight 被调，字段正确。"""
+        self.llm.return_value = (
+            '{"hypothesis": "用户可能偏好独自工作", "insight_type": "pattern",'
+            ' "evidence": [3, "fact_id_7"], "confidence": 0.6,'
+            ' "needs_more_evidence": true}'
+        )
+        self._run_l1()
+
+        self.consolidator._lifecycle.create_insight.assert_awaited_once()
+        kwargs = self.consolidator._lifecycle.create_insight.call_args.kwargs
+        self.assertEqual(kwargs["hypothesis"], "用户可能偏好独自工作")
+        self.assertEqual(kwargs["insight_type"], "pattern")
+        self.assertEqual(kwargs["evidence_fact_ids"], [3, 7])  # 字符串形式抽数字
+        self.assertAlmostEqual(kwargs["confidence"], 0.6)
+        self.assertTrue(kwargs["needs_more_evidence"])
+        self.assertEqual(kwargs["created_by"], "consolidation")
+
+    def test_markdown_wrapped_json_accepted(self):
+        """LLM 用 markdown 代码块包裹 JSON 时仍能解析。"""
+        self.llm.return_value = (
+            '```json\n{"hypothesis": "用户深夜更健谈", "insight_type": "pattern",'
+            ' "evidence": [], "confidence": 0.55, "needs_more_evidence": true}\n```'
+        )
+        self._run_l1()
+        self.consolidator._lifecycle.create_insight.assert_awaited_once()
+
+    def test_bad_json_silently_skipped(self):
+        """LLM 返回坏 JSON → log warning 跳过，不炸、不写垃圾数据。"""
+        self.llm.return_value = "这不是 JSON"
+        self._run_l1()  # 不抛异常
+        self.consolidator._lifecycle.create_insight.assert_not_awaited()
+
+    def test_missing_hypothesis_skipped(self):
+        """JSON 合法但缺 hypothesis → 跳过。"""
+        self.llm.return_value = '{"insight_type": "pattern", "confidence": 0.9}'
+        self._run_l1()
+        self.consolidator._lifecycle.create_insight.assert_not_awaited()
+
+    def test_low_confidence_gated(self):
+        """confidence 低于 L1 门槛（0.4）→ 跳过（沿用旧 significance 门槛）。"""
+        self.llm.return_value = (
+            '{"hypothesis": "证据不足的猜测", "insight_type": "prediction",'
+            ' "evidence": [], "confidence": 0.3, "needs_more_evidence": true}'
+        )
+        self._run_l1()
+        self.consolidator._lifecycle.create_insight.assert_not_awaited()
+
+    def test_l2_uses_pattern_prompt_and_default_type(self):
+        """L2：基于近期 insight 归纳模式；缺 insight_type 时默认 pattern。"""
+        self.llm.return_value = (
+            '{"hypothesis": "用户每次聊到工作就情绪低落", "evidence": [2],'
+            ' "confidence": 0.5, "needs_more_evidence": true}'
+        )
+        with patch("memory.consolidation.run_async",
+                   lambda coro: coro.send(None)):
+            self.consolidator._generate_reflection_l2()
+
+        self.consolidator._lifecycle.create_insight.assert_awaited_once()
+        kwargs = self.consolidator._lifecycle.create_insight.call_args.kwargs
+        self.assertEqual(kwargs["insight_type"], "pattern")
+        # prompt 应包含近期洞察输入位
+        prompt_text = self.llm.call_args.args[0]
+        self.assertIn("近期的洞察", prompt_text)
+
+
 class TestCareClueExtraction(unittest.TestCase):
     """内驱状态二期：consolidation 线索写入 + 对照解决（inner-drive-state.md §5）。"""
 

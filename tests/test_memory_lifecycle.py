@@ -110,6 +110,8 @@ class TestMemoryLifecycleManager(unittest.TestCase):
         """garbage_collect should call decay, merge and archive."""
         self.ltm.repo.get_active_facts_v2 = AsyncMock(return_value=[])
         self.ltm.repo.decay_fact_v2 = AsyncMock()
+        # Layer 1 二期（2026-07-20）：GC 纳入 expires_at 过期的 insight
+        self.ltm.repo.expire_due_insights = AsyncMock(return_value=0)
         cursor = MagicMock()
         cursor.execute = AsyncMock()
         self.ltm.repo.db.cursor.return_value = _AsyncIter(cursor)
@@ -117,6 +119,41 @@ class TestMemoryLifecycleManager(unittest.TestCase):
         self._run(self.manager.garbage_collect())
 
         self.ltm.repo.get_active_facts_v2.assert_awaited_once()
+        self.ltm.repo.expire_due_insights.assert_awaited_once()
+
+    def test_create_insight_stores_and_returns_model(self):
+        """Layer 1 二期：create_insight 落 insights_v2 并返回 InsightV2。"""
+        from models.memory import InsightV2
+        self.ltm.repo.insert_insight = AsyncMock(return_value=7)
+
+        result = self._run(self.manager.create_insight(
+            hypothesis="用户可能偏好独处",
+            evidence_fact_ids=[3, 7],
+            insight_type="pattern",
+            confidence=0.6,
+            needs_more_evidence=True,
+        ))
+
+        self.assertIsInstance(result, InsightV2)
+        self.assertEqual(result.id, 7)
+        self.assertEqual(result.hypothesis, "用户可能偏好独处")
+        self.assertEqual(result.evidence_fact_ids, [3, 7])
+        self.ltm.repo.insert_insight.assert_awaited_once()
+        kwargs = self.ltm.repo.insert_insight.call_args.kwargs
+        self.assertEqual(kwargs["hypothesis"], "用户可能偏好独处")
+        self.assertEqual(kwargs["evidence_fact_ids"], [3, 7])
+        self.assertEqual(kwargs["confidence"], 0.6)
+
+    def test_verify_and_expire_insight_delegate(self):
+        """verify_insight / expire_insight 委托 repo 对应方法。"""
+        self.ltm.repo.verify_insight = AsyncMock()
+        self.ltm.repo.expire_insight = AsyncMock()
+
+        self._run(self.manager.verify_insight(11))
+        self._run(self.manager.expire_insight(12))
+
+        self.ltm.repo.verify_insight.assert_awaited_once_with(11)
+        self.ltm.repo.expire_insight.assert_awaited_once_with(12)
 
     def _run(self, coro):
         import asyncio

@@ -38,7 +38,9 @@ class Database:
     # UNIQUE(session_id, category, fact_key) (#UK-001).
     # v4: Layer 1 完整上线 — user_facts 数据迁入 facts_v2，旧表改名
     # user_facts_archive 归档（2026-07-18）。
-    CURRENT_SCHEMA_VERSION = 4
+    # v5: Layer 1 二期 — reflections 数据迁入 insights_v2，旧表改名
+    # reflections_archive 归档（2026-07-20）。
+    CURRENT_SCHEMA_VERSION = 5
 
     def __init__(self, db_path: str, backup_enabled: bool = True, backup_keep: int = 5):
         self.db_path = db_path
@@ -129,6 +131,9 @@ class Database:
                 -- Layer 1 完整上线（schema v4，2026-07-18）：新库不再创建
                 -- user_facts；老库的 user_facts 由下方 v4 迁移块迁入 facts_v2
                 -- 并改名 user_facts_archive。
+                -- Layer 1 二期（schema v5，2026-07-20）：新库不再创建
+                -- reflections；老库的 reflections 由下方 v5 迁移块迁入
+                -- insights_v2 并改名 reflections_archive。
 
                 CREATE TABLE IF NOT EXISTS experiences (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,16 +148,6 @@ class Database:
                     recall_count INTEGER DEFAULT 0,
                     is_archived INTEGER DEFAULT 0,
                     composite_score REAL DEFAULT 0.5
-                );
-
-                CREATE TABLE IF NOT EXISTS reflections (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT NOT NULL,
-                    insight_type TEXT,
-                    related_experience_ids TEXT DEFAULT '[]',
-                    significance REAL DEFAULT 0.5,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS relationship_metrics (
@@ -230,6 +225,24 @@ class Database:
                     embedding_version INTEGER DEFAULT 0,
                     UNIQUE(session_id, category, fact_key)
                 );
+
+                -- Layer 1 二期（2026-07-20）：结构化 Insight 替换 Reflection
+                CREATE TABLE IF NOT EXISTS insights_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    hypothesis TEXT NOT NULL,
+                    evidence_fact_ids TEXT DEFAULT '[]',
+                    insight_type TEXT,
+                    confidence REAL DEFAULT 0.5,
+                    needs_more_evidence INTEGER DEFAULT 1,
+                    expires_at TIMESTAMP,
+                    status TEXT DEFAULT 'active',
+                    created_by TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    session_id TEXT NOT NULL,
+                    embedding BLOB,
+                    embedding_version INTEGER DEFAULT 0
+                );
             """)
 
             # #215: read current schema version to skip already-applied migrations
@@ -238,9 +251,9 @@ class Database:
             current_version = row[0] if row and row[0] else 0
             logger.info(f"[db] schema version: {current_version}")
 
-            # schema v4 兼容守卫：新库不再创建 user_facts，凡引用该表的
-            # 迁移步骤（alterations / #UK-001 / #SR-002）都先查 sqlite_master
-            # 确认表存在，不存在则跳过而不是报错。
+            # schema v4/v5 兼容守卫：新库不再创建 user_facts / reflections，
+            # 凡引用这两张表的迁移步骤（alterations / #UK-001 / #SR-002）都先查
+            # sqlite_master 确认表存在，不存在则跳过而不是报错。
             await c.execute("SELECT name FROM sqlite_master WHERE type='table'")
             existing_tables = {r[0] for r in await c.fetchall()}
 
@@ -368,10 +381,14 @@ class Database:
             # old session with the most conversation turns as the canonical data
             # and move it to session_id = role_id; discard data from stale sessions.
             async def _move_session_data(old_sid: str, rid: str) -> None:
-                # schema v4: 新库无 user_facts，按 sqlite_master 过滤表清单
+                # schema v4/v5: 新库无 user_facts / reflections，按 sqlite_master
+                # 过滤表清单。reflections 与 insights_v2 都保留在清单里：
+                # #SR-002 在 v5 迁移块之前执行，老库的 reflections 行需先搬完
+                # session，v5 迁移才能带出正确的 session_id；已升级库则
+                # reflections 不存在、只搬 insights_v2。
                 tables = [
                     t for t in (
-                        "user_facts", "experiences", "reflections",
+                        "user_facts", "experiences", "reflections", "insights_v2",
                         "conversation_turns", "relationship_snapshots",
                     ) if t in existing_tables
                 ]
@@ -416,9 +433,10 @@ class Database:
                 # Drop stale sessions for the same role.
                 for stale in others:
                     logger.warning(f"[db] dropping stale session {stale} for role {rid}")
-                    for table in ["user_facts", "experiences", "reflections", "conversation_turns", "relationship_snapshots"]:
+                    for table in ["user_facts", "experiences", "reflections", "insights_v2",
+                                  "conversation_turns", "relationship_snapshots"]:
                         if table not in existing_tables:
-                            continue  # schema v4: 新库无 user_facts
+                            continue  # schema v4/v5: 新库无 user_facts / reflections
                         await c.execute(f"DELETE FROM {table} WHERE session_id = ?", (stale,))
                     await c.execute("DELETE FROM relationship_metrics WHERE session_id = ?", (stale,))
                     await c.execute("DELETE FROM session_roles WHERE session_id = ?", (stale,))
@@ -447,12 +465,37 @@ class Database:
                     ALTER TABLE user_facts RENAME TO user_facts_archive;
                 """)
 
+            # schema v5（2026-07-20，Layer 1 二期）：reflections 数据迁入
+            # insights_v2，旧表改名 reflections_archive 归档（数据保留，代码
+            # 不再读写，可手动 DROP）。有损迁移：旧 Reflection 无证据链，
+            # evidence_fact_ids 一律 '[]'、needs_more_evidence=1；
+            # is_active=1→'active'、0→'expired'；significance→confidence。
+            # 幂等：二次 open 时 reflections 已不存在，整块跳过。
+            if current_version < 5 and "reflections" in existing_tables:
+                logger.warning("[db] migrating reflections -> insights_v2, "
+                               "renaming old table to reflections_archive")
+                await c.executescript("""
+                    INSERT OR IGNORE INTO insights_v2 (hypothesis, evidence_fact_ids,
+                        insight_type, confidence, needs_more_evidence, expires_at,
+                        status, created_by, created_at, session_id,
+                        embedding, embedding_version)
+                    SELECT content, '[]', insight_type, COALESCE(significance, 0.5),
+                           1, NULL,
+                           CASE WHEN is_active = 1 THEN 'active' ELSE 'expired' END,
+                           'migration', created_at, COALESCE(session_id, 'default'),
+                           embedding, COALESCE(embedding_version, 0)
+                    FROM reflections;
+
+                    ALTER TABLE reflections RENAME TO reflections_archive;
+                """)
+
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
             # current schema version so subsequent initialize() runs can detect/
             # version-gate new migrations.
             # ML-001: version 2 adds observations / facts_v2 tables.
             # v4: user_facts -> facts_v2 数据迁移 + 旧表归档。
+            # v5: reflections -> insights_v2 数据迁移 + 旧表归档。
             if current_version < self.CURRENT_SCHEMA_VERSION:
                 await c.execute(
                     "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
@@ -462,9 +505,10 @@ class Database:
 
             # #157: create indexes for frequently-queried columns
             # schema v4: user_facts 已归档，其索引不再创建
+            # schema v5: reflections 已归档，索引改到 insights_v2
             await c.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_experiences_session ON experiences(session_id, is_archived, composite_score);
-                CREATE INDEX IF NOT EXISTS idx_reflections_session ON reflections(session_id, is_active);
+                CREATE INDEX IF NOT EXISTS idx_insights_v2_session ON insights_v2(session_id, status, confidence);
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, id);
                 CREATE INDEX IF NOT EXISTS idx_relationship_session ON relationship_metrics(session_id);
                 CREATE INDEX IF NOT EXISTS idx_relationship_snapshots_session ON relationship_snapshots(session_id, created_at);

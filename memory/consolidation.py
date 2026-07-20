@@ -16,9 +16,9 @@ from core.personality import Personality
 from prompts.templates import (
     FACT_EXTRACTION_PROMPT,
     EXPERIENCE_SUMMARIZATION_PROMPT,
-    REFLECTION_PROMPT,
-    REFLECTION_L2_PROMPT,
-    REFLECTION_L3_PROMPT,
+    INSIGHT_GENERATION_PROMPT,
+    INSIGHT_L2_PROMPT,
+    INSIGHT_L3_PROMPT,
     EMOTION_ANALYSIS_PROMPT,
     CARE_CLUE_PROMPT,
 )
@@ -132,7 +132,9 @@ class MemoryConsolidator:
                 logger.warning(f"Experience summarization failed: {e}")
                 errors.append("experiences")
 
-        # Step 3: Generate reflection — tiered L1/L2/L3 (#5)
+        # Step 3: Generate insight — tiered L1/L2/L3 (#5)
+        # Layer 1 二期（2026-07-20）：输出由开放式 Reflection 改为结构化
+        # Insight（hypothesis + evidence + confidence），落 insights_v2。
         try:
             self._consolidation_count += 1
             if self._consolidation_count % 10 == 0:
@@ -142,7 +144,7 @@ class MemoryConsolidator:
             else:
                 self._generate_reflection_l1(personality)
         except Exception as e:
-            logger.warning(f"Reflection generation failed: {e}")
+            logger.warning(f"Insight generation failed: {e}")
             errors.append("reflections")
 
         # Step 4: Update relationship
@@ -357,146 +359,136 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning(f"Experience summarization failed: {e}")
 
+    # ── Insight generation（Layer 1 二期，2026-07-20）──
+    # 方法名保留 _generate_reflection_l1/l2/l3（层级节奏与既有测试不变），
+    # 输出统一走 INSIGHT_*_PROMPT → JSON → lifecycle.create_insight 落
+    # insights_v2。JSON 解析失败兜底：log warning 跳过，不写垃圾数据。
+
     def _generate_reflection_l1(self, personality: Personality) -> None:
-        """L1: Basic reflection — facts and user discoveries. Every consolidation."""
-        self._generate_reflection(personality)
+        """L1: 每次合并生成一条假设性 Insight（替代旧开放式 reflection）。"""
+        try:
+            experiences = self.ltm.get_recent_experiences(limit=5)
+            facts = self.ltm.get_all_active_facts(limit=10)
+            exp_text = "\n".join(
+                f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
+                for e in experiences
+            ) or "暂无"
+            fact_text = "\n".join(
+                f"- {f.fact_key}: {f.fact_value} (id={f.id})" for f in facts
+            ) or "暂无"
+            prompt = safe_format(INSIGHT_GENERATION_PROMPT,
+                                 facts=fact_text, experiences=exp_text)
+            result = self._call_llm(prompt, temperature=0.4)
+            # min_confidence 沿用旧 L1 的 significance>0.4 门槛
+            self._store_insight_from_json(result, min_confidence=0.4, level="L1")
+        except Exception as e:
+            logger.warning(f"L1 insight generation failed: {e}")
 
     def _generate_reflection_l2(self) -> None:
-        """L2: Pattern recognition — recurring behavior patterns. Every 3rd consolidation."""
+        """L2: 每 3 次合并，基于近期 insight 归纳行为模式假设。"""
         try:
             experiences = self.ltm.get_recent_experiences(limit=10)
             facts = self.ltm.get_all_active_facts(limit=15)
+            recent_insights = self.ltm.get_recent_reflections(limit=5)  # 适配器：insights_v2
             exp_text = "\n".join(
                 f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
                 for e in experiences
             ) or "暂无"
             fact_text = "\n".join(
-                f"- {f.fact_key}: {f.fact_value}" for f in facts
+                f"- {f.fact_key}: {f.fact_value} (id={f.id})" for f in facts
             ) or "暂无"
-            prompt = safe_format(REFLECTION_L2_PROMPT, facts=fact_text, experiences=exp_text)
+            insight_text = "\n".join(
+                f"- {r.content}" for r in recent_insights
+            ) or "暂无"
+            prompt = safe_format(INSIGHT_L2_PROMPT, facts=fact_text,
+                                 experiences=exp_text, insights=insight_text)
             result = self._call_llm(prompt, temperature=0.4)
-            content = ""
-            significance = 0.5
-            related_ids = []
-            for line in result.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("CONTENT:"):
-                    content = line[len("CONTENT:"):].strip()
-                elif line.startswith("SIGNIFICANCE:"):
-                    try:
-                        significance = float(line[len("SIGNIFICANCE:"):].strip())
-                    except ValueError: pass
-                elif line.startswith("RELATED_EXPERIENCES:"):
-                    ids_str = line[len("RELATED_EXPERIENCES:"):].strip()
-                    related_ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
-            if content and significance > 0.3:
-                self.ltm.store_reflection(content, "l2_pattern", related_ids, significance)
-                logger.info(f"Stored L2 pattern: {content[:50]}")
+            # 沿用旧 L2 的 significance>0.3 门槛
+            self._store_insight_from_json(result, min_confidence=0.3, level="L2",
+                                          default_type="pattern")
         except Exception as e:
-            logger.warning(f"L2 reflection failed: {e}")
+            logger.warning(f"L2 insight generation failed: {e}")
 
     def _generate_reflection_l3(self, personality: Personality) -> None:
-        """L3: Deep insight — psychological-level analysis. Every 10th consolidation."""
+        """L3: 每 10 次合并，提出长期模式/深度动机假设。"""
         try:
             experiences = self.ltm.get_recent_experiences(limit=20)
-            reflections = self.ltm.get_recent_reflections(limit=10)
+            reflections = self.ltm.get_recent_reflections(limit=10)  # 适配器：insights_v2
             facts = self.ltm.get_all_active_facts(limit=20)
             relationship = self.ltm.get_relationship()
-            patterns = [r for r in reflections if r.insight_type == "l2_pattern"][:5]
+            patterns = [r for r in reflections if r.insight_type == "pattern"][:5]
             exp_text = "\n".join(
                 f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
                 for e in experiences
             ) or "暂无"
             fact_text = "\n".join(
-                f"- {f.fact_key}: {f.fact_value}" for f in facts
+                f"- {f.fact_key}: {f.fact_value} (id={f.id})" for f in facts
             ) or "暂无"
             pat_text = "\n".join(f"- {r.content}" for r in patterns) or "暂无"
-            prompt = safe_format(REFLECTION_L3_PROMPT, 
+            prompt = safe_format(INSIGHT_L3_PROMPT,
                 facts=fact_text, experiences=exp_text,
                 relationship=relationship,
                 current_emotion=personality.emotion.dominant_emotion,
                 patterns=pat_text,
             )
             result = self._call_llm(prompt, temperature=0.5)
-            content = ""
-            significance = 0.5
-            related_ids = []
-            for line in result.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("CONTENT:"):
-                    content = line[len("CONTENT:"):].strip()
-                elif line.startswith("SIGNIFICANCE:"):
-                    try:
-                        significance = float(line[len("SIGNIFICANCE:"):].strip())
-                    except ValueError: pass
-                elif line.startswith("RELATED_EXPERIENCES:"):
-                    ids_str = line[len("RELATED_EXPERIENCES:"):].strip()
-                    related_ids = [int(x.strip()) for x in ids_str.split(",") if x.strip().isdigit()]
-            if content and significance > 0.5:
-                self.ltm.store_reflection(content, "l3_deep_insight", related_ids, significance)
-                logger.info(f"Stored L3 insight: {content[:50]}")
+            # 沿用旧 L3 的 significance>0.5 门槛
+            self._store_insight_from_json(result, min_confidence=0.5, level="L3")
         except Exception as e:
-            logger.warning(f"L3 reflection failed: {e}")
+            logger.warning(f"L3 insight generation failed: {e}")
 
-    def _generate_reflection(self, personality: Personality) -> None:
+    def _store_insight_from_json(self, result: str, min_confidence: float,
+                                 level: str,
+                                 default_type: Optional[str] = None) -> None:
+        """解析 LLM 的 Insight JSON 并经 lifecycle.create_insight 落库。
+        解析失败/字段缺失/confidence 不达标：log warning 跳过，不写垃圾数据。
+        evidence 只接受可解析为整数的事实 id（LLM 可能返回字符串或
+        "fact_id_1" 形式，统一抽取数字）。"""
+        if not result:
+            return
+        m = re.search(r'\{.*\}', result.strip(), re.DOTALL)
         try:
-            experiences = self.ltm.get_recent_experiences(limit=5)
-            reflections = self.ltm.get_recent_reflections(limit=3)
-            facts = self.ltm.get_all_active_facts(limit=10)
-            relationship = self.ltm.get_relationship()
-
-            exp_text = "\n".join(
-                f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
-                for e in experiences
-            ) or "暂无"
-            ref_text = "\n".join(
-                f"- {r.content}" for r in reflections
-            ) or "暂无"
-            fact_text = "\n".join(
-                f"- {f.fact_key}: {f.fact_value}" for f in facts
-            ) or "暂无"
-
-            prompt = safe_format(REFLECTION_PROMPT,
-                experiences=exp_text,
-                reflections=ref_text,
-                facts=fact_text,
-                current_emotion=personality.emotion.dominant_emotion,
-                # #282: 先取数值再传入——模板里的 dict 下标缺键会让 safe_format
-                # 整体失败，LLM 将看到未格式化的模板原文
-                rel_trust=relationship.get("trust", 0.3),
-                rel_familiarity=relationship.get("familiarity", 0.3),
-                rel_intimacy=relationship.get("intimacy", 0.3),
-            )
-            result = self._call_llm(prompt, temperature=0.4)
-
-            insight_type = "user_discovery"
-            content = ""
-            significance = 0.5
-            related_ids = []
-
-            for line in result.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("TYPE:"):
-                    insight_type = line[len("TYPE:"):].strip()
-                elif line.startswith("CONTENT:"):
-                    content = line[len("CONTENT:"):].strip()
-                elif line.startswith("SIGNIFICANCE:"):
-                    try:
-                        significance = float(line[len("SIGNIFICANCE:"):].strip())
-                    except ValueError:
-                        pass
-                elif line.startswith("RELATED_EXPERIENCES:"):
-                    ids_str = line[len("RELATED_EXPERIENCES:"):].strip()
-                    related_ids = [
-                        int(x.strip()) for x in ids_str.split(",")
-                        if x.strip().isdigit()
-                    ]
-
-            if content and significance > 0.4:
-                self.ltm.store_reflection(content, insight_type, related_ids, significance)
-                logger.info(f"Stored reflection ({insight_type}): {content[:50]}")
-        except Exception as e:
-            logger.warning(f"Reflection generation failed: {e}")
+            data = json.loads(m.group(0) if m else result.strip())
+        except (json.JSONDecodeError, AttributeError):
+            logger.warning(f"[consolidate] {level} insight JSON parse failed: "
+                           f"{result[:100]}")
+            return
+        if not isinstance(data, dict):
+            logger.warning(f"[consolidate] {level} insight not a JSON object, skipped")
+            return
+        hypothesis = str(data.get("hypothesis") or "").strip()
+        if not hypothesis:
+            logger.warning(f"[consolidate] {level} insight missing hypothesis, skipped")
+            return
+        try:
+            confidence = float(data.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+        if confidence <= min_confidence:
+            logger.debug(f"[consolidate] {level} insight below confidence gate "
+                         f"({confidence:.2f} <= {min_confidence}), skipped")
+            return
+        evidence: list[int] = []
+        raw_evidence = data.get("evidence") or []
+        if isinstance(raw_evidence, (list, tuple)):
+            for x in raw_evidence:
+                if isinstance(x, (int, float)):
+                    evidence.append(int(x))
+                elif isinstance(x, str):
+                    digits = re.findall(r'\d+', x)
+                    if digits:
+                        evidence.append(int(digits[0]))
+        insight_type = data.get("insight_type") or default_type
+        run_async(self._lifecycle.create_insight(
+            hypothesis=hypothesis,
+            evidence_fact_ids=evidence,
+            insight_type=str(insight_type) if insight_type else None,
+            confidence=confidence,
+            needs_more_evidence=bool(data.get("needs_more_evidence", True)),
+            created_by="consolidation",
+        ))
+        logger.info(f"Stored {level} insight ({insight_type}): {hypothesis[:50]}")
 
     def _update_relationship(self, personality: Personality) -> None:
         relationship = self.ltm.get_relationship()
@@ -564,7 +556,7 @@ class MemoryConsolidator:
         pruned_e = run_async(self.ltm.repo.prune_experiences(max_experiences))
         pruned_r = run_async(self.ltm.repo.prune_reflections(max_reflections))
         if pruned_f or pruned_e or pruned_r:
-            logger.info(f"Pruned: {pruned_f} facts, {pruned_e} experiences, {pruned_r} reflections")
+            logger.info(f"Pruned: {pruned_f} facts, {pruned_e} experiences, {pruned_r} insights")
 
     def _embed_new_items(self) -> None:
         """Batch encode rows lacking embeddings across the embeddable memory tables."""
@@ -575,10 +567,11 @@ class MemoryConsolidator:
             async def _do_embed():
                 all_updates = []
                 # H-08: 可嵌入表清单（#285: 补 facts_v2 / observations；
-                # 2026-07-18 Layer 1 完整上线：user_facts 已归档，移除）
+                # 2026-07-18 Layer 1 完整上线：user_facts 已归档，移除；
+                # 2026-07-20 Layer 1 二期：reflections 已归档，换 insights_v2）
                 tables = [
                     ("experiences", ["summary", "emotional_tone", "tags"]),
-                    ("reflections", ["content"]),
+                    ("insights_v2", ["hypothesis"]),
                     ("facts_v2", ["category", "fact_key", "fact_value"]),
                     ("observations", ["content"]),
                 ]

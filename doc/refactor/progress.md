@@ -19,7 +19,7 @@ Layer 6: Personality / Session / 记忆绑定
 
 | Layer | 主题 | 代码状态 | 文档状态 | 负责人 |
 |-------|------|----------|----------|--------|
-| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | 一期已完成，双写阶段 | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
+| Layer 1 | Memory 生命周期（Observation → Fact → Insight） | 一期（Fact）+ 二期 Insight 已上线（2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
 | Layer 2 | Prompt 分层与静态化 | 大部分已完成 | 完整（含短输入过滤优化方案） | Kimi |
 | Layer 3 | 多阶段 Retrieval | 未开始 | 设计完成 | Kimi |
 | Layer 4 | Agent Runtime 解耦 | 部分已完成 | 完整 | Kimi |
@@ -41,6 +41,7 @@ Layer 6: Personality / Session / 记忆绑定
 - [x] 测试覆盖（19 个新测试 + 全量 401 passed）
 - [x] Changes 文档：`changes/2026-07-14-memory-layer1-observation-fact.md`
 - [x] **Layer 1 完整上线（2026-07-18）**：跳过灰度直接上线——user_facts 数据迁移至 facts_v2（schema v4），读路径经 repository 适配器全部切到 facts_v2，单写 promote，旧表归档为 user_facts_archive，开关删除。见 `changes/2026-07-18-memory-layer1-full-launch.md`
+- [x] **Layer 1 二期 Insight 上线（2026-07-20）**：直接切换——reflections 数据迁移至 insights_v2（schema v5，有损：旧数据无证据链），读路径经 repository 适配器切到 insights_v2，生成路径改为结构化 Insight JSON（INSIGHT_GENERATION/L2/L3_PROMPT → lifecycle.create_insight），旧表归档为 reflections_archive。见 `changes/2026-07-20-insight-replaces-reflection.md`
 
 **已完成（文档）**：
 - [x] 完整实施方案：`layer1-memory/plan.md`
@@ -52,8 +53,8 @@ Layer 6: Personality / Session / 记忆绑定
 **待完成（二期，分阶段）**：
 
 Phase 1（下一步）：
-- [ ] `insights_v2` 表 + `InsightV2` 模型
-- [ ] 用 Insight 替换 Reflection（双写过渡）
+- [x] `insights_v2` 表 + `InsightV2` 模型（2026-07-20，schema v5）
+- [x] 用 Insight 替换 Reflection（2026-07-20：直接切换而非双写——迁移 + 适配器重定向 + 旧表归档 reflections_archive）
 - [x] Memory Agent P0 实现（answer / correct_fact + 测试）（2026-07-16）
 - [x] ~~开启 `use_observation_fact=true` 灰度验证 `facts_v2` 数据质量~~（2026-07-18：跳过灰度，直接完整上线）
 - [x] 批量验证旧 Fact（最小版睡眠巩固，`batch_verify_facts`，2026-07-16）
@@ -66,7 +67,7 @@ Phase 1.5（Memory Agent P1，2026-07-16 完成）：
 Phase 2：
 - [ ] Memory Agent 完整交叉验证（矛盾传播、LLM 线索提取）
 - [x] Memory Agent 接入 InnerDrive（`use_memory_agent` 灰度开关，默认 false，2026-07-16）
-- [ ] Retrieval 切换到 `facts_v2` + `insights_v2`
+- [x] Retrieval 切换到 `facts_v2` + `insights_v2`（facts_v2：2026-07-18；insights_v2：2026-07-20 经适配器）
 - [ ] 完整 GC：merge / decay / obsolete / archive
 - [ ] 旧数据迁移 + 删除旧表
 
@@ -188,7 +189,7 @@ Phase 3（按需）：
 2. 同一喜好重复 3 次后，确认 `verification_count >= 3` 且 `confidence` 上升
 3. 用户更正信息后，确认旧 FactV2 被标记为 `contradicted`
 4. 监控 Prompt Cache 实际命中率与 token 节省效果
-5. 启动 Layer 1 Phase 1：`insights_v2` + Insight 替换 Reflection（双写过渡）、Memory Agent P0、批量验证旧 Fact
+5. ~~启动 Layer 1 Phase 1：`insights_v2` + Insight 替换 Reflection~~（2026-07-20 已完成，直接切换）；剩余：Memory Agent P0 深化、批量验证旧 Fact
 
 ## 相关文档
 

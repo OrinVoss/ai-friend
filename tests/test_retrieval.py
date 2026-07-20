@@ -253,6 +253,63 @@ class TestSearchReflections(unittest.TestCase):
         self.assertEqual([r.id for r in result], [2])
 
 
+class TestSearchReflectionsInsightsV2(unittest.TestCase):
+    """Layer 1 二期（2026-07-20）：search_reflections 数据改读 insights_v2
+    （repository 适配器），返回 Reflection 形状不变：content=hypothesis、
+    significance=confidence、仅 status='active' 可见。"""
+
+    def setUp(self):
+        import asyncio
+        from storage.database import Database
+        from storage.repository import Repository
+        from memory.long_term import LongTermMemory
+        self.db = Database(":memory:")
+        asyncio.run(self.db.open())
+        self.repo = Repository(self.db)
+        self.ltm = LongTermMemory(self.repo)
+        self.retriever = MemoryRetriever(self.ltm)
+
+        async def _seed():
+            await self.repo.insert_insight(
+                hypothesis="用户提到自己最喜欢的爱好是编程",
+                insight_type="pattern", confidence=0.8,
+                created_by="consolidation")
+            await self.repo.insert_insight(
+                hypothesis="最近用户的作息很规律",
+                insight_type="pattern", confidence=0.6,
+                created_by="consolidation")
+            # 已过期（软删）的 insight 不应被检索到
+            expired_id = await self.repo.insert_insight(
+                hypothesis="编程相关的过期假设",
+                insight_type="pattern", confidence=0.9,
+                created_by="consolidation")
+            await self.repo.expire_insight(expired_id)
+        asyncio.run(_seed())
+
+    def tearDown(self):
+        import asyncio
+        asyncio.run(self.db.close())
+
+    def test_reads_from_insights_v2_with_reflection_shape(self):
+        """行适配：content=hypothesis、significance=confidence。"""
+        result = self.retriever.search_reflections("", limit=5)
+        self.assertEqual(len(result), 2)
+        for r in result:
+            self.assertTrue(hasattr(r, "content"))
+        by_content = {r.content: r for r in result}
+        self.assertIn("用户提到自己最喜欢的爱好是编程", by_content)
+        self.assertAlmostEqual(
+            by_content["用户提到自己最喜欢的爱好是编程"].significance, 0.8)
+
+    def test_keyword_relevance_and_expired_filtered(self):
+        """关键词命中的排在前面；status='expired' 的行不出现。"""
+        result = self.retriever.search_reflections("编程 爱好", limit=5)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0].content, "用户提到自己最喜欢的爱好是编程")
+        contents = [r.content for r in result]
+        self.assertNotIn("编程相关的过期假设", contents)
+
+
 class TestLongTermImport(unittest.TestCase):
     """P2: import re should be at top of long_term.py, not inline."""
 

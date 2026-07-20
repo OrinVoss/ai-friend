@@ -174,7 +174,8 @@ class TestFactsV2V4Migration(unittest.TestCase):
         self.assertFalse(self._table_exists("user_facts"))
         self.assertTrue(self._table_exists("user_facts_archive"))
         ver = self._query("SELECT MAX(version) AS v FROM schema_version")
-        self.assertEqual(ver[0]["v"], 4)
+        # schema v5（2026-07-20）后版本号随库升级到 5
+        self.assertEqual(ver[0]["v"], 5)
 
 
 if __name__ == "__main__":

@@ -116,7 +116,10 @@ class MemoryRetriever:
     def search_reflections(self, query: str, limit: int = 3) -> list:
         """#251: 按相关度检索反思（此前无论 query 只按时间取最近 N 条）。
         候选池取最近 30 条：有 embedding 走混合评分（语义 0.6 + 关键词 0.4，
-        同 _hybrid_score），无则关键词评分；query 为空回退为按时间取最近。"""
+        同 _hybrid_score），无则关键词评分；query 为空回退为按时间取最近。
+        Layer 1 二期（2026-07-20）：方法名与 Reflection 返回形状不变，
+        数据经 repository 适配器改读 insights_v2（content=hypothesis、
+        significance=confidence），#251 评分逻辑不变。"""
         if not query.strip():
             return self.ltm.get_recent_reflections(limit=limit)
         keywords = self.extract_keywords(query)

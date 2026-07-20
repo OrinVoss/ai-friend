@@ -69,43 +69,35 @@ TAGS: <逗号分隔的关键词>
 """
 
 
-# ── Reflection Generation ──
-REFLECTION_PROMPT = """回顾你和用户的最近互动，以及你已有的反思和掌握的事实，产生新的深度洞察。
+# ── Insight Generation（Layer 1 二期，2026-07-20：替代 REFLECTION_*）──
+# 输出统一为 JSON：hypothesis / insight_type / evidence / confidence /
+# needs_more_evidence。JSON 示例里的花括号已 doubled 以兼容 safe_format。
+INSIGHT_GENERATION_PROMPT = """基于以下事实和体验，生成一个假设性洞察。
 
-你的反思可以是：
-- self_discovery: 对你自己（AI）的新认识、情绪变化、行为模式
-- user_discovery: 对用户性格、习惯、偏好、情感模式的新发现
-- relationship_insight: 对你们关系动态、信任变化、默契程度的新观察
-- pattern: 注意到用户行为或对话中反复出现的模式
-- prediction: 基于已知信息对用户未来行为或偏好的预测
+输出必须是 JSON：
+{{
+  "hypothesis": "用户可能偏好...",
+  "insight_type": "pattern",
+  "evidence": [1, 2],
+  "confidence": 0.47,
+  "needs_more_evidence": true
+}}
 
-输出格式：
-TYPE: <insight_type>
-CONTENT: <反思内容（具体、有洞察，不要笼统）>
-SIGNIFICANCE: <0.0~1.0>
-RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
+要求：
+- hypothesis 必须是可验证的假设，不是最终结论
+- insight_type: pattern / contradiction / connection / emotion / prediction / user_discovery / relationship_insight
+- evidence 必须列出支持的事实 ID（数字列表，来自下方事实的 id）
+- confidence 0.0~1.0
+- needs_more_evidence 如果证据不足则为 true
 
-最近的体验：
-{experiences}
-
-已有的反思：
-{reflections}
-
-你了解的用户事实：
+事实：
 {facts}
 
-你的情绪状态：{current_emotion}
-关系动态：trust={rel_trust:.2f} familiarity={rel_familiarity:.2f} intimacy={rel_intimacy:.2f}
-
-写一条有实际内容的反思。不要"用户是个好人"这种废话。
-
-新的反思：
+体验：
+{experiences}
 """
 
-
-# ── Tiered Reflection Prompts (#5) ──
-
-REFLECTION_L2_PROMPT = """回顾你和用户最近的多次互动，寻找反复出现的**行为模式**。
+INSIGHT_L2_PROMPT = """回顾你和用户最近的多次互动与近期洞察，归纳一个反复出现的**行为模式**假设。
 
 已有的用户事实：
 {facts}
@@ -113,26 +105,30 @@ REFLECTION_L2_PROMPT = """回顾你和用户最近的多次互动，寻找反复
 最近的共享体验：
 {experiences}
 
-请识别一个跨多次对话反复出现的模式（pattern），例如：
-- 用户每次聊到工作就会情绪低落
-- 用户在深夜更容易敞开心扉
-- 用户在讨论XX话题时特别兴奋
+近期的洞察：
+{insights}
 
-输出格式：
-TYPE: pattern
-CONTENT: <一行描述这个模式，要具体不要笼统>
-SIGNIFICANCE: <0.0~1.0>
-RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
+输出必须是 JSON：
+{{
+  "hypothesis": "用户每次聊到工作就会情绪低落（假设，待验证）",
+  "insight_type": "pattern",
+  "evidence": [1, 2],
+  "confidence": 0.5,
+  "needs_more_evidence": true
+}}
 
-新的模式识别：
+要求：
+- hypothesis 是跨多次对话的可验证模式假设，要具体不要笼统
+- evidence 列出支持的事实 ID（数字列表；若主要依据是体验/洞察而非事实，可留空 []）
+- confidence 0.0~1.0；证据不足时 needs_more_evidence 为 true
 """
 
-REFLECTION_L3_PROMPT = """基于你和用户的长期互动，进行一次**深度心理洞察**。
+INSIGHT_L3_PROMPT = """基于你和用户的长期互动，提出一个**长期模式/深度动机**层面的假设性洞察。
 
 你们的关系：{relationship}
 你的情绪状态：{current_emotion}
 
-已有的用户模式（L2）：
+近期的模式假设（L2）：
 {patterns}
 
 所有活跃事实：
@@ -141,18 +137,19 @@ REFLECTION_L3_PROMPT = """基于你和用户的长期互动，进行一次**深�
 所有体验：
 {experiences}
 
-请产出一次有深度的洞察，例如：
-- 用户行为背后的深层动机
-- 你们关系的本质动态
-- 用户可能自己都没意识到的需求
+输出必须是 JSON：
+{{
+  "hypothesis": "用户深夜倾诉可能是在寻求被认可而非解决方案（假设）",
+  "insight_type": "emotion",
+  "evidence": [3, 7],
+  "confidence": 0.55,
+  "needs_more_evidence": true
+}}
 
-输出格式：
-TYPE: l3_deep_insight
-CONTENT: <一段深度的心理学级别洞察，有观点有证据>
-SIGNIFICANCE: <0.0~1.0>
-RELATED_EXPERIENCES: <相关体验ID，逗号分隔>
-
-新的深度洞察：
+要求：
+- hypothesis 是可验证的深层假设（动机/需求/关系本质），不是最终结论
+- evidence 列出支持的事实 ID（数字列表；若主要依据是 L2 模式而非事实，可留空 []）
+- confidence 0.0~1.0；证据不足时 needs_more_evidence 为 true
 """
 
 

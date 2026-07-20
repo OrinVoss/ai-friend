@@ -115,7 +115,8 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
             finally:
                 await conn.close()
         rows, version = asyncio.run(_read())
-        self.assertEqual(version, 4)
+        # schema v5（2026-07-20）后版本号随库升级到 5
+        self.assertEqual(version, 5)
         by_key = {r["fact_key"]: r for r in rows}
         self.assertEqual(by_key["最爱食物"]["fact_value"], "披萨")
         self.assertEqual(by_key["最爱食物"]["session_id"], "sess_a")

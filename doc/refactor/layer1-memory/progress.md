@@ -30,8 +30,8 @@
 
 ### Phase 1（下一步）
 
-- [ ] 新增 `insights_v2` 表 + `InsightV2` 模型
-- [ ] 用 Insight 替换 Reflection（双写过渡）
+- [x] 新增 `insights_v2` 表 + `InsightV2` 模型（2026-07-20，schema v5）
+- [x] 用 Insight 替换 Reflection（2026-07-20：直接切换而非双写——reflections 数据迁入 insights_v2（有损：旧数据无证据链），读路径经 repository 适配器切新表，生成路径改 INSIGHT_*_PROMPT → lifecycle.create_insight，旧表归档 reflections_archive。见 `changes/2026-07-20-insight-replaces-reflection.md`）
 - [ ] Memory Agent P0：`answer()` 基础版 + `correct_fact()` + 测试
 - [x] ~~开启 `use_observation_fact=true` 灰度，验证 `facts_v2` 数据质量~~（2026-07-18：跳过灰度，直接完整上线）
 - [ ] 批量验证旧 Fact（最小版睡眠式巩固）

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from models.memory import UserFact, Experience, Reflection, Observation, FactV2, EMBEDDING_VERSION
+from models.memory import UserFact, Experience, Reflection, Observation, FactV2, InsightV2, EMBEDDING_VERSION
 from storage.database import Database
 from core.async_utils import run_async
 
@@ -240,25 +240,30 @@ class Repository:
             await self.db.commit()
 
     # ── Reflections ──
+    # Layer 1 二期（2026-07-20，schema v5）：以下方法保留旧签名与 Reflection
+    # 返回形状（retrieval/long_term/tools/prompts 零改动），SQL 全部重定向到
+    # insights_v2。旧表 reflections 已归档为 reflections_archive，不再读写。
+    # Reflection 适配映射：
+    #   content = hypothesis；significance = confidence；
+    #   related_experience_ids = []（insights_v2 的 evidence 是 fact id，
+    #   旧字段是 experience id，语义不同，不回填）；is_active = (status=='active')。
 
     async def insert_reflection(self, content: str, insight_type: str,
                                 related_ids: list[int], significance: float,
                                 embedding: Optional[bytes] = None) -> int:
+        # 适配器：转 insert_insight 语义。related_ids（experience id）在
+        # insights_v2 无对应列，保留参数仅为兼容签名。
         logger.info(f"[db] insert_ref: type={insight_type} sig={significance:.2f} content={content[:60]}")
-        async with self.db.cursor() as c:
-            await c.execute("""
-                INSERT INTO reflections (content, insight_type, related_experience_ids, significance,
-                                         embedding, embedding_version, session_id)
-                VALUES (?, ?, ?, ?, ?, 1, ?)
-            """, (content, insight_type, json.dumps(related_ids), significance, embedding, self.session_id))
-            await self.db.commit()
-            return c.lastrowid
+        return await self.insert_insight(
+            hypothesis=content, insight_type=insight_type,
+            confidence=significance, created_by="consolidation",
+            embedding=embedding)
 
     async def get_recent_reflections(self, limit: int = 5) -> list[Reflection]:
         logger.debug(f"[db] get_recent_reflections: limit={limit}")
         async with self.db.cursor() as c:
             await c.execute("""
-                SELECT * FROM reflections WHERE is_active = 1 AND session_id = ?
+                SELECT * FROM insights_v2 WHERE status = 'active' AND session_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
             """, (self.session_id, limit))
@@ -457,6 +462,114 @@ class Repository:
             """, (self.session_id, f"%{query}%", f"%{query}%", f"%{query}%", query, limit))
             return [self._row_to_fact_v2(r) for r in await c.fetchall()]
 
+    # ── Insights v2 (Layer 1 二期，2026-07-20) ──
+
+    async def insert_insight(self, hypothesis: str,
+                             evidence_fact_ids: Optional[list[int]] = None,
+                             insight_type: Optional[str] = None,
+                             confidence: float = 0.5,
+                             needs_more_evidence: bool = True,
+                             expires_at: Optional[str] = None,
+                             created_by: str = "consolidation",
+                             embedding: Optional[bytes] = None) -> int:
+        logger.info(f"[db] insert_insight: type={insight_type} confidence={confidence:.2f} "
+                    f"hypothesis={hypothesis[:60]}")
+        async with self.db.cursor() as c:
+            await c.execute(f"""
+                INSERT INTO insights_v2 (hypothesis, evidence_fact_ids, insight_type,
+                                         confidence, needs_more_evidence, expires_at,
+                                         created_by, session_id, embedding, embedding_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (hypothesis, json.dumps(evidence_fact_ids or []), insight_type,
+                  confidence, int(needs_more_evidence), expires_at,
+                  created_by, self.session_id, embedding,
+                  EMBEDDING_VERSION if embedding else 0))
+            await self.db.commit()
+            return c.lastrowid
+
+    async def search_insights(self, query: str = "", limit: int = 10) -> list[InsightV2]:
+        """关键词检索 active insight（按 confidence 排序）。
+        #251 的语义+关键词混合评分在 retrieval.search_reflections 层做，
+        这里只提供基础的 LIKE 候选查询。"""
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM insights_v2
+                WHERE status = 'active' AND session_id = ?
+                  AND (hypothesis LIKE ? OR ? = '')
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT ?
+            """, (self.session_id, f"%{query}%", query, limit))
+            return [self._row_to_insight(r) for r in await c.fetchall()]
+
+    async def get_active_insights(self, limit: int = 10) -> list[InsightV2]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM insights_v2
+                WHERE status = 'active' AND session_id = ?
+                ORDER BY confidence DESC, created_at DESC
+                LIMIT ?
+            """, (self.session_id, limit))
+            return [self._row_to_insight(r) for r in await c.fetchall()]
+
+    async def get_recent_insights(self, limit: int = 10) -> list[InsightV2]:
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT * FROM insights_v2
+                WHERE status = 'active' AND session_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (self.session_id, limit))
+            return [self._row_to_insight(r) for r in await c.fetchall()]
+
+    async def verify_insight(self, insight_id: int) -> None:
+        """证据坐实：confidence +0.1（封顶 1.0）、needs_more_evidence=0、
+        status='verified'。"""
+        logger.info(f"[db] verify_insight: id={insight_id}")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE insights_v2
+                SET confidence = MIN(1.0, confidence + 0.1),
+                    needs_more_evidence = 0,
+                    status = 'verified',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND session_id = ?
+            """, (insight_id, self.session_id))
+            if c.rowcount == 0:
+                logger.warning(f"[db] verify_insight id={insight_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
+            await self.db.commit()
+
+    async def expire_insight(self, insight_id: int) -> None:
+        logger.info(f"[db] expire_insight: id={insight_id}")
+        await self.update_insight_status(insight_id, "expired")
+
+    async def update_insight_status(self, insight_id: int, status: str) -> None:
+        logger.info(f"[db] update_insight_status: id={insight_id} status={status}")
+        async with self.db.cursor() as c:
+            await c.execute(
+                "UPDATE insights_v2 SET status = ?, updated_at = CURRENT_TIMESTAMP"
+                " WHERE id = ? AND session_id = ?",
+                (status, insight_id, self.session_id)
+            )
+            if c.rowcount == 0:
+                logger.warning(f"[db] update_insight_status id={insight_id}: no matching row in session "
+                               f"'{self.session_id}' (missing or cross-session)")
+            await self.db.commit()
+
+    async def expire_due_insights(self) -> int:
+        """GC：expires_at 已过的 active insight 置为 expired。返回过期条数。"""
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE insights_v2
+                SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'active' AND session_id = ?
+                  AND expires_at IS NOT NULL AND expires_at < datetime('now')
+            """, (self.session_id,))
+            await self.db.commit()
+            if c.rowcount:
+                logger.info(f"[db] expire_due_insights: expired {c.rowcount} rows")
+            return c.rowcount
+
     # ── Relationship ──
 
     async def get_all_relationships(self) -> dict[str, float]:
@@ -626,20 +739,22 @@ class Repository:
             return c.rowcount
 
     async def prune_reflections(self, max_count: int) -> int:
-        # #217 已知限制：被软删（is_active=0）的反思目前没有任何读取路径
-        # （所有查询都过滤 is_active=1），等同于永久不可见；仅记录，不改行为。
+        # Layer 1 二期（2026-07-20）：目标表改为 insights_v2。旧「软删
+        # is_active=0」语义映射为 status='expired'；溢出按 confidence 升序
+        # （旧 significance 升序的对应列）。
         async with self.db.cursor() as c:
-            await c.execute("SELECT COUNT(*) FROM reflections WHERE is_active = 1 AND session_id = ?", (self.session_id,))
+            await c.execute("SELECT COUNT(*) FROM insights_v2 WHERE status = 'active' AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
             count = row[0]
             if count <= max_count:
                 return 0
             excess = count - max_count
-            logger.info(f"[db] prune_refl: pruning {excess} of {count}")
+            logger.info(f"[db] prune_insights: expiring {excess} of {count}")
             await c.execute("""
-                UPDATE reflections SET is_active = 0 WHERE id IN (
-                    SELECT id FROM reflections WHERE is_active = 1 AND session_id = ?
-                    ORDER BY significance ASC, created_at ASC
+                UPDATE insights_v2 SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+                WHERE id IN (
+                    SELECT id FROM insights_v2 WHERE status = 'active' AND session_id = ?
+                    ORDER BY confidence ASC, created_at ASC
                     LIMIT ?
                 )
             """, (self.session_id, excess))
@@ -688,11 +803,27 @@ class Repository:
         )
 
     def _row_to_reflection(self, r) -> Reflection:
+        """insights_v2 行 → Reflection 适配（Layer 1 二期，2026-07-20）。
+        content=hypothesis、significance=confidence；related_experience_ids
+        无对应列（evidence 是 fact id 而非 experience id），返回空列表。"""
         return Reflection(
-            id=r["id"], content=r["content"], insight_type=r["insight_type"],
-            related_experience_ids=json.loads(r["related_experience_ids"])
-            if r["related_experience_ids"] else [],
-            significance=r["significance"], created_at=r["created_at"],
+            id=r["id"], content=r["hypothesis"], insight_type=r["insight_type"],
+            related_experience_ids=[],
+            significance=r["confidence"], created_at=r["created_at"],
+            embedding=r["embedding"] if "embedding" in r.keys() else None,
+            embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
+        )
+
+    def _row_to_insight(self, r) -> InsightV2:
+        return InsightV2(
+            id=r["id"], hypothesis=r["hypothesis"],
+            evidence_fact_ids=json.loads(r["evidence_fact_ids"])
+            if r["evidence_fact_ids"] else [],
+            insight_type=r["insight_type"], confidence=r["confidence"],
+            needs_more_evidence=bool(r["needs_more_evidence"]),
+            expires_at=r["expires_at"], status=r["status"],
+            created_by=r["created_by"], created_at=r["created_at"],
+            updated_at=r["updated_at"], session_id=r["session_id"],
             embedding=r["embedding"] if "embedding" in r.keys() else None,
             embedding_version=r["embedding_version"] if "embedding_version" in r.keys() else 0,
         )

@@ -235,47 +235,50 @@ TAGS: <逗号分隔>
 |------|------|
 | `{text}` | 待总结的对话文本 |
 
-### L1 反思 — REFLECTION_PROMPT
+### L1 洞察 — INSIGHT_GENERATION_PROMPT
 
 **位置**: `prompts/templates.py`
 
+（2026-07-20 二期替代 REFLECTION_PROMPT：输出由 TYPE/CONTENT 行格式改为结构化 JSON，落 insights_v2。）
+
 ```
-TYPE: <insight_type>
-CONTENT: <反思内容>
-SIGNIFICANCE: <0.0~1.0>
-RELATED_EXPERIENCES: <ID列表>
+{
+  "hypothesis": "用户可能偏好...",
+  "insight_type": "pattern",
+  "evidence": [1, 2],
+  "confidence": 0.47,
+  "needs_more_evidence": true
+}
 ```
 
 | 变量 | 说明 |
 |------|------|
+| `{facts}` | 最近 10 条活跃事实（带 id，供 evidence 引用） |
 | `{experiences}` | 最近 5 条体验 |
-| `{reflections}` | 最近 3 条反思 |
-| `{facts}` | 最近 10 条活跃事实 |
-| `{current_emotion}` | 当前情绪标签 |
-| `{relationship}` | 关系四维指标 |
 
-### L2 模式识别 — REFLECTION_L2_PROMPT
+### L2 模式归纳 — INSIGHT_L2_PROMPT
 
 **位置**: `prompts/templates.py`
 
-跨多次对话寻找反复出现的行为模式。
+基于近期洞察归纳跨多次对话的行为模式假设（每 3 次 consolidation），输出同 L1 的 JSON。
 
 | 变量 | 说明 |
 |------|------|
 | `{facts}` | 最近 15 条活跃事实 |
 | `{experiences}` | 最近 10 条体验 |
+| `{insights}` | 最近 5 条洞察 |
 
-### L3 深度洞察 — REFLECTION_L3_PROMPT
+### L3 深度洞察 — INSIGHT_L3_PROMPT
 
 **位置**: `prompts/templates.py`
 
-心理学级别的深度分析。每 10 次 consolidation 触发一次。
+长期模式/深度动机层面的假设。每 10 次 consolidation 触发一次，输出同 L1 的 JSON。
 
 | 变量 | 说明 |
 |------|------|
 | `{relationship}` | 关系指标 |
 | `{current_emotion}` | 当前情绪 |
-| `{patterns}` | 最近 5 条 L2 模式 |
+| `{patterns}` | 最近 5 条 L2 模式假设 |
 | `{facts}` | 最近 20 条事实 |
 | `{experiences}` | 最近 20 条体验 |
 

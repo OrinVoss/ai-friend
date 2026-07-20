@@ -46,7 +46,7 @@
 长期记忆（SQLite 9 表）
     ├── facts_v2            经验证的事实（confidence/stability/freshness/importance）
     ├── experiences         共享体验（情感色调 + 重要性，软删除）
-    ├── reflections         反思洞察（类型 + 重要性，软删除）
+    ├── insights_v2         假设性洞察（hypothesis + evidence + confidence + expires_at，二期替换 reflections）
     ├── conversation_turns  完整对话历史
     ├── relationship_metrics 关系指标（按 session_id 隔离）
     ├── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
@@ -122,7 +122,7 @@ Agent 3: Roleplay Agent (core/agent.py)◄┘
 AI 回复 = 人格底色 × 当前情绪 × Agent 1 决策 × Agent 2 工具结果 × 对话上下文
     │
     ▼
-Emotion → Memory consolidation → Reflection（后处理，不变）
+Emotion → Memory consolidation → Insight（后处理，不变）
 ```
 
 ### 人格实现

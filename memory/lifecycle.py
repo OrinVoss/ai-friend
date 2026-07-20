@@ -1,8 +1,9 @@
-"""Layer 1 Memory lifecycle manager: Observation -> Fact.
+"""Layer 1 Memory lifecycle manager: Observation -> Fact -> Insight.
 
 ML-001: provides explicit lifecycle stages for memory so that raw observations
-are not immediately treated as permanent facts. Insights (Reflections) are left
-for Layer 2 and are not managed here.
+are not immediately treated as permanent facts.
+Layer 1 二期（2026-07-20）: Insight（假设+证据链）纳入生命周期管理，
+替换旧 Reflection。
 """
 
 import logging
@@ -11,7 +12,7 @@ from typing import Optional
 
 from memory.embeddings import EmbeddingEngine
 from memory.long_term import LongTermMemory
-from models.memory import FactV2, Observation
+from models.memory import FactV2, InsightV2, Observation
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,52 @@ class MemoryLifecycleManager:
         logger.info(f"[lifecycle] contradict_fact id={fact_id} reason={reason}")
         await self.ltm.repo.update_fact_v2_status(fact_id, "contradicted")
 
+    # ── Insight（Layer 1 二期，2026-07-20）──
+
+    async def create_insight(
+        self,
+        hypothesis: str,
+        evidence_fact_ids: Optional[list[int]] = None,
+        insight_type: Optional[str] = None,
+        confidence: float = 0.5,
+        needs_more_evidence: bool = True,
+        expires_at: Optional[str] = None,
+        created_by: str = "consolidation",
+    ) -> InsightV2:
+        """Create a hypothesis-level insight with an evidence chain."""
+        embedding = await self._embed_text(hypothesis)
+        insight_id = await self.ltm.repo.insert_insight(
+            hypothesis=hypothesis,
+            evidence_fact_ids=evidence_fact_ids or [],
+            insight_type=insight_type,
+            confidence=confidence,
+            needs_more_evidence=needs_more_evidence,
+            expires_at=expires_at,
+            created_by=created_by,
+            embedding=embedding,
+        )
+        logger.info(f"[lifecycle] insight created: id={insight_id} "
+                    f"type={insight_type} confidence={confidence:.2f}")
+        return InsightV2(
+            id=insight_id,
+            hypothesis=hypothesis,
+            evidence_fact_ids=list(evidence_fact_ids or []),
+            insight_type=insight_type,
+            confidence=confidence,
+            needs_more_evidence=needs_more_evidence,
+            expires_at=expires_at,
+            created_by=created_by,
+            session_id=self.ltm.repo.session_id,
+        )
+
+    async def verify_insight(self, insight_id: int) -> None:
+        """Evidence confirmed: raise confidence and mark verified."""
+        await self.ltm.repo.verify_insight(insight_id)
+
+    async def expire_insight(self, insight_id: int) -> None:
+        """Mark an insight as expired (unverified speculation aged out)."""
+        await self.ltm.repo.expire_insight(insight_id)
+
     async def decay(self, now: Optional[datetime] = None) -> None:
         """Decay freshness and confidence of active facts over time."""
         now = now or datetime.utcnow()
@@ -171,6 +218,8 @@ class MemoryLifecycleManager:
         await self.decay()
         await self.merge_duplicates()
         await self.archive_old_observations(self._archive_days)
+        # Layer 1 二期（2026-07-20）：expires_at 已过的 active insight 过期
+        await self.ltm.repo.expire_due_insights()
         logger.info("[lifecycle] garbage_collect completed")
 
     async def _embed_text(self, text: str) -> Optional[bytes]:
