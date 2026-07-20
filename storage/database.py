@@ -73,6 +73,11 @@ class Database:
             logger.warning(f"[db] integrity check error: {e}")
         logger.info(f"[db] opened: {self.db_path}")
 
+    # cursor() 锁等待上限：超过即报错而不是静默死锁（2026-07-20 教训：
+    # 同 loop 协程并发进入 cursor() 时阻塞 acquire 会冻死整个事件循环，
+    # 连 run_async 的 wait_for 超时都无法触发，表现为永久 hang）。
+    CURSOR_LOCK_TIMEOUT = 30.0
+
     @asynccontextmanager
     async def cursor(self):
         if self.conn is None:
@@ -81,7 +86,12 @@ class Database:
         # run_async 的 4 个 worker 线程间互斥。约束：同一事件循环内禁止两个
         # 协程并发进入 cursor()（阻塞 acquire 会卡住整个 loop）；并发访问请
         # 走 run_async 桥接（每协程独占 worker 线程跑到底，阻塞的是自己的线程）。
-        self._lock.acquire()
+        if not self._lock.acquire(timeout=self.CURSOR_LOCK_TIMEOUT):
+            raise RuntimeError(
+                f"[db] cursor() lock wait exceeded {self.CURSOR_LOCK_TIMEOUT}s — "
+                "likely concurrent cursor() calls on the same event loop "
+                "(asyncio.gather over repo methods) or a leaked cursor"
+            )
         try:
             c = await self.conn.cursor()
             try:

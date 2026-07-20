@@ -44,6 +44,8 @@ class MemoryLifecycleManager:
             created_by=created_by,
             embedding=embedding,
         )
+        logger.info(f"[lifecycle] observation created: id={obs_id} "
+                    f"len={len(content)} by={created_by}")
         return Observation(
             id=obs_id,
             content=content,
@@ -94,6 +96,8 @@ class MemoryLifecycleManager:
             created_by=created_by,
             embedding=embedding,
         )
+        logger.info(f"[lifecycle] fact promoted: {category}/{key} "
+                    f"confidence={confidence:.2f} obs={observation_ids}")
         return FactV2(
             id=fact_id,
             category=category,

@@ -355,12 +355,14 @@ class MemoryAgent:
             except Exception:
                 qvec = None
 
-        facts, observations, experiences, relationship = await asyncio.gather(
-            repo.get_active_facts_v2(limit=self.FACTS_POOL),
-            repo.get_recent_observations(limit=self.OBS_POOL),
-            repo.get_recent_experiences(limit=self.EXP_POOL),
-            repo.get_all_relationships(),
-        )
+        # 禁止 asyncio.gather 并发 repo 查询：Database.cursor() 的
+        # threading.Lock（H-03）跨 await 持有，同 loop 第二个协程的
+        # 阻塞 acquire 会冻死整个事件循环（2026-07-20 生产死锁）。
+        # SQLite 查询本身是毫秒级，串行没有性能损失。
+        facts = await repo.get_active_facts_v2(limit=self.FACTS_POOL)
+        observations = await repo.get_recent_observations(limit=self.OBS_POOL)
+        experiences = await repo.get_recent_experiences(limit=self.EXP_POOL)
+        relationship = await repo.get_all_relationships()
 
         def _measurable(blob, version) -> bool:
             return (qvec is not None and blob is not None
