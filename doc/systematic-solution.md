@@ -69,13 +69,13 @@ Layer 6: Observability 记录 source/metrics/log
 
 | Layer | 主题 | 状态 | 详细文档 |
 |-------|------|------|----------|
-| Layer 0 | Identity & State | 未开始 | `doc/refactor/layer6-personality/` |
-| Layer 1 | Memory Lifecycle | 一期已完成（Observation + Fact 双写） | `doc/refactor/layer1-memory/` |
-| Layer 2 | Context & Prompt Budget | 大部分已完成 | `doc/refactor/layer2-prompt/` |
-| Layer 3 | Async Agent Runtime | 部分已完成 | `doc/refactor/layer4-agent/` |
-| Layer 4 | Tool Runtime | 部分已完成（Prompt 已精简） | `doc/refactor/layer5-tool/` |
-| Layer 5 | Provider Abstraction | 未开始 | `doc/refactor/systems/provider.md` |
-| Layer 6 | Observability | 部分已完成（监控面板） | `doc/refactor/systems/logging.md` |
+| Layer 0 | Identity & State | ✅ 已实现（2026-07-21，角色绑定） | `doc/refactor/layer6-personality/` |
+| Layer 1 | Memory Lifecycle | ✅ 全部完成（一期 Fact + 二期 Insight + Memory Agent P0~P2） | `doc/refactor/layer1-memory/` |
+| Layer 2 | Context & Prompt Budget | ✅ 全部完成（2026-07-21 收尾） | `doc/refactor/layer2-prompt/` |
+| Layer 3 | Async Agent Runtime | ✅ 收尾完成（2026-07-21，含 Think Loop + 内驱状态） | `doc/refactor/layer4-agent/` |
+| Layer 4 | Tool Runtime | ✅ 已完成（2026-07-21 工具系统增强） | `doc/refactor/layer5-tool/` |
+| Layer 5 | Provider Abstraction | 📐 设计完成（`LLMProvider` ABC 已落地，增强方案待实施） | `doc/refactor/systems/provider.md` |
+| Layer 6 | Observability | 部分已完成（监控面板 + 工具 metrics + prompt cache stats） | `doc/refactor/systems/logging.md` |
 
 ### Layer 0: Identity & State —— 一个角色一份完整状态
 

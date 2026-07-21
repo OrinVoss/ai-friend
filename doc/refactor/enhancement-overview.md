@@ -11,23 +11,23 @@
 | 子系统 | 核心问题 | 增强方案 | 文档 | 状态 |
 |--------|----------|----------|------|------|
 | **顶层设计** | 模块各自为战，没有总装图 | 自我系统：一份自我状态 + 三个生命循环（响应/独处/睡眠） | `self-system.md` | 📐 设计完成 |
-| **记忆** (L1) | 对话直接存结论，无验证、无遗忘、无来源 | Observation → Fact → Insight 三层生命周期，可验证/可衰减/可追溯 | `layer1-memory/plan.md` | ✅ 一期（双写运行） |
-| **记忆检索** | 相似度 TopK，给什么信什么 | Memory Agent：向量召回 + 交叉验证 + 置信度 + 证据链 | `memory-agent.md` 等 3 份 | 📐 设计完成 |
-| **睡眠** | 只有睡相，没有睡眠的功能 | 睡眠工作层流水线：整理→实质性核查→清理→内驱维护→提炼→做梦 | `sleep-cycle.md` | 📐 设计完成 |
-| **Prompt** (L2) | 每轮重复构建，token 浪费 | 分层缓存 + block 拆分 + Agent 1→3 上下文复用（短输入跳过已移除） | `layer2-prompt/README.md` | ✅ 完成 |
-| **检索架构** (L3) | 所有 Agent 共享同一份 Context | 多阶段检索 + 按 Agent 定制 Retrieval Profile | `layer3-retrieval/README.md` | 📐 设计完成 |
-| **Agent 运行时** (L4) | Handler 直接操作内部状态、魔法数字遍地 | 状态机 + ToolExecutionResult + 注册表隔离 + 常量提取 | `layer4-agent/README.md` | ✅ 部分完成 |
-| **主动性/独处** | 主动决策单次拍脑袋，没有内心世界 | Think Loop + 内驱状态（挂念清单）+ 独处活动内化 | `layer4-agent/` 3 份文档 | 📐 设计完成 |
-| **工具系统** (L5) | 错误不分类、重试盲目、串行、无超时无校验 | ToolResult v2 + 错误感知重试 + 参数校验 + 并行 + 智能截断 + 指标 | `layer5-tool/enhancement-plan.md` | ✅ Prompt 精简 / 📐 执行层设计 |
-| **人格绑定** (L6) | 角色、session、记忆混杂 | RoleSession 一一对应，自我状态按角色隔离 | `layer6-personality/README.md` | 📐 设计完成（等产品决策） |
+| **记忆** (L1) | 对话直接存结论，无验证、无遗忘、无来源 | Observation → Fact → Insight 三层生命周期，可验证/可衰减/可追溯 | `layer1-memory/plan.md` | ✅ 全部完成（2026-07-20） |
+| **记忆检索** | 相似度 TopK，给什么信什么 | Memory Agent：向量召回 + 交叉验证 + 置信度 + 证据链 | `memory-agent.md` 等 3 份 | ✅ 完成（P0~P2，2026-07-20） |
+| **睡眠** | 只有睡相，没有睡眠的功能 | 睡眠工作层流水线：整理→实质性核查→清理→内驱维护→提炼→做梦 | `sleep-cycle.md` | ✅ 主体完成（最小睡眠巩固 + SL-011/012 兜底） |
+| **Prompt** (L2) | 每轮重复构建，token 浪费 | 分层缓存 + block 拆分 + Agent 1→3 上下文复用（短输入跳过已移除） | `layer2-prompt/README.md` | ✅ 完成（含 2026-07-21 收尾） |
+| **检索架构** (L3) | 所有 Agent 共享同一份 Context | 多阶段检索 + 按 Agent 定制 Retrieval Profile | `layer3-retrieval/README.md` | ✅ 完成（2026-07-21） |
+| **Agent 运行时** (L4) | Handler 直接操作内部状态、魔法数字遍地 | 状态机 + ToolExecutionResult + 注册表隔离 + 常量提取 | `layer4-agent/README.md` | ✅ 收尾完成（2026-07-21） |
+| **主动性/独处** | 主动决策单次拍脑袋，没有内心世界 | Think Loop + 内驱状态（挂念清单）+ 独处活动内化 | `layer4-agent/` 3 份文档 | ✅ 完成（Think Loop + 内驱状态一二期 + 回馈闭环） |
+| **工具系统** (L5) | 错误不分类、重试盲目、串行、无超时无校验 | ToolResult v2 + 错误感知重试 + 参数校验 + 并行 + 智能截断 + 指标 | `layer5-tool/enhancement-plan.md` | ✅ 完成（2026-07-21） |
+| **人格绑定** (L6) | 角色、session、记忆混杂 | RoleSession 一一对应，自我状态按角色隔离 | `layer6-personality/README.md` | ✅ 已实现（2026-07-21） |
 | **基础设施与接口** | | | | |
-| **日志** | 跨天日志写错文件、全链路无请求关联 ID | 滚动日志 + ContextVar request_id + 观测面整合 | `systems/logging.md` | 📐 设计完成 |
-| **模型 Provider** | 流式截断静默当成功、embedding 子进程无生命周期 | 修截断语义/重试 + 生命周期闭环 + token 预算集中 | `systems/provider.md` | 📐 设计完成 |
-| **数据库** | ⚠️ 语义检索静默失效、跨 session 泄漏、零备份自动迁移 | embedding 维度修复 + session 过滤 + 迁移前备份 | `systems/database.md` | 📐 设计完成（含活 bug） |
-| **人格内容** | 运行会话覆盖手改、.bak 时机错误、内容零校验 | 合并保存 + 校验器 + 模板与演化 | `systems/personality.md` | 📐 设计完成 |
-| **情绪** | ⚠️ CLI 路径情绪不更新、按轮衰减不按时间 | 统一情绪入口 + 按时间衰减 | `systems/emotion.md` | 📐 设计完成（含活 bug） |
-| **Web** | ⚠️ session_id 共享竞态、零访问控制、REST 阻塞事件循环 | 会话隔离 + token 鉴权 + 异步化 | `systems/web.md` | 📐 设计完成（含安全漏洞） |
-| **CLI** | ⚠️ 与 Web 双轨管线、情绪/睡眠缺失、原始标记喷给用户 | 症状速修 → 管线收敛 → 终端体验 | `systems/cli.md` | 📐 设计完成（含活 bug） |
+| **日志** | 跨天日志写错文件、全链路无请求关联 ID | 滚动日志 + ContextVar request_id + 观测面整合 | `systems/logging.md` | 部分完成（滚动日志 + 监控面板 + 工具/prompt 指标；request_id 未做） |
+| **模型 Provider** | 流式截断静默当成功、embedding 子进程无生命周期 | 修截断语义/重试 + 生命周期闭环 + token 预算集中 | `systems/provider.md` | 部分完成（#213/#261 重试与关闭、embedding 托管与自检；截断语义/预算集中未做） |
+| **数据库** | ⚠️ 语义检索静默失效、跨 session 泄漏、零备份自动迁移 | embedding 维度修复 + session 过滤 + 迁移前备份 | `systems/database.md` | ✅ 完成（维度修复、session 过滤、P0-3 自动备份、schema v5） |
+| **人格内容** | 运行会话覆盖手改、.bak 时机错误、内容零校验 | 合并保存 + 校验器 + 模板与演化 | `systems/personality.md` | 部分完成（H-06 合并保存、RLock；校验器未做） |
+| **情绪** | ⚠️ CLI 路径情绪不更新、按轮衰减不按时间 | 统一情绪入口 + 按时间衰减 | `systems/emotion.md` | 部分完成（H-05/M-07 路径统一、R5 负向权重；按时间衰减未做） |
+| **Web** | ⚠️ session_id 共享竞态、零访问控制、REST 阻塞事件循环 | 会话隔离 + token 鉴权 + 异步化 | `systems/web.md` | ✅ 主体完成（统一管线 P0-P3、M-12/M-16/L-04；鉴权未做） |
+| **CLI** | ⚠️ 与 Web 双轨管线、情绪/睡眠缺失、原始标记喷给用户 | 症状速修 → 管线收敛 → 终端体验 | `systems/cli.md` | ✅ 主体完成（统一管线 P0-P3、M-15 标记过滤） |
 
 ✅ = 代码已落地　📐 = 文档设计完成待实现　⚠️ = 发现现存 bug/漏洞，见对应文档
 

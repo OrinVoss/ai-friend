@@ -20,10 +20,10 @@ Layer 6: Personality / Session / 记忆绑定
 | Layer | 主题 | 代码状态 | 文档状态 | 负责人 |
 |-------|------|----------|----------|--------|
 | Layer 1 | Memory 生命周期（Observation → Fact → Insight） | ✅ 全部完成（一期 Fact + 二期 Insight + Memory Agent P0~P2，2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
-| Layer 2 | Prompt 分层与静态化 | 大部分已完成 | 完整（含短输入过滤优化方案） | Kimi |
+| Layer 2 | Prompt 分层与静态化 | ✅ 全部完成（2026-07-21 收尾） | 完整 | Kimi |
 | Layer 3 | 多阶段 Retrieval | 主体完成（2026-07-21） | 设计 + 实现记录 | Kimi |
 | Layer 4 | Agent Runtime 解耦 | 收尾完成（L4-1~L4-4 + L4-6a/b，2026-07-21） | 完整 | Kimi |
-| Layer 5 | Tool Agent 精简 | 大部分已完成（Prompt 已精简） | 完整 | Kimi |
+| Layer 5 | Tool Agent 精简 + 工具系统增强 | ✅ 已完成（2026-07-21 工具系统增强） | 完整 | Kimi |
 | Layer 6 | Personality / Session / 记忆绑定 | 已实现 | 2026-07-21 | Kimi |
 
 ---
@@ -95,9 +95,10 @@ Phase 3（按需）：
 - [x] 情绪摘要化（`EmotionalState.to_prompt_summary()`）
 - [x] Tool Agent Prompt 精简
 
-**待完成**：
-- [ ] 监控 Prompt Cache 命中率与 token 节省
-- [ ] 进一步压缩 Agent 3 Prompt
+**已完成（收尾，2026-07-21）**：
+- [x] 监控 Prompt Cache 命中率与 token 节省（PC-002：`prompt_cache.stats()`）
+- [x] 缓存版本 key 优化（CF-010：`load_config()` 进程级缓存）
+- [x] Agent 3 Prompt 块级必要性评估（L2-3，结论见 `layer2-prompt/progress.md`；压缩改动留待确认后立项）
 
 **阻塞项**：无
 
@@ -158,14 +159,17 @@ Phase 3（按需）：
 
 ## Layer 5: Tool Agent 精简
 
-**状态**：大部分已完成
+**状态**：✅ 已完成（2026-07-21 工具系统增强）
 
 **已完成**：
 - [x] Tool Agent Prompt 不再包含人格/情绪/关系/回忆
 - [x] Tool Agent 仅接收 Task / Available tools / Schema / Retry history
+- [x] ToolResult v2 错误分类（error_type/retryable/elapsed_ms）+ 按错误类型的智能重试（退避）
+- [x] 参数 schema 校验 + per-tool 超时 + 并行执行 + 权限检查
+- [x] 工具 metrics（`/api/tools/metrics`）
 
-**待完成**：
-- [ ] 评估是否进一步限制 Tool Agent 的上下文长度
+**推迟项**：
+- [ ] 评估是否进一步限制 Tool Agent 的上下文长度（记录推迟，非遗漏）
 
 **阻塞项**：无
 
