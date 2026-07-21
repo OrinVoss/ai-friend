@@ -120,6 +120,56 @@ class TestToolAgent(unittest.TestCase):
         formatted = self.agent.format_for_phase2(result)
         self.assertIn("失败", formatted)
 
+    def test_non_retryable_error_gives_up_early(self):
+        """A param_error from a tool should not waste retry budget."""
+        self.provider.generate.return_value = (
+            '<tool_call>\n{"name": "web_search", "arguments": {"query": "x"}}\n</tool_call>'
+        )
+        # Patch registry.get() to return a mock that yields a non-retryable failure.
+        mock_tool = MagicMock()
+        from tools.traits import ToolResult, ERROR_TYPE_PARAM_ERROR
+        mock_tool.execute.return_value = ToolResult.fail(
+            "bad param", error_type=ERROR_TYPE_PARAM_ERROR, retryable=False
+        )
+        mock_tool.timeout_seconds = 30.0
+        mock_tool.parameters_schema.return_value = {"type": "object", "properties": {}}
+        mock_tool.name.return_value = "web_search"
+        self.registry.get.side_effect = None
+        self.registry.get.return_value = mock_tool
+
+        result = self.agent.run_with_request("搜索 x", max_retries=3)
+        self.assertFalse(result.any_success)
+        # Provider should only be called once because the failure is non-retryable.
+        self.assertEqual(self.provider.generate.call_count, 1)
+
+    def test_retryable_error_retries(self):
+        """A network_error should retry up to max_retries."""
+        call_count = [0]
+
+        def mock_generate(*args, **kwargs):
+            call_count[0] += 1
+            return (
+                '<tool_call>\n{"name": "web_search", "arguments": {"query": "x"}}\n</tool_call>'
+            )
+
+        self.provider.generate.side_effect = mock_generate
+        mock_tool = MagicMock()
+        from tools.traits import ToolResult, ERROR_TYPE_NETWORK_ERROR
+        mock_tool.execute.return_value = ToolResult.fail(
+            "timeout", error_type=ERROR_TYPE_NETWORK_ERROR, retryable=True
+        )
+        mock_tool.timeout_seconds = 30.0
+        mock_tool.parameters_schema.return_value = {"type": "object", "properties": {}}
+        mock_tool.name.return_value = "web_search"
+        self.registry.get.side_effect = None
+        self.registry.get.return_value = mock_tool
+
+        result = self.agent.run_with_request("搜索 x", max_retries=2)
+        self.assertFalse(result.any_success)
+        # 2 attempts, no early bail-out for retryable errors.
+        self.assertEqual(call_count[0], 2)
+        self.assertEqual(len(result.records), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

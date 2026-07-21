@@ -3,7 +3,10 @@
 import logging
 from typing import Any
 
-from tools.traits import Tool, ToolResult
+from tools.traits import (
+    Tool, ToolResult,
+    ERROR_TYPE_PARAM_ERROR, ERROR_TYPE_INTERNAL,
+)
 from memory.long_term import LongTermMemory
 from memory.retrieval import MemoryRetriever
 
@@ -12,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 class RecallTool(Tool):
     """Recall past memories about the user or shared experiences."""
+
+    is_internal = True
+    timeout_seconds = 10.0
 
     def __init__(self, retriever: MemoryRetriever, ltm: LongTermMemory):
         self.retriever = retriever
@@ -39,7 +45,11 @@ class RecallTool(Tool):
         try:
             query = args.get("query", "").strip()
             if not query:
-                return ToolResult.fail("请告诉我你想回忆什么")
+                return ToolResult.fail(
+                    "请告诉我你想回忆什么",
+                    error_type=ERROR_TYPE_PARAM_ERROR,
+                    retryable=False,
+                )
 
             logger.info(f"[tool] recall query={query[:60]}")
             keywords = self.retriever.extract_keywords(query)
@@ -71,11 +81,18 @@ class RecallTool(Tool):
             return ToolResult.ok("\n".join(parts))
         except Exception as e:
             logger.exception(f"[tool] recall failed: {e}")
-            return ToolResult.fail(f"回忆失败: {e}")
+            return ToolResult.fail(
+                f"回忆失败: {e}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )
 
 
 class RememberTool(Tool):
     """Explicitly remember an important fact about the user."""
+
+    is_internal = True
+    timeout_seconds = 10.0
 
     def __init__(self, ltm: LongTermMemory):
         self.ltm = ltm
@@ -133,7 +150,11 @@ class RememberTool(Tool):
             fact_type = args.get("fact_type", "user_fact")  # #127
 
             if not key or not value:
-                return ToolResult.fail("请提供关键词和具体内容")
+                return ToolResult.fail(
+                    "请提供关键词和具体内容",
+                    error_type=ERROR_TYPE_PARAM_ERROR,
+                    retryable=False,
+                )
 
             if is_correction:
                 similar = self.ltm.search_facts(key, limit=5)
@@ -152,4 +173,8 @@ class RememberTool(Tool):
                 return ToolResult.ok(f"已记住: {key} = {value}")
         except Exception as e:
             logger.exception(f"[tool] remember failed: {e}")
-            return ToolResult.fail(f"记忆失败: {e}")
+            return ToolResult.fail(
+                f"记忆失败: {e}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )

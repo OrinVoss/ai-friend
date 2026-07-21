@@ -11,7 +11,11 @@ from urllib.parse import urlparse
 
 import requests
 
-from tools.traits import Tool, ToolResult
+from tools.traits import (
+    Tool, ToolResult,
+    ERROR_TYPE_PARAM_ERROR, ERROR_TYPE_NETWORK_ERROR,
+    ERROR_TYPE_NOT_FOUND, ERROR_TYPE_INTERNAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +120,9 @@ def _anysearch_api(tool_name: str, arguments: dict) -> dict:
 class WebSearchTool(Tool):
     """Search the web using AnySearch API."""
 
+    # Layer5-WT1: network-heavy tool gets a longer leash.
+    timeout_seconds = 45.0
+
     def name(self) -> str:
         return "web_search"
 
@@ -153,7 +160,11 @@ class WebSearchTool(Tool):
         freshness = args.get("freshness", "").strip() or None
 
         if not query:
-            return ToolResult.fail("请提供搜索关键词")
+            return ToolResult.fail(
+                "请提供搜索关键词",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         # WT-004: validate freshness enum before passing to API
         if freshness is not None and freshness not in _VALID_FRESHNESS:
@@ -177,11 +188,17 @@ class WebSearchTool(Tool):
             return ToolResult.ok(f"未找到关于「{query}」的结果。")
         except Exception as e:
             logger.warning(f"Web search failed: {e}")
-            return ToolResult.fail(f"搜索失败: {e}")
+            return ToolResult.fail(
+                f"搜索失败: {e}",
+                error_type=ERROR_TYPE_NETWORK_ERROR,
+                retryable=True,
+            )
 
 
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL using AnySearch extract API."""
+
+    timeout_seconds = 45.0
 
     def name(self) -> str:
         return "web_fetch"
@@ -205,7 +222,11 @@ class WebFetchTool(Tool):
         url = args.get("url", "").strip()
 
         if not url:
-            return ToolResult.fail("请提供URL")
+            return ToolResult.fail(
+                "请提供URL",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         # #241: proper URL validation — reject non-http schemes, fix protocol-relative URLs
         if url.startswith("//"):
@@ -213,12 +234,20 @@ class WebFetchTool(Tool):
         if not url.startswith(("http://", "https://")):
             parsed = urlparse(url)
             if parsed.scheme and parsed.scheme not in ("http", "https"):
-                return ToolResult.fail(f"不支持的协议: {parsed.scheme}，仅支持 http/https")
+                return ToolResult.fail(
+                    f"不支持的协议: {parsed.scheme}，仅支持 http/https",
+                    error_type=ERROR_TYPE_PARAM_ERROR,
+                    retryable=False,
+                )
             url = "https://" + url
 
         # #155: SSRF prevention — block internal/private URLs
         if not _is_safe_url(url):
-            return ToolResult.fail(f"出于安全原因，不能访问内网地址: {url}")
+            return ToolResult.fail(
+                f"出于安全原因，不能访问内网地址: {url}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
 
         logger.info(f"[tool] web_fetch url={url[:80]}")
         try:
@@ -226,11 +255,19 @@ class WebFetchTool(Tool):
             content = result.get("content", "") or result.get("text", "")
 
             if not content:
-                return ToolResult.fail(f"未能提取网页内容: {url}")
+                return ToolResult.fail(
+                    f"未能提取网页内容: {url}",
+                    error_type=ERROR_TYPE_NOT_FOUND,
+                    retryable=False,
+                )
 
             title = result.get("title", "")
             header = f"网页 {url}" + (f"\n标题: {title}" if title else "")
             return ToolResult.ok(f"{header}:\n```\n{content[:8000]}\n```")
         except Exception as e:
             logger.warning(f"Web fetch failed: {e}")
-            return ToolResult.fail(f"获取网页失败: {e}")
+            return ToolResult.fail(
+                f"获取网页失败: {e}",
+                error_type=ERROR_TYPE_NETWORK_ERROR,
+                retryable=True,
+            )

@@ -17,7 +17,7 @@ def _make_agent(tmpdir):
 
     cfg = Config()
     cfg.max_tokens = 512
-    cfg.personality_file = os.path.join(tmpdir, "personality.json")
+    cfg.personality_file = os.path.join(tmpdir, "role.json")
 
     personality = MagicMock()
     personality.config.name = "TestBot"

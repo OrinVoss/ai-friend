@@ -5,7 +5,11 @@ import time
 from itertools import islice
 from typing import Any
 
-from tools.traits import Tool, ToolResult
+from tools.traits import (
+    Tool, ToolResult,
+    ERROR_TYPE_PARAM_ERROR, ERROR_TYPE_NOT_FOUND,
+    ERROR_TYPE_PERMISSION_DENIED, ERROR_TYPE_INTERNAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +85,8 @@ def _path_in_allowed(filepath: str) -> str | None:
 class ReadFileTool(Tool):
     """Read content from a local text file with line numbers."""
 
+    timeout_seconds = 10.0
+
     def name(self) -> str:
         return "read_file"
 
@@ -116,10 +122,18 @@ class ReadFileTool(Tool):
     def _read_one(self, filepath: str, limit: int, offset: int) -> ToolResult:
         resolved = _path_in_allowed(filepath)
         if resolved is None:
-            return ToolResult.fail(f"路径超出项目范围: {filepath}")
+            return ToolResult.fail(
+                f"路径超出项目范围: {filepath}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
 
         if not os.path.exists(resolved):
-            return ToolResult.fail(f"文件不存在: {filepath}")
+            return ToolResult.fail(
+                f"文件不存在: {filepath}",
+                error_type=ERROR_TYPE_NOT_FOUND,
+                retryable=False,
+            )
 
         # If it's a directory, list contents
         if os.path.isdir(resolved):
@@ -127,7 +141,11 @@ class ReadFileTool(Tool):
                 # FL-005: filter hidden files (dot-prefixed) from listing
                 items = sorted(i for i in os.listdir(resolved) if not i.startswith("."))
             except PermissionError:
-                return ToolResult.fail(f"无权限访问目录: {filepath}")
+                return ToolResult.fail(
+                    f"无权限访问目录: {filepath}",
+                    error_type=ERROR_TYPE_PERMISSION_DENIED,
+                    retryable=False,
+                )
             if not items:
                 return ToolResult.ok(f"目录 {filepath}: (空)")
             files = []
@@ -150,14 +168,26 @@ class ReadFileTool(Tool):
             return ToolResult.ok("\n".join(lines))
 
         if not os.path.isfile(resolved):
-            return ToolResult.fail(f"不是文件也不是目录: {filepath}")
+            return ToolResult.fail(
+                f"不是文件也不是目录: {filepath}",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         size = os.path.getsize(resolved)
         if size > MAX_FILE_SIZE:
-            return ToolResult.fail(f"文件太大 ({size/1024:.0f}KB > {MAX_FILE_SIZE/1024:.0f}KB)")
+            return ToolResult.fail(
+                f"文件太大 ({size/1024:.0f}KB > {MAX_FILE_SIZE/1024:.0f}KB)",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         if _is_binary(resolved):
-            return ToolResult.fail("二进制文件，无法读取文本内容")
+            return ToolResult.fail(
+                "二进制文件，无法读取文本内容",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         try:
             # FL-007: stream only the needed slice instead of readlines() loading
@@ -168,9 +198,17 @@ class ReadFileTool(Tool):
                     next(islice(f, offset, offset), None)
                 selected = list(islice(f, limit))
         except PermissionError:
-            return ToolResult.fail(f"无权限: {filepath}")
+            return ToolResult.fail(
+                f"无权限: {filepath}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
         except Exception as e:
-            return ToolResult.fail(f"读取失败: {e}")
+            return ToolResult.fail(
+                f"读取失败: {e}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )
 
         # total_lines is approximate when streaming; re-stat via size heuristic only.
         # We report the slice range instead of total to avoid a second full read.
@@ -198,13 +236,21 @@ class ReadFileTool(Tool):
         offset = max(0, int(args.get("offset", 0)))
 
         if not filepath_raw:
-            return ToolResult.fail("请提供文件路径")
+            return ToolResult.fail(
+                "请提供文件路径",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         logger.info(f"[tool] read_file path={filepath_raw[:80]} limit={limit} offset={offset}")
 
         paths = [p.strip() for p in filepath_raw.split(",") if p.strip()]
         if len(paths) > 5:
-            return ToolResult.fail("最多同时读取 5 个文件")
+            return ToolResult.fail(
+                "最多同时读取 5 个文件",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         if len(paths) == 1:
             return self._read_one(paths[0], limit, offset)
@@ -229,6 +275,7 @@ class FileTreeTool(Tool):
     MAX_DEPTH = 4
     MAX_FILES_PER_DIR = 10
     MAX_NODES = 200
+    timeout_seconds = 5.0
 
     def name(self) -> str:
         return "file_tree"
@@ -338,10 +385,18 @@ class FileTreeTool(Tool):
 
         resolved = _path_in_allowed(path_raw)
         if resolved is None:
-            return ToolResult.fail(f"路径不在可访问范围内: {path_raw}")
+            return ToolResult.fail(
+                f"路径不在可访问范围内: {path_raw}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
 
         if not os.path.isdir(resolved):
-            return ToolResult.fail(f"不是目录: {path_raw}")
+            return ToolResult.fail(
+                f"不是目录: {path_raw}",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         logger.info(f"[tool] file_tree path={path_raw} depth={depth}")
         lines, nodes = self._build_tree(resolved, depth)

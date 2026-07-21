@@ -6,9 +6,10 @@ and returns a structured record of all tool calls and results.
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from tools.traits import ToolRegistry
+from tools.traits import ToolRegistry, ERROR_TYPE_PARAM_ERROR
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ class ToolCallRecord:
     success: bool
     output: str
     elapsed_ms: float = 0.0
+    error_type: str = ""
+    retryable: bool = False
 
 
 @dataclass
@@ -112,6 +115,9 @@ class ToolAgent:
                     arguments={},
                     success=r["success"],
                     output=r["output"][:3000],
+                    elapsed_ms=r.get("elapsed_ms", 0.0),
+                    error_type=r.get("error_type", ""),
+                    retryable=r.get("retryable", False),
                 )
                 result.records.append(record)
                 result.total_calls += 1
@@ -170,10 +176,13 @@ class ToolAgent:
                 logger.info(f"[tool_agent] retry {attempt}/{max_retries}")
                 # TA-005: append failure context to existing messages instead of rebuilding
                 messages.append({"role": "assistant", "content": resp if 'resp' in dir() else ""})
-                messages.append({"role": "user", "content": (
-                    f"之前的尝试失败了（{last_failure}）。"
-                    "请调整方式后重新输出 JSON 格式的工具调用。"
-                )})
+                retry_prompt = _build_retry_prompt(last_failure, attempt)
+                messages.append({"role": "user", "content": retry_prompt})
+                # Layer5-TA1: simple exponential backoff for retryable failures.
+                if _should_backoff(last_failure):
+                    backoff = 2 ** (attempt - 2)  # 1s, 2s, 4s
+                    logger.debug(f"[tool_agent] backoff {backoff}s before retry")
+                    time.sleep(backoff)
 
             resp = self._provider.generate(messages, stream=False, max_tokens=1024,
                                           response_format=json_schema, source="tool_agent")
@@ -181,7 +190,12 @@ class ToolAgent:
             if not calls:
                 # TA-007: explicitly track parse failures
                 logger.debug("[tool_agent] no tool calls parsed from response")
-                last_failure = "解析失败：未能从响应中提取有效的工具调用"
+                last_failure = {
+                    "kind": "parse",
+                    "error_type": "",
+                    "retryable": True,
+                    "message": "解析失败：未能从响应中提取有效的工具调用",
+                }
                 continue
 
             messages.append({"role": "assistant", "content": resp})
@@ -194,6 +208,9 @@ class ToolAgent:
                     arguments={},
                     success=r["success"],
                     output=r["output"][:3000],
+                    elapsed_ms=r.get("elapsed_ms", 0.0),
+                    error_type=r.get("error_type", ""),
+                    retryable=r.get("retryable", False),
                 )
                 round_records.append(record)
                 result.records.append(record)
@@ -207,9 +224,14 @@ class ToolAgent:
             if result.any_success:
                 break
 
-            last_failure = "; ".join(
-                r["output"][:100] for r in results if not r["success"]
-            )
+            # Layer5-TA2: classify failure for error-aware retry.
+            last_failure = _summarize_failure(results)
+            if last_failure and not last_failure.get("retryable", True):
+                logger.info(
+                    f"[tool_agent] non-retryable failure ({last_failure.get('error_type')}), "
+                    "giving up early"
+                )
+                break
 
         result.elapsed_ms = (time.time() - t0) * 1000
         if result.has_results:
@@ -222,7 +244,7 @@ class ToolAgent:
         return result
 
     def run_with_requests(self, tool_requests: list[str], max_retries: int = 3) -> ToolAgentResult:
-        """MH-001: execute a batch of tool requests sequentially and merge.
+        """MH-001: execute a batch of tool requests concurrently and merge.
 
         Each request is a natural-language tool need from Agent 1. They run as
         independent ToolAgent rounds (each with its own retry budget) and the
@@ -232,12 +254,29 @@ class ToolAgent:
         if not tool_requests:
             logger.warning("[tool_agent] empty tool_requests list, returning empty result")
             return merged
+
         t0 = time.time()
-        for req in tool_requests:
-            single = self.run_with_request(req, max_retries=max_retries)
+        # Layer5-TA3: parallelize independent requests. Tool calls inside each
+        # request are already parallelized by execute_tool_calls; this layer
+        # removes the sequential delay across requests.
+        if len(tool_requests) == 1:
+            single = self.run_with_request(tool_requests[0], max_retries=max_retries)
             merged.records.extend(single.records)
             merged.total_calls += single.total_calls
             merged.success_count += single.success_count
+        else:
+            max_workers = min(len(tool_requests), 4)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(self.run_with_request, req, max_retries)
+                    for req in tool_requests
+                ]
+                for future in futures:
+                    single = future.result()
+                    merged.records.extend(single.records)
+                    merged.total_calls += single.total_calls
+                    merged.success_count += single.success_count
+
         merged.elapsed_ms = (time.time() - t0) * 1000
         return merged
 
@@ -251,10 +290,79 @@ class ToolAgent:
 
         from core.dispatcher import format_tool_results
         records = [
-            {"name": r.name, "success": r.success, "output": r.output}
+            {
+                "name": r.name,
+                "success": r.success,
+                "output": r.output,
+                "error_type": r.error_type,
+                "retryable": r.retryable,
+                "elapsed_ms": r.elapsed_ms,
+            }
             for r in result.records
         ]
         return format_tool_results(records)
+
+
+def _summarize_failure(results: list[dict]) -> dict | None:
+    """Summarize the first failure result for retry decisions."""
+    for r in results:
+        if not r.get("success"):
+            return {
+                "kind": "tool",
+                "error_type": r.get("error_type", ""),
+                "retryable": r.get("retryable", False),
+                "message": r.get("output", ""),
+            }
+    return None
+
+
+def _should_backoff(failure: dict | None) -> bool:
+    """Return True if the last failure deserves a backoff pause."""
+    if failure is None:
+        return False
+    # Parse failures are transient model-format issues; a short pause helps
+    # avoid hammering the provider. Tool-level retryable failures also back off.
+    return failure.get("retryable", False) or failure.get("kind") == "parse"
+
+
+def _build_retry_prompt(failure: dict | None, attempt: int) -> str:
+    """Build a specific retry prompt based on the previous failure."""
+    if failure is None:
+        return (
+            f"之前的尝试失败了（第 {attempt - 1} 次）。"
+            "请调整方式后重新输出 JSON 格式的工具调用。"
+        )
+
+    kind = failure.get("kind", "tool")
+    error_type = failure.get("error_type", "")
+    message = failure.get("message", "")
+    retryable = failure.get("retryable", False)
+
+    if kind == "parse":
+        return (
+            "之前的输出无法解析为有效的 JSON 工具调用。"
+            "请严格使用 JSON 格式，包含 \"calls\" 数组，每个元素有 \"name\" 和 \"arguments\"。"
+        )
+
+    parts = [f"之前的尝试失败了（第 {attempt - 1} 次）"]
+    if error_type:
+        parts.append(f"，错误类型：{error_type}")
+    parts.append("。")
+
+    if error_type == ERROR_TYPE_PARAM_ERROR:
+        parts.append("请检查工具参数名称和类型，修正后再输出 JSON 工具调用。")
+    elif error_type == "not_found":
+        parts.append("目标不存在，请换一个来源或放弃。")
+    elif error_type == "permission_denied":
+        parts.append("你没有权限执行该操作，请换方式或放弃。")
+    elif retryable:
+        parts.append("这可能是临时故障，请调整后重试。")
+    else:
+        parts.append("请调整方式后重新输出 JSON 格式的工具调用。")
+
+    if message:
+        parts.append(f" 详情：{message[:200]}")
+    return "".join(parts)
 
 
 def _format_raw_results(results: list[dict]) -> str:
@@ -262,5 +370,10 @@ def _format_raw_results(results: list[dict]) -> str:
     parts = []
     for r in results:
         tag = "成功" if r["success"] else "失败"
-        parts.append(f"工具 {r['name']} 执行{tag}:\n{r['output']}")
+        error_hint = ""
+        if not r.get("success"):
+            error_type = r.get("error_type", "")
+            if error_type:
+                error_hint = f"[{error_type}] "
+        parts.append(f"工具 {r['name']} 执行{tag}:\n{error_hint}{r['output']}")
     return "\n\n".join(parts)

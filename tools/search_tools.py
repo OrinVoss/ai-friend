@@ -7,7 +7,11 @@ import time
 from typing import Any
 
 from tools.file_tools import _get_allowed_roots, _is_binary
-from tools.traits import Tool, ToolResult
+from tools.traits import (
+    Tool, ToolResult,
+    ERROR_TYPE_PARAM_ERROR, ERROR_TYPE_NOT_FOUND,
+    ERROR_TYPE_PERMISSION_DENIED, ERROR_TYPE_INTERNAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,8 @@ def _should_skip_dir(dirpath: str) -> bool:
 class GlobTool(Tool):
     """Find files matching glob patterns."""
 
+    timeout_seconds = 10.0
+
     def name(self) -> str:
         return "glob"
 
@@ -102,12 +108,20 @@ class GlobTool(Tool):
         search_root = args.get("path", ".").strip()
 
         if not pattern:
-            return ToolResult.fail("请提供 glob 模式")
+            return ToolResult.fail(
+                "请提供 glob 模式",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         logger.info(f"[tool] glob pattern={pattern} root={search_root}")
         root = _resolve_search_path(search_root)
         if root is None:
-            return ToolResult.fail(f"路径不在可访问范围内: {search_root}")
+            return ToolResult.fail(
+                f"路径不在可访问范围内: {search_root}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
 
         # #172: check cache
         cache_key = f"glob:{pattern}:{root}"
@@ -159,6 +173,7 @@ class GrepTool(Tool):
 
     MAX_SIZE = 500 * 1024  # 500KB per file
     MAX_RESULTS = 50
+    timeout_seconds = 15.0
 
     def name(self) -> str:
         return "grep"
@@ -208,12 +223,20 @@ class GrepTool(Tool):
         ignore_case = bool(args.get("ignore_case", False))
 
         if not pattern:
-            return ToolResult.fail("请提供搜索模式")
+            return ToolResult.fail(
+                "请提供搜索模式",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         logger.info(f"[tool] grep pattern={pattern[:60]} path={search_path} glob={file_glob}")
         target = _resolve_search_path(search_path)
         if target is None:
-            return ToolResult.fail(f"路径不在可访问范围内: {search_path}")
+            return ToolResult.fail(
+                f"路径不在可访问范围内: {search_path}",
+                error_type=ERROR_TYPE_PERMISSION_DENIED,
+                retryable=False,
+            )
 
         # #172: check cache
         cache_key = f"grep:{pattern}:{target}:{file_glob}:{ignore_case}"
@@ -225,14 +248,26 @@ class GrepTool(Tool):
         try:
             # #150: validate regex doesn't have catastrophic backtracking patterns
             if len(pattern) > 500:  # unreasonably long regex
-                return ToolResult.fail("正则表达式过长")
+                return ToolResult.fail(
+                    "正则表达式过长",
+                    error_type=ERROR_TYPE_PARAM_ERROR,
+                    retryable=False,
+                )
             flags = re.IGNORECASE if ignore_case else 0
             regex = re.compile(pattern, flags)
             # Quick ReDoS check: reject nested quantifiers like (a+)+
             if re.search(r'\(\s*[^)]+[\*\+]\s*\)[\*\+]', pattern):
-                return ToolResult.fail("正则表达式包含潜在的 ReDoS 模式，请简化")
+                return ToolResult.fail(
+                    "正则表达式包含潜在的 ReDoS 模式，请简化",
+                    error_type=ERROR_TYPE_PARAM_ERROR,
+                    retryable=False,
+                )
         except re.error as e:
-            return ToolResult.fail(f"正则表达式错误: {e}")
+            return ToolResult.fail(
+                f"正则表达式错误: {e}",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         # Collect files
         files = []

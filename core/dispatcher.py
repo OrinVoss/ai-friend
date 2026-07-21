@@ -3,17 +3,31 @@
 import json
 import logging
 import re
-from typing import Optional
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from typing import Any, Optional
 
-from tools.traits import ToolRegistry, ToolResult
+from tools.traits import (
+    ToolRegistry,
+    ToolResult,
+    ERROR_TYPE_PARAM_ERROR,
+    ERROR_TYPE_NOT_FOUND,
+    ERROR_TYPE_NETWORK_ERROR,
+    ERROR_TYPE_PERMISSION_DENIED,
+    ERROR_TYPE_INTERNAL,
+)
 
 logger = logging.getLogger(__name__)
 
 TOOL_CALL_PATTERN = re.compile(r'<tool_call>(.*?)</tool_call>', re.DOTALL)
 THINK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
 
-# DI-006: cap individual output fragments at 2000 chars in formatted results
+# Layer5-D1: unified output cap for formatted results. Individual tools may
+# pre-truncate their own output to larger internal limits (e.g. web_fetch).
 _OUTPUT_CAP = 2000
+
+# Layer5-D2: cap raw input JSON at 10KB before parsing (DI-001).
+_MAX_RAW_JSON_BYTES = 10240
 
 
 def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
@@ -49,9 +63,9 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
         raw_json = m.group(1).strip()
 
         # DI-001: cap raw input at 10KB before json.loads
-        if len(raw_json) > 10240:
+        if len(raw_json) > _MAX_RAW_JSON_BYTES:
             logger.warning(f"Tool call JSON too large ({len(raw_json)} bytes), truncating")
-            raw_json = raw_json[:10240]
+            raw_json = raw_json[:_MAX_RAW_JSON_BYTES]
 
         try:
             parsed = json.loads(raw_json)
@@ -74,7 +88,7 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
     # ── Tier 3: Bare JSON object fallback ──
     if not calls:
         try:
-            obj = json.loads(text[:10240])  # DI-001
+            obj = json.loads(text[:_MAX_RAW_JSON_BYTES])  # DI-001
             if isinstance(obj, dict):
                 name = obj.get("name") or obj.get("tool", "")
                 if name:
@@ -95,7 +109,7 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
 def _try_structured_json(text: str) -> list[dict]:
     """Try parsing text as JSON with 'calls' array (structured output format)."""
     try:
-        obj = json.loads(text[:10240])  # DI-001
+        obj = json.loads(text[:_MAX_RAW_JSON_BYTES])  # DI-001
     except json.JSONDecodeError:
         return []
 
@@ -119,39 +133,209 @@ def _try_structured_json(text: str) -> list[dict]:
     return parsed
 
 
-def execute_tool_calls(tool_registry: ToolRegistry, calls: list[dict]) -> list[dict]:
+def _validate_args(args: dict[str, Any], schema: dict) -> Optional[str]:
+    """Validate arguments against a JSON schema subset.
+
+    Returns None if valid, otherwise a human-readable error message.
+    """
+    if not isinstance(schema, dict):
+        return None
+
+    required = schema.get("required", [])
+    properties = schema.get("properties", {})
+
+    for key in required:
+        if key not in args or args[key] in (None, ""):
+            return f"缺少必填参数: {key}"
+
+    type_map = {
+        "string": str,
+        "integer": int,
+        "number": (int, float),
+        "boolean": bool,
+        "array": list,
+        "object": dict,
+    }
+
+    for key, value in args.items():
+        prop = properties.get(key)
+        if not isinstance(prop, dict):
+            continue
+        expected = prop.get("type")
+        if expected and expected in type_map:
+            py_type = type_map[expected]
+            # bool is a subclass of int; reject booleans for integer fields.
+            if expected == "integer" and isinstance(value, bool):
+                return f"参数 {key} 应为整数，但得到布尔值"
+            if not isinstance(value, py_type):
+                return f"参数 {key} 类型错误: 应为 {expected}，得到 {type(value).__name__}"
+        enum = prop.get("enum")
+        if enum is not None and value not in enum:
+            return f"参数 {key} 的值不在允许范围内: {value}"
+
+    return None
+
+
+def _run_tool_with_timeout(tool, args: dict[str, Any]) -> ToolResult:
+    """Execute a single tool with its configured timeout.
+
+    Uses a one-off thread so sync tools (e.g. requests) do not block the caller.
+    """
+    timeout = getattr(tool, "timeout_seconds", 30.0)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        timeout = 30.0
+    if timeout <= 0 or timeout > 300:
+        timeout = 30.0
+
+    t0 = time.perf_counter()
+
+    def _worker() -> ToolResult:
+        try:
+            return tool.execute(args)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(f"Tool {tool.name()} execution error")
+            return ToolResult.fail(
+                f"工具执行异常: {exc}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_worker)
+            result = future.result(timeout=timeout)
+    except FutureTimeoutError:
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.warning(f"[tool] {tool.name()} timed out after {timeout}s")
+        return ToolResult.fail(
+            f"工具执行超时（>{timeout}s）",
+            error_type=ERROR_TYPE_NETWORK_ERROR,
+            retryable=True,
+            elapsed_ms=elapsed,
+        )
+
+    elapsed = (time.perf_counter() - t0) * 1000
+    result.elapsed_ms = elapsed
+    return result
+
+
+def _execute_single(
+    tool_registry: ToolRegistry,
+    call: dict,
+    user_role: str,
+    collect_metrics: bool = True,
+) -> dict:
+    """Execute one tool call: permission → validation → timeout execution."""
+    name = call.get("name", "")
+    args = call.get("arguments", {})
+    if not isinstance(args, dict):
+        args = {}
+
+    from core.monitor import record_tool_metric
+
+    if not name:
+        return {
+            "name": name,
+            "success": False,
+            "output": "工具调用缺少名称",
+            "error_type": ERROR_TYPE_PARAM_ERROR,
+            "retryable": False,
+            "elapsed_ms": 0.0,
+        }
+
+    tool = tool_registry.get(name)
+    if tool is None:
+        _record_metric(name, False, 0.0, collect_metrics)
+        return {
+            "name": name,
+            "success": False,
+            "output": f"未知工具: {name}",
+            "error_type": ERROR_TYPE_NOT_FOUND,
+            "retryable": False,
+            "elapsed_ms": 0.0,
+        }
+
+    # Layer5-D3: permission enforcement
+    if not tool_registry.check_permission(name, user_role):
+        _record_metric(name, False, 0.0, collect_metrics)
+        return {
+            "name": name,
+            "success": False,
+            "output": f"权限不足，无法调用工具: {name}",
+            "error_type": ERROR_TYPE_PERMISSION_DENIED,
+            "retryable": False,
+            "elapsed_ms": 0.0,
+        }
+
+    # Layer5-D4: pre-execution parameter validation
+    schema = tool.parameters_schema()
+    validation_error = _validate_args(args, schema)
+    if validation_error:
+        _record_metric(name, False, 0.0, collect_metrics)
+        return {
+            "name": name,
+            "success": False,
+            "output": validation_error,
+            "error_type": ERROR_TYPE_PARAM_ERROR,
+            "retryable": False,
+            "elapsed_ms": 0.0,
+        }
+
+    result = _run_tool_with_timeout(tool, args)
+    _record_metric(name, result.success, result.elapsed_ms, collect_metrics)
+
+    return {
+        "name": name,
+        "success": result.success,
+        "output": result.output,
+        "error_type": result.error_type,
+        "retryable": result.retryable,
+        "elapsed_ms": round(result.elapsed_ms, 2),
+    }
+
+
+def _record_metric(name: str, success: bool, elapsed_ms: float, enabled: bool) -> None:
+    if not enabled:
+        return
+    try:
+        from core.monitor import record_tool_metric
+        record_tool_metric(name, success, elapsed_ms)
+    except Exception:
+        # Metrics must never break tool execution.
+        pass
+
+
+def execute_tool_calls(
+    tool_registry: ToolRegistry,
+    calls: list[dict],
+    user_role: str = "user",
+    parallel: bool = True,
+) -> list[dict]:
     """Execute tools and return results.
 
-    Each result: {"name": str, "success": bool, "output": str}
-    """
-    results = []
-    for call in calls:
-        name = call["name"]
-        args = call["arguments"]
-        tool = tool_registry.get(name)
-        if tool is None:
-            logger.warning(f"Unknown tool: {name}")
-            results.append({
-                "name": name,
-                "success": False,
-                "output": f"未知工具: {name}",
-            })
-            continue
+    Each result: {"name": str, "success": bool, "output": str,
+                  "error_type": str, "retryable": bool, "elapsed_ms": float}
 
-        try:
-            result: ToolResult = tool.execute(args)
-            results.append({
-                "name": name,
-                "success": result.success,
-                "output": result.output,
-            })
-        except Exception as e:
-            logger.exception(f"Tool {name} execution error")  # DI-005: include traceback
-            results.append({
-                "name": name,
-                "success": False,
-                "output": str(e),
-            })
+    Args:
+        parallel: Run independent tool calls concurrently. Defaults to True.
+    """
+    if not calls:
+        return []
+
+    # Layer5-D5: parallel execution. Most tools are I/O-bound, so running them
+    # concurrently turns total latency from sum to max.
+    if parallel and len(calls) > 1:
+        max_workers = min(len(calls), 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_execute_single, tool_registry, call, user_role)
+                for call in calls
+            ]
+            results = [f.result() for f in futures]
+    else:
+        results = [_execute_single(tool_registry, call, user_role) for call in calls]
 
     successes = sum(1 for r in results if r["success"])
     for r in results:
@@ -169,10 +353,21 @@ def format_tool_results(results: list[dict]) -> str:
         output = r["output"]
         if len(output) > _OUTPUT_CAP:
             output = output[:_OUTPUT_CAP] + f"\n...(截断, 剩余 {len(output)-_OUTPUT_CAP} 字符)"
+        error_hint = ""
+        if not r.get("success"):
+            error_type = r.get("error_type", "")
+            retryable = r.get("retryable", False)
+            if error_type:
+                error_hint = f"[错误类型: {error_type}]"
+                if retryable:
+                    error_hint += "（可重试）"
+                else:
+                    error_hint += "（不可重试，请换方式或放弃）"
+                error_hint += "\n"
         parts.append(
             f'<tool_result name="{r["name"]}">\n'
             f"工具 {r['name']} 执行{tag}:\n"
-            f"{output}\n"
+            f"{error_hint}{output}\n"
             f"</tool_result>"
         )
     parts.append(

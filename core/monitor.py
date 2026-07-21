@@ -30,6 +30,71 @@ class MonitorRecord:
     source: str = ""                                   # "assess" / "review" / "re_decide" / "tool_agent" / "react" / "dream"
 
 
+@dataclass
+class ToolMetrics:
+    """Per-tool aggregated metrics."""
+    calls: int = 0
+    successes: int = 0
+    failures: int = 0
+    retries: int = 0
+    total_elapsed_ms: float = 0.0
+
+    @property
+    def success_rate(self) -> float:
+        if self.calls == 0:
+            return 0.0
+        return self.successes / self.calls
+
+    @property
+    def avg_elapsed_ms(self) -> float:
+        if self.calls == 0:
+            return 0.0
+        return self.total_elapsed_ms / self.calls
+
+    def to_dict(self) -> dict:
+        return {
+            "calls": self.calls,
+            "successes": self.successes,
+            "failures": self.failures,
+            "retries": self.retries,
+            "success_rate": round(self.success_rate, 4),
+            "avg_elapsed_ms": round(self.avg_elapsed_ms, 2),
+        }
+
+
+class ToolMetricsCollector:
+    """Thread-safe collector for per-tool success / latency / retry metrics."""
+
+    def __init__(self):
+        self._data: dict[str, ToolMetrics] = {}
+        self._lock = threading.Lock()
+
+    def record(self, name: str, success: bool, elapsed_ms: float, retries: int = 0):
+        with self._lock:
+            metrics = self._data.setdefault(name, ToolMetrics())
+            metrics.calls += 1
+            if success:
+                metrics.successes += 1
+            else:
+                metrics.failures += 1
+            metrics.retries += retries
+            metrics.total_elapsed_ms += elapsed_ms
+
+    def get_all(self) -> dict[str, ToolMetrics]:
+        with self._lock:
+            return {k: ToolMetrics(
+                calls=v.calls,
+                successes=v.successes,
+                failures=v.failures,
+                retries=v.retries,
+                total_elapsed_ms=v.total_elapsed_ms,
+            ) for k, v in self._data.items()}
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
+
+
 class MonitorBuffer:
     """线程安全的环形缓冲，保留最近 N 条 API 调用记录。"""
 
@@ -83,10 +148,21 @@ class MonitorBuffer:
 # 全局单例
 _monitor = MonitorBuffer()
 _monitor_enabled = True
+_tool_metrics = ToolMetricsCollector()
 
 
 def get_monitor() -> MonitorBuffer:
     return _monitor
+
+
+def get_tool_metrics() -> dict[str, dict]:
+    """Return per-tool metrics suitable for the web panel."""
+    return {k: v.to_dict() for k, v in _tool_metrics.get_all().items()}
+
+
+def record_tool_metric(name: str, success: bool, elapsed_ms: float, retries: int = 0):
+    """Record a single tool invocation metric."""
+    _tool_metrics.record(name, success, elapsed_ms, retries=retries)
 
 
 def set_monitor_enabled(enabled: bool):

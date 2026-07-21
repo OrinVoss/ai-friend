@@ -75,6 +75,9 @@ def mock_tool_registry():
         t.execute.return_value = ToolResult(success=True, output="mock tool output")
         t.spec.return_value = ToolSpec(name=tool_name, description="mock", parameters={})
         t.name.return_value = tool_name
+        t.timeout_seconds = 30.0
+        t.parameters_schema.return_value = {"type": "object", "properties": {}}
+        t.required_permissions = []
         return t
 
     m.get.side_effect = lambda name: _make_mock_tool(name)

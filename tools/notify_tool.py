@@ -3,7 +3,10 @@ import logging
 import subprocess
 from typing import Any
 
-from tools.traits import Tool, ToolResult
+from tools.traits import (
+    Tool, ToolResult,
+    ERROR_TYPE_PARAM_ERROR, ERROR_TYPE_INTERNAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +14,13 @@ logger = logging.getLogger(__name__)
 class NotifyTool(Tool):
     """Send Windows desktop toast notifications."""
 
+    timeout_seconds = 10.0
+
     def name(self) -> str:
         return "notify"
 
     def description(self) -> str:
-        return "发送 Windows 桌面通知弹窗。当你需要提醒用户某事、或用户要求你通知ta时使用。"
+        return "发送 Windows 桌面通知弹窗。当你需要提醒用户某事、或用户要求我通知ta时使用。"
 
     def parameters_schema(self) -> dict:
         return {
@@ -51,9 +56,17 @@ class NotifyTool(Tool):
         logger.debug(f"[notify] args={args} resolved title={title!r} message={message!r}")
 
         if not title:
-            return ToolResult.fail(f"标题不能为空，收到的参数：{args}")
+            return ToolResult.fail(
+                f"标题不能为空，收到的参数：{args}",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
         if not message:
-            return ToolResult.fail(f"内容不能为空，收到的参数：{args}")
+            return ToolResult.fail(
+                f"内容不能为空，收到的参数：{args}",
+                error_type=ERROR_TYPE_PARAM_ERROR,
+                retryable=False,
+            )
 
         # #150: escape PowerShell injection
         esc_title = title.replace("'", "''")
@@ -77,12 +90,24 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
             if result.returncode != 0:
                 stderr = result.stderr.decode('utf-8', errors='replace')[:200]
                 logger.warning(f"Notification stderr: {stderr}")
-                return ToolResult.fail(f"通知发送失败: {stderr}")
+                return ToolResult.fail(
+                    f"通知发送失败: {stderr}",
+                    error_type=ERROR_TYPE_INTERNAL,
+                    retryable=False,
+                )
             logger.info(f"Notification sent: {title}")
             return ToolResult.ok(f"已发送通知：{title}")
         except subprocess.TimeoutExpired:
             logger.warning(f"Notification timed out: {title}")
-            return ToolResult.fail("通知发送超时")
+            return ToolResult.fail(
+                "通知发送超时",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )
         except Exception as e:
             logger.warning(f"Notification failed: {title} - {e}")
-            return ToolResult.fail(f"通知发送失败: {e}")
+            return ToolResult.fail(
+                f"通知发送失败: {e}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )

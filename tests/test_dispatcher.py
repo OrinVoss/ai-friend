@@ -1,5 +1,6 @@
 """Tests for core/dispatcher.py"""
 import unittest
+from unittest.mock import MagicMock
 
 from core.dispatcher import (
     parse_tool_calls, execute_tool_calls, format_tool_results,
@@ -7,6 +8,7 @@ from core.dispatcher import (
     contains_fake_action, _normalize_args,
 )
 from tests.mocks import mock_tool_registry
+from tools.traits import ToolResult, ToolRegistry, Tool
 
 
 class TestParseToolCalls(unittest.TestCase):
@@ -296,6 +298,143 @@ class TestJSONSchema(unittest.TestCase):
         schema = self.reg.to_json_schema(names=[])
         self.assertEqual(self._calls_schema(schema)["items"], {"type": "object"})
         self.assertNotIn("web_fetch", str(schema))
+
+
+class _FakeSearchTool(Tool):
+    """Test double with a real parameters_schema."""
+    def name(self): return "web_search"
+    def description(self): return "fake"
+    def parameters_schema(self):
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+    def execute(self, args):
+        return ToolResult.ok("ran")
+
+
+class TestParameterValidation(unittest.TestCase):
+    def setUp(self):
+        self.registry = ToolRegistry()
+        self.registry.register(_FakeSearchTool())
+
+    def test_missing_required_param(self):
+        # web_search requires "query"; missing it should yield param_error
+        # without calling the tool.
+        tool = self.registry.get("web_search")
+        tool.execute = MagicMock(return_value=ToolResult.ok("should not run"))
+
+        results = execute_tool_calls(self.registry, [{"name": "web_search", "arguments": {}}])
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["success"])
+        self.assertEqual(results[0]["error_type"], "param_error")
+        tool.execute.assert_not_called()
+
+    def test_type_mismatch(self):
+        results = execute_tool_calls(
+            self.registry,
+            [{"name": "web_search", "arguments": {"query": 123}}]
+        )
+        self.assertFalse(results[0]["success"])
+        self.assertEqual(results[0]["error_type"], "param_error")
+
+
+class TestPermissionCheck(unittest.TestCase):
+    def test_permission_denied(self):
+        from tools.traits import ToolRegistry, Tool, ToolResult, ToolSpec
+
+        class SecretTool(Tool):
+            required_permissions = ["admin"]
+
+            def name(self): return "secret"
+            def description(self): return "secret"
+            def parameters_schema(self): return {"type": "object", "properties": {}}
+            def execute(self, args): return ToolResult.ok("ok")
+
+        reg = ToolRegistry()
+        reg.register(SecretTool())
+        results = execute_tool_calls(reg, [{"name": "secret", "arguments": {}}], user_role="user")
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["success"])
+        self.assertEqual(results[0]["error_type"], "permission_denied")
+
+
+class TestTimeout(unittest.TestCase):
+    def test_tool_timeout_returns_network_error(self):
+        from tools.traits import ToolRegistry, Tool, ToolResult
+
+        class SlowTool(Tool):
+            timeout_seconds = 0.1
+
+            def name(self): return "slow"
+            def description(self): return "slow"
+            def parameters_schema(self): return {"type": "object", "properties": {}}
+            def execute(self, args):
+                import time
+                time.sleep(2)
+                return ToolResult.ok("never")
+
+        reg = ToolRegistry()
+        reg.register(SlowTool())
+        results = execute_tool_calls(reg, [{"name": "slow", "arguments": {}}], parallel=False)
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0]["success"])
+        self.assertEqual(results[0]["error_type"], "network_error")
+        self.assertTrue(results[0]["retryable"])
+
+
+class TestParallelExecution(unittest.TestCase):
+    def test_parallel_is_faster_than_serial(self):
+        from tools.traits import ToolRegistry, Tool, ToolResult
+
+        class SleepTool(Tool):
+            def __init__(self, name, seconds):
+                self._name = name
+                self._seconds = seconds
+            def name(self): return self._name
+            def description(self): return self._name
+            def parameters_schema(self): return {"type": "object", "properties": {}}
+            def execute(self, args):
+                import time
+                time.sleep(self._seconds)
+                return ToolResult.ok(f"done {self._name}")
+
+        reg = ToolRegistry()
+        reg.register(SleepTool("a", 0.4))
+        reg.register(SleepTool("b", 0.4))
+
+        import time
+        t0 = time.perf_counter()
+        results = execute_tool_calls(
+            reg,
+            [{"name": "a", "arguments": {}}, {"name": "b", "arguments": {}}],
+            parallel=True,
+        )
+        elapsed = time.perf_counter() - t0
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r["success"] for r in results))
+        # parallel should complete in < 0.8s (sum), ideally ~0.4s (max)
+        self.assertLess(elapsed, 0.8)
+
+
+class TestToolMetrics(unittest.TestCase):
+    def setUp(self):
+        from core.monitor import _tool_metrics
+        _tool_metrics.clear()
+
+    def tearDown(self):
+        from core.monitor import _tool_metrics
+        _tool_metrics.clear()
+
+    def test_metric_recorded(self):
+        from core.monitor import get_tool_metrics
+        reg = mock_tool_registry()
+        execute_tool_calls(reg, [{"name": "web_search", "arguments": {"query": "x"}}])
+        metrics = get_tool_metrics()
+        self.assertIn("web_search", metrics)
+        self.assertEqual(metrics["web_search"]["calls"], 1)
+        self.assertEqual(metrics["web_search"]["successes"], 1)
 
 
 if __name__ == "__main__":
