@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**未开始**（Memory Agent 属于 Layer 1 的组件，但会依赖本层的多阶段检索策略）。
+**实施计划已制定**（2026-07-20，见 `implementation-plan.md`）。核对结论：约 70% 已建成（内嵌在 MemoryAgent 中），剩余工作为抽取共享管线 + 按 Agent 分 Profile + Agent 3 轻量上下文。
 
 ## 核心问题
 
