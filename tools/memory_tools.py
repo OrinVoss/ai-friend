@@ -55,10 +55,14 @@ class RecallTool(Tool):
                 )
 
             logger.info(f"[tool] recall query={query[:60]}")
-            keywords = self.retriever.extract_keywords(query)
-            facts = self.ltm.search_facts(query, limit=5)
-            experiences = self.ltm.search_experiences(keywords, limit=3)
-            reflections = self.ltm.get_recent_reflections(limit=2)
+            # 修复：recall 不再用 ltm.search_facts（整句 LIKE 恒 0 命中），
+            # 改走 retriever 混合检索管线（语义 0.6 + 关键词 0.4，
+            # embedding 宕机时自动降级关键词评分）——Agent 1/3 的 recall
+            # 与 memory context 检索同源。
+            ctx = self.retriever.retrieve_for_query(query)
+            facts = ctx.facts[:5]
+            experiences = ctx.experiences[:3]
+            reflections = ctx.reflections[:2]
             logger.info(f"[tool] recall result: facts={len(facts)} exps={len(experiences)} refl={len(reflections)}")
 
             parts = []
@@ -71,7 +75,9 @@ class RecallTool(Tool):
             if experiences:
                 parts.append("共同回忆：")
                 for e in experiences:
-                    parts.append(f"- [{e.emotional_tone}] {e.summary}")
+                    # F4: 梦境标记，防止被当作真实事件
+                    dream_prefix = "【梦境，非真实事件】" if ("dream" in (getattr(e, "tags", None) or [])) else ""
+                    parts.append(f"- {dream_prefix}[{e.emotional_tone}] {e.summary}")
 
             if reflections:
                 parts.append("相关思考：")

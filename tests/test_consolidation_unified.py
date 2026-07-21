@@ -208,6 +208,19 @@ INSIGHT:
         )
         self.consolidator._lifecycle.create_insight.assert_called_once()
 
+    def test_unified_call_uses_enlarged_token_budget(self):
+        """防回归：统一调用必须带 max_tokens>=1024（默认 512 会截掉末段，
+        2026-07-21 生产事故：finish_reason=length 导致 INSIGHT 段丢失）。"""
+        self._buffer_long_user_turn()
+        self.llm.return_value = self._unified_output(with_insight=True)
+
+        with patch("memory.consolidation.run_async",
+                   lambda coro: coro.send(None)):
+            self.consolidator.consolidate(MagicMock(), self.personality)
+
+        _, kwargs = self.llm.call_args
+        self.assertGreaterEqual(kwargs.get("max_tokens", 0), 1024)
+
 
 if __name__ == "__main__":
     unittest.main()

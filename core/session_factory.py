@@ -127,9 +127,11 @@ def assemble_session(config: Config, db: Database, session_id: str,
     ltm = LongTermMemory(repo)
     short_term = ConversationBuffer(maxlen=config.short_term_capacity)
 
-    def llm_generate(prompt: str, temperature: float = 0.2) -> str:
+    def llm_generate(prompt: str, temperature: float = 0.2,
+                     max_tokens: int | None = None) -> str:
+        kwargs = {"max_tokens": max_tokens} if max_tokens else {}
         return provider.generate([{"role": "user", "content": prompt}],
-                                 stream=False, source="consolidation")
+                                 stream=False, source="consolidation", **kwargs)
 
     llm_rerank_fn = None
     if enable_llm_rerank:

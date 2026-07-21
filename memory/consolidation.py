@@ -53,9 +53,15 @@ class MemoryConsolidator:
             ltm, config=self.config, embedding_engine=embedding_engine
         )
 
-    def _call_llm(self, prompt: str, temperature: float = 0.2) -> str:
-        """Call LLM with timeout protection. (#184)"""
-        future = _EXECUTOR.submit(self.llm, prompt, temperature=temperature)
+    def _call_llm(self, prompt: str, temperature: float = 0.2,
+                  max_tokens: int | None = None) -> str:
+        """Call LLM with timeout protection. (#184)
+
+        max_tokens: 可选输出预算（统一固化调用需要比默认 512 更大的空间，
+        否则末段会被 finish_reason=length 截掉）。
+        """
+        kwargs = {"max_tokens": max_tokens} if max_tokens else {}
+        future = _EXECUTOR.submit(self.llm, prompt, temperature=temperature, **kwargs)
         try:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError:
@@ -509,7 +515,9 @@ class MemoryConsolidator:
                                  text=turn_text,
                                  facts=fact_text,
                                  experiences=exp_text)
-            result = self._call_llm(prompt, temperature=0.3)
+            # 统一调用输出含三段，默认 512 预算会把末段截掉
+            # （finish_reason=length → missing section），给足 1024
+            result = self._call_llm(prompt, temperature=0.3, max_tokens=1024)
             if not result:
                 return ["unified"]
 

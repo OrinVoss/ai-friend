@@ -89,10 +89,11 @@ class MemoryRetriever:
         if not m:
             return None
         query = m.group(1).strip()
-        keywords = self.extract_keywords(query)
-        facts = self.ltm.search_facts(query, limit=5)
-        experiences = self.ltm.search_experiences(keywords, limit=3)
-        reflections = self.search_reflections(query, limit=2)  # #251: 按相关度检索
+        # 修复：与 RecallTool 同源——整句 LIKE 恒 0 命中，改走混合检索管线
+        ctx = self.retrieve_for_query(query)
+        facts = ctx.facts[:5]
+        experiences = ctx.experiences[:3]
+        reflections = ctx.reflections[:2]
 
         parts = []
         if facts:
