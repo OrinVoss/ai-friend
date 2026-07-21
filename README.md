@@ -52,10 +52,10 @@
     ├── relationship_snapshots 关系指标历史快照（按 session_id 隔离）
     ├── session_roles       session_id → role_id 映射
     ├── observations        原始观察（记忆生命周期 Layer 1）
-    └── user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写）
+    └── facts_v2 / insights_v2  长期记忆主表（旧 user_facts / reflections 已迁移，归档表 schema v6 删除）
 ```
 
-记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ **Insight**（二期已上线 2026-07-20，假设 + 证据链 + 过期时间）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
+记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ **Insight**（二期已上线 2026-07-20，假设 + 证据链 + 过期时间）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc / merge（语义近重复合并，A5）。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` / `reflections` 表数据已迁移（schema v4/v5），归档表已于 schema v6（2026-07-21）物理删除；双写开关 `use_observation_fact` 已随上线删除。
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
 

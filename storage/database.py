@@ -40,7 +40,8 @@ class Database:
     # user_facts_archive 归档（2026-07-18）。
     # v5: Layer 1 二期 — reflections 数据迁入 insights_v2，旧表改名
     # reflections_archive 归档（2026-07-20）。
-    CURRENT_SCHEMA_VERSION = 5
+    # v6: 删除两张归档表（A8，2026-07-21；数据已迁移且 P0-3 有备份）。
+    CURRENT_SCHEMA_VERSION = 6
 
     def __init__(self, db_path: str, backup_enabled: bool = True, backup_keep: int = 5):
         self.db_path = db_path
@@ -489,6 +490,23 @@ class Database:
                     ALTER TABLE reflections RENAME TO reflections_archive;
                 """)
 
+            # schema v6（2026-07-21，A8）：物理删除两张归档表。数据已在
+            # v4/v5 迁入 facts_v2/insights_v2，且 P0-3 在版本落后时先自动
+            # 备份到 data/backups/——归档数据仍有副本，DROP 安全。
+            if current_version < 6:
+                # 注意重新查表：v4/v5 的 RENAME 在本次 initialize 内才发生，
+                # 开头的 existing_tables 快照里还没有 _archive 名字
+                await c.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                    "('user_facts_archive', 'reflections_archive')")
+                dropped = [r[0] for r in await c.fetchall()]
+                if dropped:
+                    await c.executescript("""
+                        DROP TABLE IF EXISTS user_facts_archive;
+                        DROP TABLE IF EXISTS reflections_archive;
+                    """)
+                    logger.info(f"[db] dropped archive tables: {dropped}")
+
             # S-006: schema_version table existed but was never populated, so it
             # couldn't tell future migrations what state the DB was in. Stamp the
             # current schema version so subsequent initialize() runs can detect/
@@ -496,6 +514,7 @@ class Database:
             # ML-001: version 2 adds observations / facts_v2 tables.
             # v4: user_facts -> facts_v2 数据迁移 + 旧表归档。
             # v5: reflections -> insights_v2 数据迁移 + 旧表归档。
+            # v6: 删除归档表（A8）。
             if current_version < self.CURRENT_SCHEMA_VERSION:
                 await c.execute(
                     "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",

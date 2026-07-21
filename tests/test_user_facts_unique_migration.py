@@ -88,18 +88,15 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
 
     def test_old_schema_migrated_data_preserved(self):
         """v2 老库升级：UK-001 重建（session 级约束）→ v4 数据迁入 facts_v2，
-        旧表改名 user_facts_archive，schema_version 升到 4。"""
+        旧表归档 → v6（A8）归档表物理删除，schema_version 升到 6。"""
         self._make_v2_db()
         db = Database(self.db_path)
         asyncio.run(db.open())
         asyncio.run(db.close())
 
-        # user_facts 已归档；归档表带有 UK-001 重建后的 session 级约束
+        # user_facts 已归档且 v6 已物理删除归档表
         self.assertEqual(self._table_sql("user_facts"), "")
-        archive_sql = self._table_sql("user_facts_archive")
-        self.assertIn("UNIQUE(session_id, category, fact_key)", archive_sql)
-        self.assertNotIn("UNIQUE(category, fact_key)", archive_sql.replace(
-            "UNIQUE(session_id, category, fact_key)", ""))
+        self.assertEqual(self._table_sql("user_facts_archive"), "")
 
         async def _read():
             conn = await aiosqlite.connect(self.db_path)
@@ -115,8 +112,8 @@ class TestUserFactsUniqueMigration(unittest.TestCase):
             finally:
                 await conn.close()
         rows, version = asyncio.run(_read())
-        # schema v5（2026-07-20）后版本号随库升级到 5
-        self.assertEqual(version, 5)
+        # schema v6（2026-07-21，A8 删除归档表）后版本号随库升级到 6
+        self.assertEqual(version, 6)
         by_key = {r["fact_key"]: r for r in rows}
         self.assertEqual(by_key["最爱食物"]["fact_value"], "披萨")
         self.assertEqual(by_key["最爱食物"]["session_id"], "sess_a")

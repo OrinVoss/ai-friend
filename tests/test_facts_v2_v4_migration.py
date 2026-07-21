@@ -121,11 +121,9 @@ class TestFactsV2V4Migration(unittest.TestCase):
         self.assertAlmostEqual(by_key["最爱食物"]["importance"], 0.8)
         self.assertEqual(by_key["最爱食物"]["created_by"], "migration")
         self.assertEqual(by_key["旧事件"]["status"], "obsolete")
-        # 旧表改名归档，数据保留
+        # v6（A8）：归档表已被物理删除，数据只在 facts_v2
         self.assertFalse(self._table_exists("user_facts"))
-        self.assertTrue(self._table_exists("user_facts_archive"))
-        self.assertEqual(
-            len(self._query("SELECT 1 FROM user_facts_archive")), 3)
+        self.assertFalse(self._table_exists("user_facts_archive"))
 
     def test_conflict_with_existing_facts_v2_skipped(self):
         """UNIQUE(session_id, category, fact_key) 冲突时跳过——facts_v2
@@ -172,10 +170,10 @@ class TestFactsV2V4Migration(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["fact_value"], "披萨")
         self.assertFalse(self._table_exists("user_facts"))
-        self.assertTrue(self._table_exists("user_facts_archive"))
+        self.assertFalse(self._table_exists("user_facts_archive"))
         ver = self._query("SELECT MAX(version) AS v FROM schema_version")
-        # schema v5（2026-07-20）后版本号随库升级到 5
-        self.assertEqual(ver[0]["v"], 5)
+        # schema v6（2026-07-21，A8 删除归档表）后版本号随库升级到 6
+        self.assertEqual(ver[0]["v"], 6)
 
 
 if __name__ == "__main__":

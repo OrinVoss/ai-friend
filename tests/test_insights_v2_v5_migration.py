@@ -108,11 +108,9 @@ class TestInsightsV2V5Migration(unittest.TestCase):
         self.assertEqual(expired["hypothesis"], "已失效的旧反思")
         self.assertEqual(expired["status"], "expired")
 
-        # 旧表改名归档，数据保留
+        # v6（A8）：归档表已被物理删除，数据只在 insights_v2
         self.assertFalse(self._table_exists("reflections"))
-        self.assertTrue(self._table_exists("reflections_archive"))
-        self.assertEqual(
-            len(self._query("SELECT 1 FROM reflections_archive")), 2)
+        self.assertFalse(self._table_exists("reflections_archive"))
 
     def test_migration_idempotent_second_open(self):
         """幂等：二次 open 不重复迁移、不报错、数据不变。"""
@@ -130,9 +128,9 @@ class TestInsightsV2V5Migration(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["hypothesis"], "用户喜欢深夜聊天")
         self.assertFalse(self._table_exists("reflections"))
-        self.assertTrue(self._table_exists("reflections_archive"))
+        self.assertFalse(self._table_exists("reflections_archive"))
         ver = self._query("SELECT MAX(version) AS v FROM schema_version")
-        self.assertEqual(ver[0]["v"], 5)
+        self.assertEqual(ver[0]["v"], 6)
 
     def test_fresh_db_has_insights_v2_without_reflections(self):
         """全新库：创建 insights_v2，不再创建 reflections / reflections_archive。"""
@@ -144,7 +142,7 @@ class TestInsightsV2V5Migration(unittest.TestCase):
         self.assertFalse(self._table_exists("reflections"))
         self.assertFalse(self._table_exists("reflections_archive"))
         ver = self._query("SELECT MAX(version) AS v FROM schema_version")
-        self.assertEqual(ver[0]["v"], 5)
+        self.assertEqual(ver[0]["v"], 6)
 
 
 if __name__ == "__main__":
