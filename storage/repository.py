@@ -571,6 +571,29 @@ class Repository:
             """, (factor, insight_id, self.session_id))
             await self.db.commit()
 
+    async def merge_facts_v2(self, keeper_id: int, absorbed_ids: list[int],
+                             added_verification: int) -> None:
+        """语义近重复合并（A5，2026-07-21）：被吸收方标 status='merged'，
+        其 verification_count 并入保留方，单事务完成。"""
+        if not absorbed_ids:
+            return
+        logger.info(f"[db] merge_facts_v2: keeper={keeper_id} "
+                    f"absorbed={absorbed_ids} +{added_verification} verifications")
+        async with self.db.cursor() as c:
+            await c.execute("""
+                UPDATE facts_v2
+                SET verification_count = verification_count + ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND session_id = ?
+            """, (added_verification, keeper_id, self.session_id))
+            placeholders = ",".join("?" for _ in absorbed_ids)
+            await c.execute(f"""
+                UPDATE facts_v2
+                SET status = 'merged', updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders}) AND session_id = ?
+            """, (*absorbed_ids, self.session_id))
+            await self.db.commit()
+
     async def expire_due_insights(self) -> int:
         """GC：expires_at 已过的 active insight 置为 expired。返回过期条数。"""
         async with self.db.cursor() as c:

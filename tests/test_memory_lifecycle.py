@@ -206,5 +206,80 @@ class TestContradictionPropagation(unittest.TestCase):
             3, "contradicted")
 
 
+class TestMergeDuplicates(unittest.TestCase):
+    """A5（2026-07-21）：语义近重复合并（并查集 + 保留最强 + 计数并入）。"""
+
+    def setUp(self):
+        self.ltm = MagicMock()
+        self.ltm.repo = MagicMock()
+        self.ltm.repo.session_id = "test-session"
+        self.ltm.repo.merge_facts_v2 = AsyncMock()
+
+    def _run(self, coro):
+        import asyncio
+        return asyncio.run(coro)
+
+    def _fact(self, fid, key, value, cat="preference", vc=1, conf=0.8):
+        return FactV2(id=fid, category=cat, fact_key=key, fact_value=value,
+                      confidence=conf, status="active", verification_count=vc)
+
+    def _manager_with_vecs(self, vec_map):
+        """vec_map: {text: vector}，按 'key value' 文本取向量。"""
+        import numpy as np
+
+        def _unit(v):
+            a = np.array(v, dtype=np.float32)
+            return a / np.linalg.norm(a)
+        embed = MagicMock()
+        embed.encode.side_effect = lambda texts: np.stack(
+            [_unit(vec_map[t]) for t in texts])
+        embed.health_check.return_value = True
+        return MemoryLifecycleManager(self.ltm, embedding_engine=embed)
+
+    def test_near_dup_merged_into_strongest(self):
+        f1 = self._fact(1, "最爱食物", "披萨", vc=3, conf=0.9)
+        f2 = self._fact(2, "喜欢的食物", "披萨", vc=1, conf=0.8)
+        self.ltm.repo.get_active_facts_v2 = AsyncMock(return_value=[f1, f2])
+        same = [1, 0, 0, 0]
+        mgr = self._manager_with_vecs({
+            "最爱食物 披萨": same, "喜欢的食物 披萨": same,
+        })
+        self._run(mgr.merge_duplicates())
+        # f1 更强（vc=3）→ keeper；f2 被吸收，计数 +1
+        self.ltm.repo.merge_facts_v2.assert_awaited_once_with(1, [2], 1)
+
+    def test_distinct_facts_not_merged(self):
+        f1 = self._fact(1, "最爱食物", "披萨")
+        f2 = self._fact(2, "最爱颜色", "蓝色")
+        self.ltm.repo.get_active_facts_v2 = AsyncMock(return_value=[f1, f2])
+        mgr = self._manager_with_vecs({
+            "最爱食物 披萨": [1, 0, 0, 0], "最爱颜色 蓝色": [0, 1, 0, 0],
+        })
+        self._run(mgr.merge_duplicates())
+        self.ltm.repo.merge_facts_v2.assert_not_called()
+
+    def test_no_embed_skip(self):
+        mgr = MemoryLifecycleManager(self.ltm)  # 无 embedding_engine
+        self.ltm.repo.get_active_facts_v2 = AsyncMock(
+            return_value=[self._fact(1, "a", "b")])
+        self._run(mgr.merge_duplicates())
+        self.ltm.repo.get_active_facts_v2.assert_not_called()
+        self.ltm.repo.merge_facts_v2.assert_not_called()
+
+    def test_cluster_of_three_single_keeper(self):
+        f1 = self._fact(1, "a", "披萨", vc=1)
+        f2 = self._fact(2, "b", "披萨", vc=5, conf=0.9)
+        f3 = self._fact(3, "c", "披萨", vc=2)
+        self.ltm.repo.get_active_facts_v2 = AsyncMock(
+            return_value=[f1, f2, f3])
+        same = [1, 0, 0, 0]
+        mgr = self._manager_with_vecs({
+            "a 披萨": same, "b 披萨": same, "c 披萨": same,
+        })
+        self._run(mgr.merge_duplicates())
+        # f2 vc=5 最强 → keeper；f1/f3 被吸收，计数 1+2=3
+        self.ltm.repo.merge_facts_v2.assert_awaited_once_with(2, [1, 3], 3)
+
+
 if __name__ == "__main__":
     unittest.main()

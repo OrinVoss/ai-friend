@@ -10,11 +10,17 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
+
 from memory.embeddings import EmbeddingEngine
 from memory.long_term import LongTermMemory
 from models.memory import FactV2, InsightV2, Observation
 
 logger = logging.getLogger(__name__)
+
+# A5（2026-07-21）：语义近重复合并的相似度阈值。取高值——只合并
+# 「同一事实的不同表述」，不合并「相关但不同的事实」
+MERGE_SIM_THRESHOLD = 0.88
 
 
 class MemoryLifecycleManager:
@@ -207,12 +213,74 @@ class MemoryLifecycleManager:
                 logger.info(f"[lifecycle] fact {fact.id} decayed")
 
     async def merge_duplicates(self) -> None:
-        """Placeholder for semantic duplicate merging.
+        """语义近重复合并（A5，2026-07-21）：同 category 的 active facts 按
+        key+value 文本批量编码，余弦相似度 ≥ MERGE_SIM_THRESHOLD 的并为一组
+        （并查集），保留 (verification_count, confidence) 最强的一条，其余
+        标 status='merged'，verification_count 并入保留方。
+        无 embedding 时跳过（精确重复已由 UNIQUE 约束兜底）。"""
+        if not self._embed:
+            return
+        try:
+            facts = await self.ltm.repo.get_active_facts_v2(limit=1000)
+        except Exception as e:
+            logger.warning(f"[lifecycle] merge load facts failed: {e}")
+            return
+        by_cat: dict[str, list] = {}
+        for f in facts:
+            by_cat.setdefault(f.category, []).append(f)
+        merged_total = 0
+        for category, group in by_cat.items():
+            if len(group) < 2:
+                continue
+            try:
+                texts = [f"{f.fact_key} {f.fact_value}" for f in group]
+                vecs = np.asarray(self._embed.encode(texts), dtype=np.float32)
+                norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+                norms[norms == 0] = 1.0
+                vecs = vecs / norms
+                sims = np.dot(vecs, vecs.T)
+            except Exception as e:
+                logger.debug(f"[lifecycle] merge encode failed ({category}): {e}")
+                continue
+            # 并查集分组
+            parent = list(range(len(group)))
 
-        SQLite UNIQUE(session_id, category, fact_key) already prevents exact
-        duplicates. Future work can merge near-duplicate keys/values here.
-        """
-        pass
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            n = len(group)
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if sims[i][j] >= MERGE_SIM_THRESHOLD:
+                        ri, rj = find(i), find(j)
+                        if ri != rj:
+                            parent[rj] = ri
+            clusters: dict[int, list[int]] = {}
+            for i in range(n):
+                clusters.setdefault(find(i), []).append(i)
+            for members in clusters.values():
+                if len(members) < 2:
+                    continue
+                keeper_idx = max(
+                    members,
+                    key=lambda i: (group[i].verification_count,
+                                   group[i].confidence))
+                keeper = group[keeper_idx]
+                absorbed = [group[i] for i in members if i != keeper_idx]
+                added = sum(max(f.verification_count, 1) for f in absorbed)
+                try:
+                    await self.ltm.repo.merge_facts_v2(
+                        keeper.id, [f.id for f in absorbed], added)
+                    merged_total += len(absorbed)
+                    logger.info(f"[lifecycle] merged {len(absorbed)} near-dup "
+                                f"fact(s) into {keeper.fact_key!r} ({category})")
+                except Exception as e:
+                    logger.warning(f"[lifecycle] merge write failed: {e}")
+        if merged_total:
+            logger.info(f"[lifecycle] merge_duplicates: {merged_total} facts merged")
 
     async def archive_old_observations(self, max_age_days: int = 30) -> None:
         """Archive observations older than max_age_days."""
