@@ -268,7 +268,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 

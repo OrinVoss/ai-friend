@@ -105,8 +105,8 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   ├── long_term.py     (SQLite CRUD)
     │   ├── embeddings.py    (EmbeddingEngine, Qwen3.5-0.8B, llama.cpp, LRU cache)
     │   ├── retrieval.py     (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
-    │   ├── consolidation.py (记忆合并 + 情感分析 + 自动嵌入编码 + 双写 Observation/FactV2)
-    │   ├── fact_checker.py  (矛盾检测 + 置信度衰减 + 用户纠正)
+    │   ├── consolidation.py (记忆合并 + 分层洞察 L1/L2/L3 + 自动嵌入编码 + 双写 Observation/FactV2)
+    │   ├── fact_checker.py  (矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正)
     │   └── lifecycle.py     (MemoryLifecycleManager: Observation→Fact→Insight 生命周期)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
@@ -176,6 +176,8 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 `InnerDriveResult` 新增 `context_summary` 字段。Agent 1 完成判断后，会把已格式化的关系/记忆摘要写入该字段。Agent 3 构建 prompt 时，如果 `context_summary` 非空，直接使用它作为慢变块，不再调用 `retriever.retrieve_for_query()`，避免同一请求内两次检索长期记忆。
 
+同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 缓存，`memory_agent.answer()` 每轮至多调用一次（R1，2026-07-20）；空 query（主动路径）跳过 MemoryAgent 置信度管线，直接走 retriever（F3）。
+
 ### 静态对话示例限制
 
 `conversation_examples_max_turns` 控制系统提示中的对话示例仅在会话前 N 轮注入，之后自动省略，减少长期运行时的 token 开销。
@@ -220,6 +222,8 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，旧 `reflections` 表已于 schema v5（2026-07-20）迁移数据后归档为 `reflections_archive`，代码均不再读写。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
 
 记忆生命周期（一期 Fact 上线 2026-07-18，二期 Insight 上线 2026-07-20）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（假设 + 证据链 + confidence + expires_at）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / create_insight / verify_insight / expire_insight / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2；分层 L1/L2/L3 生成结构化 Insight（LLM 输出 JSON：hypothesis/insight_type/evidence/confidence/needs_more_evidence，解析失败静默跳过），单写 insights_v2。读路径全部走 facts_v2 / insights_v2（repository 旧方法名适配，Reflection 返回形状不变：content=hypothesis、significance=confidence）；旧 `user_facts` / `reflections` 表数据已迁移并归档（schema v4 / v5）。
+
+矛盾检测与传播（2026-07-20）：FactChecker 检出的嵌入相似候选矛盾先经 LLM 复核（`verify_fn`，复述/近义否决则保留旧事实），同键不同值的直接判定不复核；Fact 被推翻时向上传播——引用它的 active Insight 标记 `needs_more_evidence` 且 confidence ×0.5。Memory Agent 证据池纳入 active Insight（待验证项显式标注），query 与指代锚点余弦达到 `memory_agent_coreference_threshold`（默认 0.78）时先由 LLM 改写为自足形式再检索（P2）。
 
 ---
 
@@ -354,7 +358,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── doc/                     文档
 │
 ├── core/                    核心引擎（19 模块，三层架构）
-│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策）
+│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策 + 主动沉思循环）
 │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
 │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
 │   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
@@ -378,8 +382,8 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 │   ├── embeddings.py        本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache）
 │   ├── retrieval.py         三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
 │   ├── consolidation.py     记忆合并 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
-│   ├── fact_checker.py      矛盾检测 + 置信度衰减 + 用户纠正
-│   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答（确定性管道）
+│   ├── fact_checker.py      矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正
+│   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 向量锚点指代解析（确定性管道，P0~P2）
 │   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）

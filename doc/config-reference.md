@@ -76,6 +76,8 @@
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
 | `max_tool_iterations` | int | `5` | ReAct 循环最大工具调用轮次 |
+| `degrade_threshold` | int | `3` | 连续工具失败 N 次后降级（#255） |
+| `max_fake_actions` | int | `3` | 虚假动作纠正上限（#255） |
 | `monitor_enabled` | bool | `true` | LLM 调用监控开关（Web `/monitor` 页），生产环境建议关闭以避免记录 prompt |
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
 | `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
@@ -112,6 +114,8 @@
 | `AI_FRIEND_WEB_PORT` | `web_port` | `set AI_FRIEND_WEB_PORT=8000` |
 | `AI_FRIEND_TYPING_SPEED` | `typing_speed` | `set AI_FRIEND_TYPING_SPEED=0.005` |
 | `AI_FRIEND_MAX_TOOL_ITERATIONS` | `max_tool_iterations` | `set AI_FRIEND_MAX_TOOL_ITERATIONS=5` |
+| `AI_FRIEND_DEGRADE_THRESHOLD` | `degrade_threshold` | `set AI_FRIEND_DEGRADE_THRESHOLD=3` |
+| `AI_FRIEND_MAX_FAKE_ACTIONS` | `max_fake_actions` | `set AI_FRIEND_MAX_FAKE_ACTIONS=3` |
 | `AI_FRIEND_EMBEDDING_ENDPOINT` | `embedding_endpoint` | `set AI_FRIEND_EMBEDDING_ENDPOINT=http://localhost:8080/v1/embeddings` |
 | `AI_FRIEND_EMBEDDING_DIM` | `embedding_dim` | `set AI_FRIEND_EMBEDDING_DIM=1024` |
 | `AI_FRIEND_SHORT_TERM_CAPACITY` | `short_term_capacity` | `set AI_FRIEND_SHORT_TERM_CAPACITY=500` |

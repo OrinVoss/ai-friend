@@ -442,10 +442,12 @@ pending_turns
     ├ Step 1: LLM 抽取 facts（#127 只提取 user_fact）
     │   → FACT|category|key|value|confidence|importance|fact_type
     │   → 跳过 agent_fact / system_fact（AI 行为/系统属性不入库）
+    │   → 只从「用户:」开头的行提取（2026-07-20 Bug 2：AI 对用户的复述/画像不算用户陈述）
     │   → 单写 facts_v2（UNIQUE(session_id, category, key)，逐条 promote）
     │   → FactChecker 矛盾检测 (#6)：
     │       同 (category, key) 不同 value → 直接矛盾
     │       嵌入相似度 > 0.65 且 value 不同 → 语义矛盾
+    │       语义候选先经 LLM 复核（verify_fn，2026-07-20 Bug 3：复述/近义否决则保留旧事实）
     │       矛盾事实: confidence × 0.4
     │       衰减后 < 0.2 → 软删除 (is_active=0)
     │
@@ -455,7 +457,9 @@ pending_turns
     │
     ├ Step 3: 分层洞察（#5，二期 2026-07-20 替代反思）
     │   → L1 基础洞察（每次）/ L2 行为模式（每 3 次）/ L3 深度洞察（每 10 次）
+    │   → 本批无新事实/新体验（纯功能性操作）→ 跳过 L1，省一次 LLM 调用（R3 短路）
     │   → LLM 输出 JSON（hypothesis/evidence/confidence）→ insert insights_v2
+    │   → 强制规则（R3）：evidence 为空或 confidence < 0.7 → needs_more_evidence=True（覆盖 LLM 自报值）
     │
     ├ Step 4: 更新 relationship
     │   → familiarity += 0.02
@@ -491,7 +495,8 @@ Observation（原始观察，整批对话文本，低置信）
 FactV2（四维评分：confidence / stability / freshness / importance）
     │
     ├ verify     → verification_count += 1，刷新 last_verified_at
-    ├ contradict → status = "contradicted"
+    ├ contradict → status = "contradicted"；并向上传播（2026-07-20 P2）：
+    │   引用该 Fact 的 active Insight → needs_more_evidence=1 + confidence ×0.5（mark_insight_suspect）
     └ decay（GC 时）→ freshness/confidence × 0.99^天数
          → freshness < 0.2 → status = "decayed"
 
@@ -499,7 +504,7 @@ GC（每 5 次 consolidation 执行一次）：
   decay + merge_duplicates（占位）+ 归档 > 30 天的 observations
 ```
 
-由 `MemoryLifecycleManager`（memory/lifecycle.py）提供 observe / promote / verify / contradict / decay / gc；对应模型 Observation / FactV2（models/memory.py），测试 tests/test_memory_lifecycle.py（7 用例）。
+由 `MemoryLifecycleManager`（memory/lifecycle.py）提供 observe / promote / verify / contradict / decay / gc；对应模型 Observation / FactV2（models/memory.py），测试 tests/test_memory_lifecycle.py（12 用例）。
 
 ### 4.5 上下文压缩
 
@@ -564,6 +569,7 @@ GC（每 5 次 consolidation 执行一次）：
 1. 同 (category, fact_key) 不同 fact_value → 直接矛盾
 2. 嵌入余弦相似度 > 0.65 且 value 不同 → 语义矛盾
 3. 嵌入引擎不可用时回退关键词重叠（Jaccard ≥ 0.5）检测（FC-005）
+4. 语义候选矛盾经 LLM 复核（`verify_fn` / CONTRADICTION_VERIFY_PROMPT，2026-07-20 Bug 3）：复述/近义/补充 → 否决并保留旧事实；复核异常保持原判定；同键直接判定不经复核
 
 **置信度衰减**：
 - 被矛盾的事实：confidence × 0.4（新事实置信度明显更低时 ×0.7 轻度衰减，FC-003）

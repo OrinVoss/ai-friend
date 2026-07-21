@@ -1,6 +1,6 @@
 # 重构进度总览
 
-> 最后更新：2026-07-16
+> 最后更新：2026-07-20
 
 ## 整体架构六层方案
 
@@ -133,7 +133,7 @@ Phase 3（按需）：
 - [x] 魔法数字提取为类常量
 - [x] Agent 1/2 工具注册表隔离
 - [x] Agent 2 执行逻辑拆分
-- [x] 主动沉思循环（Proactive Think Loop）：`assess_proactive()` 3 轮有界循环 + JSON schema + 挂念清单一期（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）
+- [x] 主动沉思循环（Proactive Think Loop）：`assess_proactive()` 2 轮有界循环（F2，2026-07-20 由 3 轮收紧）+ JSON schema + 挂念清单一期（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）
 - [x] 内驱状态二期：类型化条目 + 生命周期 + 情绪联动浮现规则 + 响应路径语义浮现 + consolidation 对照解决/线索写入（2026-07-18，`changes/2026-07-18-inner-drive-state-p2.md`）
 
 **待完成**：

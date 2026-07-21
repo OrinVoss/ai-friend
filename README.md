@@ -55,7 +55,7 @@
     └── user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写）
 ```
 
-记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ Insight（二期规划）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
+记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ **Insight**（二期已上线 2026-07-20，假设 + 证据链 + 过期时间）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` 表数据已迁移并归档为 `user_facts_archive`（schema v4）；双写开关 `use_observation_fact` 已随上线删除。
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
 
@@ -336,24 +336,24 @@ ai-friend/
 │   ├── systematic-solution.md 六层系统性解决方案
 │   └── refactor/              重构设计与进度（self-system 总装图 + 六层方案 + systems 增强 + progress）
 │
-├── tests/                     单元测试（672 用例，52 个测试文件）
+├── tests/                     单元测试（693 用例，52 个测试文件）
 │   ├── mocks.py                Mock 工厂
-│   ├── test_emotional_state.py EmotionalState 测试（41 用例）
+│   ├── test_emotional_state.py EmotionalState 测试（48 用例）
 │   ├── test_dispatcher.py      工具调度测试（37 用例）
-│   ├── test_inner_drive.py     InnerDrive 测试（37 用例，含主动沉思循环）
+│   ├── test_inner_drive.py     InnerDrive 测试（41 用例，含主动沉思循环）
 │   ├── test_inner_drive_state.py 挂念清单测试（7 用例）
-│   ├── test_fact_checker.py    矛盾检测测试（26 用例）
+│   ├── test_fact_checker.py    矛盾检测测试（30 用例）
 │   ├── test_retrieval.py       检索评分 + 语义维度回归（22 用例）
-│   ├── test_message_handler.py 消息处理测试（21 用例）
+│   ├── test_message_handler.py 消息处理测试（30 用例）
 │   ├── test_repository.py      Repository 数据访问 + session 隔离（19 用例）
 │   ├── test_embeddings.py      嵌入引擎测试（16 用例）
 │   ├── test_web_agent.py       WebAgent 主动行为测试（15 用例）
 │   ├── test_tool_agent.py      ToolAgent 测试（14 用例）
 │   ├── test_v02_issues.py      v0.2 综合测试（14 用例）
-│   ├── test_prompt_instructions.py Prompt 指令测试（12 用例）
+│   ├── test_prompt_instructions.py Prompt 指令测试（20 用例）
 │   ├── test_personality_core.py 人格核心测试（12 用例）
 │   ├── test_context_manager.py 上下文管理测试（12 用例）
-│   ├── test_consolidation.py   记忆合并 FactChecker 集成测试（12 用例）
+│   ├── test_consolidation.py   记忆合并 FactChecker 集成测试（30 用例）
 │   ├── test_provider.py        Provider 测试（10 用例）
 │   ├── test_notify_tool.py     通知工具测试（9 用例）
 │   ├── test_cli_controller.py  CLI 控制器测试（8 用例）
@@ -365,7 +365,7 @@ ai-friend/
 │   ├── test_session_factory.py 统一装配测试（5 用例）
 │   ├── test_unified_pipeline.py 统一管线引擎测试（13 用例）
 │   ├── test_runtime_driver.py 时间驱动循环测试（9 用例）
-│   ├── test_memory_agent.py    Memory Agent 测试（33 用例）
+│   ├── test_memory_agent.py    Memory Agent 测试（34 用例）
 │   ├── test_add_turn_metadata.py add_turn metadata 回归测试（4 用例）
 │   ├── test_sleep_manager.py   睡眠系统测试（6 用例）
 │   ├── test_session_manager.py 会话管理测试（6 用例）
@@ -403,10 +403,10 @@ ai-friend/
 │   ├── long_term.py            LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
 │   ├── embeddings.py           本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache + 线程锁）
 │   ├── lifecycle.py            MemoryLifecycleManager（Observation→Fact 生命周期：observe/promote/verify/contradict/decay/gc）
-│   ├── fact_checker.py         矛盾检测 + 置信度衰减 + 用户纠正（语义相似度→衰减→软删除）
+│   ├── fact_checker.py         矛盾检测 + 置信度衰减 + 用户纠正（语义相似度→LLM 复核→衰减→软删除）
 │   ├── retrieval.py            三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
 │   ├── memory_agent.py         Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 指代解析（确定性管道，P0~P2）
-│   └── consolidation.py        记忆合并（事实/体验/反思/分层反思L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
+│   └── consolidation.py        记忆合并（事实/体验/分层洞察L1/L2/L3）+ FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
 │
 ├── tools/                     工具系统（Agent 1,3: 2 内部 / Agent 2: 7 外部）
 │   ├── traits.py               Tool 基类 + to_json_schema() + ToolResult + ToolRegistry
