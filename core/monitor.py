@@ -32,6 +32,9 @@ class MonitorRecord:
     # 可选字段带默认值，旧记录兼容。
     truncated: bool = False                            # 响应被截断（finish_reason=length / 流超时 / 超 1MB / 缺 [DONE]）
     finish_reason: str = ""                            # API 返回的 finish_reason（如可见）
+    # A3（2026-07-21，logging.md P1-6）：监控记录接通 request_id，
+    # 慢调用可拿 id 回日志捞全链路
+    request_id: str = ""
 
 
 @dataclass
@@ -194,8 +197,10 @@ def record_call(
     """记录一次完整的 LLM API 调用（若监控被禁用则忽略）。"""
     if not _monitor_enabled:
         return
+    from core.logging_setup import request_id_var
     rec = MonitorRecord(
-        timestamp=time.strftime("%H:%M:%S"),
+        # A3: 时间戳补日期（跨天可对齐），request_id 从 ContextVar 读
+        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
         model=model,
         duration_ms=round(duration_ms, 1),
         max_tokens=max_tokens,
@@ -206,5 +211,6 @@ def record_call(
         source=source,
         truncated=truncated,
         finish_reason=finish_reason,
+        request_id=request_id_var.get(),
     )
     _monitor.record(rec)

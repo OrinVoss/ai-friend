@@ -5,6 +5,7 @@ Replaces duplicated _run_sync implementations in long_term.py and repository.py.
 
 import asyncio
 import concurrent.futures
+import contextvars
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,11 @@ def run_async(coro, timeout: float = 60.0):
         # #263: 无循环分支同样应用 timeout，wait_for 超时会掐断协程
         return asyncio.run(asyncio.wait_for(coro, timeout))
 
-    # Already inside an event loop — use a thread to run the coroutine
-    future = _EXECUTOR.submit(asyncio.run, coro)
+    # Already inside an event loop — use a thread to run the coroutine.
+    # A3（2026-07-21）：copy_context 显式传播——ThreadPoolExecutor 不会自动
+    # 携带 ContextVar，request_id 等上下文需要随任务进入 worker 线程。
+    ctx = contextvars.copy_context()
+    future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:

@@ -286,6 +286,13 @@ class MessageHandler:
         if not user_input or not user_input.strip():
             return ""
 
+        # A3（2026-07-21）：CLI 路径的 request_id 设置点——Web 已由中间件
+        # 设置，这里仅在未设置时生成。无需复位：后台 tick 在独立线程/任务
+        # 的 context 里，天然显示 '-'（三个生命循环的边界即 context 边界）
+        from core.logging_setup import new_request_id, request_id_var
+        if not request_id_var.get():
+            request_id_var.set(new_request_id())
+
         # #110: strip prompt injection patterns from user input
         user_input = _sanitize_input(user_input)
 

@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from config import load_config
+from core.logging_setup import new_request_id, request_id_var
 from core.conversation_engine import ConversationEngine, Frontend
 from core.personality_manager import PersonalityManager
 from core.runtime_driver import RuntimeDriver
@@ -147,10 +148,16 @@ def _request_token_ok(request: Request) -> bool:
 
 @app.middleware("http")
 async def _token_auth(request: Request, call_next):
-    if request.url.path.startswith("/api/") and not _request_token_ok(request):
-        logger.warning(f"[auth] 401: {request.url.path} from {request.client.host if request.client else '?'}")
-        return JSONResponse({"detail": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    # A3: 每个 HTTP 请求一个 request_id，全链路日志可关联
+    rid = new_request_id()
+    token = request_id_var.set(rid)
+    try:
+        if request.url.path.startswith("/api/") and not _request_token_ok(request):
+            logger.warning(f"[auth] 401: {request.url.path} from {request.client.host if request.client else '?'}")
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return await call_next(request)
+    finally:
+        request_id_var.reset(token)
 
 
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
@@ -421,6 +428,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
             data = json.loads(raw)
             msg_type = data.get("type", "")
+            # A3: WS 长连接按消息帧打 request_id（init 除外——它只是握手）
+            if msg_type == "message":
+                request_id_var.set(new_request_id())
 
             if msg_type == "init":
                 # A1: token 启用时，init 消息必须带匹配 token，否则 4001 关闭
