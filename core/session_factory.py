@@ -118,6 +118,9 @@ def assemble_session(config: Config, db: Database, session_id: str,
     if personality_manager is None:
         personality_manager = PersonalityManager()
     personality = personality_manager.load_role(role_id)
+    # A6: 按真实时间衰减的「一轮秒数」从 config 注入（默认 300s）
+    personality.emotion.turn_seconds = float(
+        getattr(config, "emotion_turn_seconds", 300))
 
     repo = Repository(db)
     repo.session_id = role_id

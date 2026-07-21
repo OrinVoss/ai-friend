@@ -45,6 +45,59 @@ class TestR5NegativeWeightAndBoundary(unittest.TestCase):
         self.assertEqual(e._valence_boundary_count, 0)
 
 
+class TestDecayElapsed(unittest.TestCase):
+    """A6（2026-07-21）：按真实时间衰减（读时结算）。"""
+
+    def _state(self, **kw):
+        base = dict(valence=0.9, arousal=0.8, baseline_valence=0.4,
+                    baseline_arousal=0.3, decay_rate=0.1, turn_seconds=300.0)
+        base.update(kw)
+        return EmotionalState(**base)
+
+    def test_first_call_initializes_no_decay(self):
+        e = self._state()
+        n = e.decay_elapsed(now=1000.0)
+        self.assertEqual(n, 0)
+        self.assertEqual(e.last_decay_at, 1000.0)
+        self.assertAlmostEqual(e.valence, 0.9)
+
+    def test_elapsed_settles_n_ticks(self):
+        e = self._state()
+        e.decay_elapsed(now=1000.0)
+        n = e.decay_elapsed(now=1000.0 + 900)  # 3 ticks
+        self.assertEqual(n, 3)
+        # 与手动 3 次 decay() 完全一致
+        ref = self._state()
+        for _ in range(3):
+            ref.decay()
+        self.assertAlmostEqual(e.valence, ref.valence, places=6)
+        self.assertAlmostEqual(e.arousal, ref.arousal, places=6)
+        self.assertAlmostEqual(e.joy, ref.joy, places=6)
+
+    def test_clamped_at_50(self):
+        e = self._state()
+        e.decay_elapsed(now=1000.0)
+        n = e.decay_elapsed(now=1000.0 + 300 * 999)  # 远超上限
+        self.assertEqual(n, 50)
+
+    def test_no_elapsed_no_decay(self):
+        e = self._state()
+        e.decay_elapsed(now=1000.0)
+        n = e.decay_elapsed(now=1000.0 + 100)  # 不足一轮
+        self.assertEqual(n, 0)
+        self.assertAlmostEqual(e.valence, 0.9)
+
+    def test_prompt_summary_triggers_settlement(self):
+        e = self._state()
+        e.decay_elapsed(now=1000.0)
+        import time
+        # to_prompt_summary 用真实时间——把 last_decay_at 拨到 2 小时前
+        e.last_decay_at = time.time() - 7200
+        v_before = e.valence
+        e.to_prompt_summary()
+        self.assertLess(e.valence, v_before)  # 已向 baseline 回落
+
+
 class TestShift(unittest.TestCase):
     def setUp(self):
         self.e = _make_default_state()

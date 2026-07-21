@@ -22,6 +22,7 @@
   "inner_drive_surface_top_k": 8,
   "inner_drive_surface_response_k": 3,
   "inner_drive_decay_rate": 0.9,
+  "emotion_turn_seconds": 300,
   "inner_drive_care_similarity_threshold": 0.7,
   "agent2_total_timeout_seconds": 120,
   "web_access_token": "",

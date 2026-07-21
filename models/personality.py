@@ -96,6 +96,11 @@ class EmotionalState:
     turns_without_anger: int = 0
     # R5: 连续停留在效价边界的 shift 次数，用于升级边界告警
     _valence_boundary_count: int = 0
+    # A6（2026-07-21，systems/emotion.md P0-3）：按真实时间衰减。
+    # last_decay_at=0 表示未初始化（首次结算视为 now，不回溯）；
+    # turn_seconds 是「一轮衰减对应的真实秒数」（持久化，可手改）
+    last_decay_at: float = 0.0
+    turn_seconds: float = 300.0
 
     @property
     def dominant_emotion(self) -> str:
@@ -260,6 +265,31 @@ class EmotionalState:
                      f"joy={self.joy:.2f} anger={self.anger:.2f} sadness={self.sadness:.2f} "
                      f"resentment={self.resentment:.2f}")
 
+    def decay_elapsed(self, now: float | None = None) -> int:
+        """A6：按真实时间结算衰减（读时结算，不加后台线程）。
+
+        n = (now - last_decay_at) / turn_seconds，clamp 到 [0, 50]，
+        循环执行 n 次现有 decay()（逐次递推，与按轮衰减数学上完全一致）。
+        首次调用只初始化时间戳不回溯。返回结算的 tick 数。"""
+        import time as _time
+        now = now if now is not None else _time.time()
+        if not self.last_decay_at:
+            self.last_decay_at = now
+            return 0
+        if self.turn_seconds <= 0:
+            self.last_decay_at = now
+            return 0
+        n = int((now - self.last_decay_at) / self.turn_seconds)
+        n = max(0, min(n, 50))
+        if n <= 0:
+            return 0
+        self.last_decay_at = now
+        for _ in range(n):
+            self.decay()
+        logger.info(f"[emotion] decay_elapsed: settled {n} tick(s) "
+                    f"(idle {self.turn_seconds:.0f}s/tick)")
+        return n
+
     def decay(self) -> None:
         """Decay toward baseline AND mood, with per-emotion rates."""
         # Fast decay toward baseline (turn-level)
@@ -343,6 +373,8 @@ class EmotionalState:
         This decouples the full EmotionalState from prompt formatting: Runtime
         can pass this lightweight dict instead of the whole object (#294 P2-5).
         """
+        # A6: 读时结算——prompt 是最主要的读取路径，在此按真实时间衰减
+        self.decay_elapsed()
         emotion_desc = {
             "excited": "兴奋", "content": "满足", "engaged": "投入",
             "anxious": "有点不安", "melancholy": "有些忧郁",
