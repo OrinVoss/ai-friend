@@ -120,17 +120,28 @@ class Personality:
         if not os.path.exists(path):
             config = PersonalityConfig()
             return cls(config)
+        bak_path = path + ".bak"
+        data = None
         try:
-            # PE-004: backup before reading
-            bak_path = path + ".bak"
-            if os.path.exists(path):
-                import shutil
-                shutil.copy2(path, bak_path)
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+            # A4（2026-07-21）：解析成功后才刷新 .bak——PE-004 原来在读前
+            # 复制，会把损坏文件覆盖到备份上；改后 .bak 始终是 last-known-good
+            import shutil
+            shutil.copy2(path, bak_path)
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Failed to load personality from {path}: {e}")
-            return cls(PersonalityConfig())
+            # A4: 损坏时先尝试从 .bak（last-known-good）恢复，再退默认人格
+            if os.path.exists(bak_path):
+                try:
+                    with open(bak_path, encoding="utf-8") as f:
+                        data = json.load(f)
+                    logger.warning(f"[personality] {path} 损坏（{e}），已从 .bak 恢复")
+                except (json.JSONDecodeError, OSError) as e2:
+                    logger.warning(f"[personality] {path} 与 .bak 均损坏（{e2}），使用默认人格")
+                    return cls(PersonalityConfig())
+            else:
+                logger.warning(f"Failed to load personality from {path}: {e}")
+                return cls(PersonalityConfig())
 
         p_data = data.get("personality", data)
         e_data = data.get("emotional_state", {})

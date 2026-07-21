@@ -28,6 +28,10 @@ class PersonalityManager:
         path = self.personality_path(role_id)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Role file not found: {path}")
+        # A4: 加载前校验——拼错字段/越界值全部进日志（此前静默失效）
+        from core.personality_validator import (log_issues,
+                                                validate_personality_file)
+        log_issues(path, validate_personality_file(path))
         return Personality.load(path)
 
     def save_role(self, role_id: str, personality: Personality) -> None:
