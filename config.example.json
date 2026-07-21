@@ -24,6 +24,7 @@
   "inner_drive_decay_rate": 0.9,
   "inner_drive_care_similarity_threshold": 0.7,
   "agent2_total_timeout_seconds": 120,
+  "web_access_token": "",
   "db_backup_enabled": true,
   "db_backup_keep": 5
 }

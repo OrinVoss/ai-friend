@@ -69,6 +69,10 @@ class Config:
     agent2_total_timeout_seconds: int = 120  # L4-2: hard deadline for Agent 2 tool loop
     web_host: str = "0.0.0.0"
     web_port: int = 8000
+    # A1（2026-07-21）：Web 访问 token。空 = 不启用（行为与现状一致）。
+    # 启用后：/api/* 需 Authorization: Bearer <token> 或 ?token=<token>，
+    # WS init 消息需带 token 字段（web.md 一期）。
+    web_access_token: str = ""
     log_level: str = "INFO"
     # MN-003: LLM monitor switch -- disable in production to avoid leaking prompts
     monitor_enabled: bool = True
@@ -189,6 +193,7 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         "AI_FRIEND_TIMEOUT": "api_timeout",
         "AI_FRIEND_TYPING_SPEED": "typing_speed",
         "AI_FRIEND_WEB_HOST": "web_host",
+        "AI_FRIEND_WEB_ACCESS_TOKEN": "web_access_token",
         "AI_FRIEND_WEB_PORT": "web_port",
         "AI_FRIEND_EMBEDDING_ENDPOINT": "embedding_endpoint",
         "AI_FRIEND_EMBEDDING_DIM": "embedding_dim",

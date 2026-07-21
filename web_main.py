@@ -25,6 +25,14 @@ def main():
         host = getattr(config, 'web_host', '0.0.0.0')
         port = getattr(config, 'web_port', 8000)
 
+        # A1: 非 loopback 绑定且未设 token → 醒目告警（不阻断启动，
+        # 避免打断现有穿透部署；web.md 建议尽快补 token）
+        if host not in ("127.0.0.1", "localhost") and not getattr(
+                config, "web_access_token", ""):
+            logger.warning(
+                f"[auth] ⚠️ Web 绑定 {host} 且未设置 web_access_token——"
+                "任何能访问该地址的人都可以操作全部 API，建议立即在 config.json 配置 token")
+
         logger = logging.getLogger(__name__)
         logger.info(f"Starting AI Friend Web: model={config.api_model} host={host}:{port} log_level={config.log_level}")
 

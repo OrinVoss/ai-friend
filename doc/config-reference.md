@@ -27,6 +27,7 @@
 |------|------|--------|------|
 | `web_host` | string | `"0.0.0.0"` | 监听地址 |
 | `web_port` | int | `8000` | 监听端口 |
+| `web_access_token` | string | `""` | Web 访问 token：空=不启用；启用后 `/api/*` 需 `Authorization: Bearer <token>` 或 `?token=`，WS init 需带 token。非 loopback 绑定且未设置时启动打印醒目告警 |
 | `allowed_origins` | array | `[]` | 额外允许的 CORS 来源（默认已包含 localhost） |
 
 ### 记忆系统
@@ -112,6 +113,7 @@
 | `AI_FRIEND_DB_PATH` | `db_path` | `set AI_FRIEND_DB_PATH=D:\data\my_friend.db` |
 | `AI_FRIEND_LOG_LEVEL` | `log_level` | `set AI_FRIEND_LOG_LEVEL=DEBUG` |
 | `AI_FRIEND_WEB_HOST` | `web_host` | `set AI_FRIEND_WEB_HOST=0.0.0.0` |
+| `AI_FRIEND_WEB_ACCESS_TOKEN` | `web_access_token` | `set AI_FRIEND_WEB_ACCESS_TOKEN=your-token` |
 | `AI_FRIEND_WEB_PORT` | `web_port` | `set AI_FRIEND_WEB_PORT=8000` |
 | `AI_FRIEND_TYPING_SPEED` | `typing_speed` | `set AI_FRIEND_TYPING_SPEED=0.005` |
 | `AI_FRIEND_MAX_TOOL_ITERATIONS` | `max_tool_iterations` | `set AI_FRIEND_MAX_TOOL_ITERATIONS=5` |

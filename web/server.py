@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import load_config
@@ -126,6 +126,31 @@ async def _add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
+
+
+# A1（2026-07-21，web.md 一期）：可选 token 鉴权。config.web_access_token
+# 为空时不启用，行为与现状逐字节一致；启用后 /api/* 需要
+# Authorization: Bearer <token> 或 ?token=<token>（EventSource 不能自定义头）。
+def _token_enabled() -> str:
+    return getattr(config, "web_access_token", "") or ""
+
+
+def _request_token_ok(request: Request) -> bool:
+    token = _token_enabled()
+    if not token:
+        return True
+    auth = request.headers.get("authorization", "")
+    if auth == f"Bearer {token}":
+        return True
+    return request.query_params.get("token") == token
+
+
+@app.middleware("http")
+async def _token_auth(request: Request, call_next):
+    if request.url.path.startswith("/api/") and not _request_token_ok(request):
+        logger.warning(f"[auth] 401: {request.url.path} from {request.client.host if request.client else '?'}")
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
@@ -398,6 +423,11 @@ async def websocket_endpoint(websocket: WebSocket):
             msg_type = data.get("type", "")
 
             if msg_type == "init":
+                # A1: token 启用时，init 消息必须带匹配 token，否则 4001 关闭
+                if _token_enabled() and data.get("token") != _token_enabled():
+                    logger.warning("[auth] ws init rejected: bad token")
+                    await websocket.close(code=4001)
+                    return
                 sid = data.get("session_id")
                 role_id = data.get("role_id")
                 session_id, agent = session_manager.get_or_create(sid, role_id)

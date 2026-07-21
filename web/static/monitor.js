@@ -2,6 +2,22 @@ let autoRefresh = false;
 let refreshTimer = null;
 let currentData = [];
 
+// A1: 可选 token 鉴权（web_access_token），与 app.js 同一约定
+function getToken() { return localStorage.getItem('ai_friend_token') || ''; }
+function authFetch(url, opts) {
+  opts = opts || {};
+  if (getToken()) {
+    opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + getToken() });
+  }
+  return fetch(url, opts).then(function(resp) {
+    if (resp.status === 401) {
+      var t = prompt('需要访问令牌（web_access_token）：');
+      if (t) { localStorage.setItem('ai_friend_token', t); location.reload(); }
+    }
+    return resp;
+  });
+}
+
 function fmtDuration(ms) {
   if (ms < 1000) return ms + 'ms';
   return (ms / 1000).toFixed(1) + 's';
@@ -118,7 +134,7 @@ function restoreOpenKeys(keys) {
 function fetchData() {
   document.getElementById('status').textContent = '加载中...';
   const openKeys = getOpenKeys();
-  fetch('/api/monitor?limit=0')
+  authFetch('/api/monitor?limit=0')
     .then(r => r.json())
     .then(data => {
       currentData = data || [];
@@ -150,7 +166,7 @@ function bindCardHeaders() {
 }
 
 function clearData() {
-  fetch('/api/monitor/clear').then(() => fetchData());
+  authFetch('/api/monitor/clear').then(() => fetchData());
   document.getElementById('status').textContent = '已清空';
 }
 

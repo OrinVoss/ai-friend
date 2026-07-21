@@ -6,6 +6,27 @@ let roleName = '';
 let isProcessing = false;
 let lastMessageTime = 0;
 let logsEnabled = true;
+
+// A1: 可选 token 鉴权（web_access_token）——token 存 localStorage，
+// 401 时提示输入并重载
+function getToken() { return localStorage.getItem('ai_friend_token') || ''; }
+function withToken(url) {
+    var t = getToken();
+    return t ? url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t) : url;
+}
+function authFetch(url, opts) {
+    opts = opts || {};
+    if (getToken()) {
+        opts.headers = Object.assign({}, opts.headers, { 'Authorization': 'Bearer ' + getToken() });
+    }
+    return fetch(url, opts).then(function(resp) {
+        if (resp.status === 401) {
+            var t = prompt('需要访问令牌（web_access_token）：');
+            if (t) { localStorage.setItem('ai_friend_token', t); location.reload(); }
+        }
+        return resp;
+    });
+}
 let eventSource = null;
 let currentMobileTab = 'chat';
 let reconnectDelay = 2000;
@@ -82,6 +103,7 @@ function connect() {
         var init = { type: 'init' };
         if (sessionId) init.session_id = sessionId;
         if (roleId) init.role_id = roleId;
+        if (getToken()) init.token = getToken();
         ws.send(JSON.stringify(init));
         setStatus('connected');
     };
@@ -199,7 +221,7 @@ function loadHistory() {
     if (!sid) return;
     var controller = new AbortController();
     setTimeout(function() { controller.abort(); }, 15000);
-    fetch('/api/chat/history?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
+    authFetch('/api/chat/history?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             var container = document.getElementById('chat-messages');
@@ -220,7 +242,7 @@ function loadStatus() {
     var sid = getCookie('session_id') || 'default';
     var controller = new AbortController();
     setTimeout(function() { controller.abort(); }, 15000);
-    fetch('/api/status?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
+    authFetch('/api/status?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             renderStatus(data);
@@ -274,7 +296,7 @@ function connectLogs() {
     var content = document.getElementById('logs-content');
     if (!content) return;
 
-    eventSource = new EventSource('/api/logs');
+    eventSource = new EventSource(withToken('/api/logs'));
     eventSource.onmessage = function(e) {
         appendLogLine(e.data);
     };
@@ -398,7 +420,7 @@ function sendMessage() {
     } else {
         var controller = new AbortController();
         setTimeout(function() { controller.abort(); }, 15000);
-        fetch('/api/chat', {
+        authFetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: text, session_id: sessionId }),
@@ -437,7 +459,7 @@ function openRoleModal() {
     list.innerHTML = '<div class="system-message">加载中...</div>';
     showModal('role-modal');
 
-    fetch('/api/roles')
+    authFetch('/api/roles')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             list.innerHTML = '';
