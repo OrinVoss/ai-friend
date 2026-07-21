@@ -21,10 +21,10 @@ Layer 6: Personality / Session / 记忆绑定
 |-------|------|----------|----------|--------|
 | Layer 1 | Memory 生命周期（Observation → Fact → Insight） | ✅ 全部完成（一期 Fact + 二期 Insight + Memory Agent P0~P2，2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
 | Layer 2 | Prompt 分层与静态化 | 大部分已完成 | 完整（含短输入过滤优化方案） | Kimi |
-| Layer 3 | 多阶段 Retrieval | 未开始 | 设计完成 | Kimi |
-| Layer 4 | Agent Runtime 解耦 | 部分已完成 | 完整 | Kimi |
+| Layer 3 | 多阶段 Retrieval | 主体完成（2026-07-21） | 设计 + 实现记录 | Kimi |
+| Layer 4 | Agent Runtime 解耦 | 收尾完成（L4-1~L4-4 + L4-6a/b，2026-07-21） | 完整 | Kimi |
 | Layer 5 | Tool Agent 精简 | 大部分已完成（Prompt 已精简） | 完整 | Kimi |
-| Layer 6 | Personality / Session / 记忆绑定 | 未开始 | 设计完成 | Kimi |
+| Layer 6 | Personality / Session / 记忆绑定 | 已实现 | 2026-07-21 | Kimi |
 
 ---
 
@@ -105,21 +105,25 @@ Phase 3（按需）：
 
 ## Layer 3: 多阶段 Retrieval
 
-**代码状态**：未开始
-**文档状态**：设计完成
+**代码状态**：主体完成（2026-07-21）
+**文档状态**：设计完成 + 实现记录
 
 **已完成（文档）**：
 - [x] 多阶段检索架构（Query Analyzer → Parallel Retriever → Cross Verifier → Reranker → Context Builder）
 - [x] 各 Agent Retrieval Profile（Agent 1/2/3、Fact Extractor、Memory Agent）
 
-**待完成**：
-- [ ] `QueryClues` 数据模型 + `ParallelRetriever`
-- [ ] `CrossVerifier` 与 `FactChecker` 集成
-- [ ] `ContextBuilder` 按 Agent 类型组装
-- [ ] 不同 Agent 使用不同 Retrieval 策略
-- [ ] React 默认不读取 Reflection
+**已完成（代码）**：
+- [x] 抽取 `memory/retrieval_pipeline.py`：QueryClues / MemoryEvidence / retrieve_bundle / cross_verify / ContextBuilder
+- [x] `ContextBuilder` 按 Agent Profile 渲染（agent1 全文 / agent3 轻量 / agent2 空）
+- [x] Agent 3 `context_summary` 切换为轻量上下文，Agent 1 prompt 仍为全文
+- [x] `_cs_memo` 缓存 `MemoryAnswer` 对象，assess/review/re_decide 共享一次 `memory_agent.answer()`
+- [x] `tests/test_retrieval_pipeline.py` 覆盖 retrieve_bundle / cross_verify / ContextBuilder
 
-**阻塞项**：等待 Layer 1 二期完成，Insight 替代 Reflection 后 Context Builder 才有意义
+**待完成**：
+- [ ] `fact_extractor` 未接线：仅 profile 桩，现状提取输入为整批 turn 文本，够用
+- [ ] React 默认不读取 Reflection（已随 Insight 替代 Reflection 自然解决）
+
+**阻塞项**：无
 
 ---
 
@@ -136,14 +140,19 @@ Phase 3（按需）：
 - [x] 主动沉思循环（Proactive Think Loop）：`assess_proactive()` 2 轮有界循环（F2，2026-07-20 由 3 轮收紧）+ JSON schema + 挂念清单一期（2026-07-18，`changes/2026-07-18-proactive-think-loop.md`）
 - [x] 内驱状态二期：类型化条目 + 生命周期 + 情绪联动浮现规则 + 响应路径语义浮现 + consolidation 对照解决/线索写入（2026-07-18，`changes/2026-07-18-inner-drive-state-p2.md`）
 
-**待完成**：
-- [ ] 为 `Agent` 添加公开方法，避免直接访问内部属性
-- [ ] 改进异常处理，错误时向用户反馈
-- [ ] 全局请求超时
-- [ ] 依赖注入
-- [ ] 强化输入清洗
+**已完成（收尾，2026-07-21）**：
+- [x] 为 `Agent` 添加公开方法，避免 `MessageHandler` 直接访问内部属性（L4-1）
+- [x] 强化输入清洗（L4-3）
+- [x] Agent 2 工具循环全局超时（L4-2）
+- [x] Agent 2 异常时向 Agent 3 注入如实反馈提示（L4-4）
+- [x] 内驱状态三期之反馈闭环 `record_outcome`（L4-6a）
+- [x] Memory Agent 矛盾来源写入 `curiosity` 条目（L4-6b）
 
-**阻塞项**：等待 Layer 3 确定各 Agent 的 Context 边界
+**明确不做**：
+- [ ] 依赖注入（收益不足以支撑结构性改动，L4-5）
+- [ ] dreams 长期梦想（无数据支撑，L4-6c）
+
+**阻塞项**：无
 
 ---
 
@@ -164,22 +173,17 @@ Phase 3（按需）：
 
 ## Layer 6: Personality / Session / 记忆绑定
 
-**代码状态**：未开始
-**文档状态**：设计完成
+**代码状态**：已实现（2026-07-21）
+**文档状态**：已同步
 
-**已完成（文档）**：
-- [x] RoleSession 数据模型设计
-- [x] 绑定关系图（Role → personality / session / sleep / embedding）
-- [x] 实施步骤（5 步）
+**已完成**：
+- [x] 强制 `session_id = role_id`（`assemble_session` / `SessionManager.get_or_create` 硬校验）
+- [x] 废弃根目录 `personality.json`（从 git 移除，代码引用清零）
+- [x] `PersonalityManager` 统一加载/保存/枚举/创建（`core/personality_manager.py`）
+- [x] 情绪状态持久化到 personality 文件（`personalities/{role_id}.json` 的 `emotional_state`）
+- [x] 多角色数据隔离验证（`tests/test_role_isolation.py`）
 
-**待完成**：
-- [ ] 强制 `session_id = role_id`
-- [ ] 废弃根目录 `personality.json`
-- [ ] `PersonalityManager` 统一加载/保存
-- [ ] 情绪状态持久化到 personality 文件
-- [ ] 多角色数据隔离验证
-
-**阻塞项**：需要先明确多角色产品形态
+**阻塞项**：无
 
 ---
 

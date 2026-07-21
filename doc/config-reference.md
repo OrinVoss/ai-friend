@@ -78,6 +78,7 @@
 | `max_tool_iterations` | int | `5` | ReAct 循环最大工具调用轮次 |
 | `degrade_threshold` | int | `3` | 连续工具失败 N 次后降级（#255） |
 | `max_fake_actions` | int | `3` | 虚假动作纠正上限（#255） |
+| `agent2_total_timeout_seconds` | int | `120` | Agent 2 工具循环全局超时（秒），超期后降级为 Agent 3 直接回复（L4-2） |
 | `monitor_enabled` | bool | `true` | LLM 调用监控开关（Web `/monitor` 页），生产环境建议关闭以避免记录 prompt |
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
 | `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
@@ -164,7 +165,7 @@
 
 - `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的默认模板。
 - 新增角色时，系统会复制该模板到 `personalities/{role_id}.json`。
-- 旧版根目录 `personality.json` 保留为备份，正常运行不再读取（仅在数据库一次性迁移时用于推断旧角色名）。
+- 根目录 `personality.json` 已废弃并从 git 移除；正常运行不再读取（数据库一次性迁移仍会读取遗留文件以推断旧角色名）。
 
 ### 静态部分 — 人格定义（可编辑）
 

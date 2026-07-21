@@ -35,7 +35,7 @@
 - 每个角色有独立的 `personality`（名字、性格特质、说话风格、背景故事、兴趣领域）
 - 每个角色有独立的 `emotional_state`（情绪状态），由系统自动维护
 - `config.json` 中的 `personality_file` 作为新建角色的模板
-- 系统默认提供 `personalities/default.json`（Luna），原 `personality.json` 保留为备份
+- 系统默认提供 `personalities/default.json`（Luna）作为模板
 
 ### 记忆系统
 
@@ -312,10 +312,9 @@ ai-friend/
 ├── web_main.py                Web 入口
 ├── config.py / config.json    配置系统（dataclass + JSON + 环境变量）
 ├── requirements.txt           依赖锁定（含 aiosqlite 等）
-├── personalities/             角色定义目录（每个角色独立 JSON）
+├── personalities/             角色定义目录（每个角色独立 JSON，含个性+情绪）
 │   ├── default.json             默认角色模板（Luna）
 │   └── 小星.json                 示例角色
-├── personality.json           旧版人格文件（保留为备份）
 ├── CLAUDE.md                  AI 协作规则
 ├── data/                      SQLite 数据库（WAL 模式）
 ├── logs/                      运行日志（YYYY-MM-DD.log，含 API/情绪/睡眠/工具追踪）

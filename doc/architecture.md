@@ -44,7 +44,7 @@ python web_main.py
 | `personality.interests` | 兴趣领域 |
 
 - `personalities/default.json` 是 `config.json` 中 `personality_file` 指向的模板。
-- Web 端启动时选择角色；角色与 session 严格一一对应（`session_id = role_id`），每个角色拥有独立的情绪与记忆。
+- Web 端启动时选择角色；角色与 session 严格一一对应（`session_id = role_id`），由 `core/personality_manager.py` 的 `PersonalityManager` 统一加载/保存/枚举角色，每个角色拥有独立的情绪与记忆。
 
 ### CLI 内置命令
 
@@ -214,12 +214,14 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 2. **Query-Guided**：语义 (0.6) + 关键词 (0.4) 混合评分 → LLM 重排序
 3. **On-Demand**：LLM 主动调 recall 工具回溯
 
+多阶段检索管线共享（`memory/retrieval_pipeline.py`），`ContextBuilder` 按 Agent Profile 渲染：Agent 1 读取完整交叉验证结果，Agent 3 读取轻量事实/经历/关系，Agent 2 不读记忆。
+
 语义搜索：基于 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, llama.cpp, 1024维），
 通过本地 llama-server /v1/embeddings API 计算余弦相似度。嵌入服务器不可用时自动降级为纯关键词检索。
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，旧 `reflections` 表已于 schema v5（2026-07-20）迁移数据后归档为 `reflections_archive`，代码均不再读写。在最终架构中 `session_id = role_id`，因此这些表也按角色隔离，实现「一个角色一份记忆」。
+长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` 表已于 schema v4（2026-07-18）迁移数据后归档为 `user_facts_archive`，旧 `reflections` 表已于 schema v5（2026-07-20）迁移数据后归档为 `reflections_archive`，代码均不再读写。Layer 6 已强制 `session_id = role_id`（`assemble_session` 与 `SessionManager.get_or_create` 不一致即抛错），因此这些表也按角色隔离，实现「一个角色一份记忆」。
 
 记忆生命周期（一期 Fact 上线 2026-07-18，二期 Insight 上线 2026-07-20）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（假设 + 证据链 + confidence + expires_at）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / create_insight / verify_insight / expire_insight / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2；分层 L1/L2/L3 生成结构化 Insight（LLM 输出 JSON：hypothesis/insight_type/evidence/confidence/needs_more_evidence，解析失败静默跳过），单写 insights_v2。读路径全部走 facts_v2 / insights_v2（repository 旧方法名适配，Reflection 返回形状不变：content=hypothesis、significance=confidence）；旧 `user_facts` / `reflections` 表数据已迁移并归档（schema v4 / v5）。
 
@@ -349,10 +351,9 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── web_main.py              Web 入口
 ├── config.py / config.json  配置系统
 ├── requirements.txt         依赖锁定
-├── personalities/           角色定义目录（每个角色独立 JSON）
+├── personalities/           角色定义目录（每个角色独立 JSON，含个性+情绪）
 │   ├── default.json           默认角色模板
 │   └── 小星.json               示例角色
-├── personality.json         旧版人格文件（保留为备份）
 ├── data/                    SQLite 数据库
 ├── changes/                 修改记录
 ├── doc/                     文档
