@@ -120,6 +120,9 @@ def _anysearch_api(tool_name: str, arguments: dict) -> dict:
 class WebSearchTool(Tool):
     """Search the web using AnySearch API."""
 
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"query": ("search", "keyword", "question")}
+
     # Layer5-WT1: network-heavy tool gets a longer leash.
     timeout_seconds = 45.0
 

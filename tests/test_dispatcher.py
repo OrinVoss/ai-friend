@@ -5,10 +5,14 @@ from unittest.mock import MagicMock
 from core.dispatcher import (
     parse_tool_calls, execute_tool_calls, format_tool_results,
     _try_structured_json,
-    contains_fake_action, _normalize_args,
+    contains_fake_action,
 )
 from tests.mocks import mock_tool_registry
 from tools.traits import ToolResult, ToolRegistry, Tool
+from tools.web_tools import WebSearchTool
+from tools.search_tools import GrepTool
+from tools.music_tool import MusicPlayTool
+from tools.notify_tool import NotifyTool
 
 
 class TestParseToolCalls(unittest.TestCase):
@@ -167,46 +171,78 @@ class TestContainsFakeAction(unittest.TestCase):
 
 
 class TestNormalizeArgs(unittest.TestCase):
-    def test_query_alias(self):
-        args = {"search": "hello"}
-        result = _normalize_args(args)
-        self.assertEqual(result["query"], "hello")
-        self.assertNotIn("search", result)
+    """KI-1: 参数别名归一下沉到各工具（dispatcher 全局别名已删除）。"""
 
-    def test_content_alias(self):
-        args = {"text": "message"}
-        result = _normalize_args(args)
-        self.assertEqual(result["content"], "message")
-        self.assertNotIn("text", result)
+    def test_query_alias_per_tool(self):
+        args = WebSearchTool().normalize_args({"search": "hello"})
+        self.assertEqual(args["query"], "hello")
+        self.assertNotIn("search", args)
 
-    def test_name_alias(self):
-        args = {"who": "Alice"}
-        result = _normalize_args(args)
-        self.assertEqual(result["name"], "Alice")
-        self.assertNotIn("who", result)
+    def test_grep_search_maps_to_pattern(self):
+        # 全局别名时代 search→query 后 grep 拿不到 pattern；下沉后修正
+        args = GrepTool().normalize_args({"search": "foo"})
+        self.assertEqual(args["pattern"], "foo")
+        self.assertNotIn("search", args)
+
+    def test_grep_path_aliases(self):
+        args = GrepTool().normalize_args({"pattern": "x", "dir": "src"})
+        self.assertEqual(args["path"], "src")
 
     def test_existing_field_kept(self):
-        args = {"query": "hello", "keyword": "world"}
-        result = _normalize_args(args)
-        self.assertEqual(result["query"], "hello")
-        # keyword stays because query already exists (group skipped)
-        self.assertIn("keyword", result)
+        args = WebSearchTool().normalize_args({"query": "hello", "keyword": "world"})
+        self.assertEqual(args["query"], "hello")
+        # keyword stays because query already exists
+        self.assertIn("keyword", args)
 
-    def test_title_not_mapped_to_song(self):
-        """title is a common notify param and must not be stolen by music aliases."""
-        args = {"title": "通知标题", "message": "正文"}
-        result = _normalize_args(args)
-        self.assertEqual(result["title"], "通知标题")
-        self.assertNotIn("song", result)
+    def test_title_not_mapped_to_song_for_notify(self):
+        """notify 的 title 不会被 music 的别名抢走（KI-1 原 bug 的回归守卫）。"""
+        args = NotifyTool().normalize_args({"title": "通知标题", "message": "正文"})
+        self.assertEqual(args["title"], "通知标题")
+        self.assertNotIn("song", args)
 
-    def test_song_name_and_track_aliases(self):
-        args = {"song_name": "晴天", "track": "七里香"}
-        result = _normalize_args(args)
-        # song_name wins because it appears first in the alias group
-        self.assertEqual(result["song"], "晴天")
-        self.assertNotIn("song_name", result)
+    def test_music_song_aliases(self):
+        args = MusicPlayTool().normalize_args({"song_name": "晴天", "track": "七里香"})
+        self.assertEqual(args["song"], "晴天")
+        self.assertNotIn("song_name", args)
         # track is kept because song already exists
-        self.assertIn("track", result)
+        self.assertIn("track", args)
+
+    def test_no_aliases_passthrough(self):
+        # 无别名表的工具原样返回（含 person/who/user→name 旧全局组已废弃）
+        args = NotifyTool().normalize_args({"who": "Alice", "title": "t"})
+        self.assertEqual(args, {"who": "Alice", "title": "t"})
+
+    def test_execute_tool_calls_applies_per_tool_aliases(self):
+        """dispatcher 执行前按工具归一参数：别名参数能通过 required 校验。"""
+        seen = {}
+
+        class _SearchTool(Tool):
+            ALIASES = {"query": ("search",)}
+
+            def name(self):
+                return "web_search"
+
+            def description(self):
+                return "d"
+
+            def parameters_schema(self):
+                return {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                }
+
+            def execute(self, args):
+                seen.update(args)
+                return ToolResult.ok("done")
+
+        registry = ToolRegistry()
+        registry.register(_SearchTool())
+        results = execute_tool_calls(registry, [
+            {"name": "web_search", "arguments": {"search": "hello"}}])
+        self.assertTrue(results[0]["success"])
+        # execute 拿到的是归一后的规范参数名
+        self.assertEqual(seen, {"query": "hello"})
 
 
 class TestStructuredJSON(unittest.TestCase):

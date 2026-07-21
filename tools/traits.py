@@ -97,6 +97,28 @@ class Tool:
     # Layer5-T1: internal tools (recall/remember) are never exposed to Agent 2.
     is_internal: bool = False
 
+    # KI-1: 参数别名表（原 dispatcher 全局别名下沉到各工具）。
+    # 格式：{规范参数名: (别名1, 别名2, ...)}；规范名已存在时别名不生效。
+    ALIASES: dict[str, tuple[str, ...]] = {}
+
+    def normalize_args(self, args: dict[str, Any]) -> dict[str, Any]:
+        """KI-1: 把 LLM 给出的别名参数归一到本工具的规范参数名。
+
+        dispatcher 只负责解析与分发，不再做全局参数改名——全局别名曾把
+        notify 的 title 吃掉（title→song 冲突），各工具自己声明自己的别名。
+        """
+        if not self.ALIASES or not isinstance(args, dict):
+            return args
+        result = dict(args)
+        for canonical, aliases in self.ALIASES.items():
+            if canonical in result:
+                continue
+            for alias in aliases:
+                if alias in result:
+                    result[canonical] = result.pop(alias)
+                    break
+        return result
+
     def name(self) -> str:
         raise NotImplementedError
 

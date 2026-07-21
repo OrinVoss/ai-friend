@@ -13,6 +13,12 @@ DEFAULT_EMBEDDING_ENDPOINT = "http://localhost:8080/v1/embeddings"
 MAX_WAIT_SECONDS = 90          # ES-001: give slower machines more time to load the model
 WAIT_POLL_INTERVAL = 1
 
+# M-18: watchdog — llama-server 崩溃后自动重启（此前 watcher 就绪即退出，
+# 进程死了无人管，只能靠 retrieval 每消息探活降级到关键词检索）
+WATCHDOG_INTERVAL = 30         # 看门狗探活间隔（秒）
+WATCHDOG_FAIL_THRESHOLD = 3    # 连续失败多少次才认定崩溃（容忍瞬时抖动）
+WATCHDOG_MAX_RESTARTS = 3      # 连续重启失败上限，超过则放弃保持降级
+
 
 def kill_existing_llama() -> None:
     """Kill any existing llama-server processes before starting a new one."""
@@ -153,6 +159,62 @@ def _wait_for_ready(proc: subprocess.Popen, endpoint: str,
         )
 
 
+def _wait_ready_quiet(endpoint: str, max_seconds: int) -> bool:
+    """Probe until ready or timeout without logging (watchdog restart path)."""
+    for _ in range(max_seconds):
+        if _is_server_ready(endpoint):
+            return True
+        time.sleep(WAIT_POLL_INTERVAL)
+    return _is_server_ready(endpoint)
+
+
+def _watchdog_loop(proc: subprocess.Popen, endpoint: str, server_log_path: str,
+                   log: logging.Logger, project: str,
+                   interval: float = WATCHDOG_INTERVAL, stop_event=None) -> None:
+    """M-18: keep llama-server alive after startup. Runs in a daemon thread.
+
+    Probes every `interval` seconds; WATCHDOG_FAIL_THRESHOLD consecutive
+    failed probes trigger kill+restart. Gives up after WATCHDOG_MAX_RESTARTS
+    consecutive failed restarts — retrieval keeps degrading to keyword
+    search either way (retrieval.py 每消息探活)，手动重启应用可恢复。
+    """
+    failures = 0
+    restarts = 0
+    while not (stop_event and stop_event.is_set()):
+        time.sleep(interval)
+        if _is_server_ready(endpoint):
+            failures = 0
+            continue
+        failures += 1
+        if failures < WATCHDOG_FAIL_THRESHOLD:
+            continue
+        failures = 0
+        restarts += 1
+        if restarts > WATCHDOG_MAX_RESTARTS:
+            log.error("[embed] watchdog: 连续重启失败，保持关键词检索降级，"
+                      "不再自动重启（手动重启应用可恢复）")
+            return
+        log.warning("[embed] watchdog: llama-server 无响应，尝试重启...")
+        kill_existing_llama()
+        new_proc = _start_llama_server(project, server_log_path, endpoint)
+        if new_proc is None:
+            continue
+        proc = new_proc
+        if _wait_ready_quiet(endpoint, MAX_WAIT_SECONDS):
+            log.info("[embed] watchdog: llama-server 重启成功，语义检索已恢复")
+            restarts = 0
+        else:
+            log.warning(f"[embed] watchdog: 重启后 {MAX_WAIT_SECONDS}s 内未就绪")
+
+
+def _watch_then_guard(proc: subprocess.Popen, endpoint: str, server_log_path: str,
+                      log: logging.Logger, project: str) -> None:
+    """Startup watcher → on ready, hand over to the crash watchdog (M-18)."""
+    _wait_for_ready(proc, endpoint, server_log_path, log)
+    if _is_server_ready(endpoint):
+        _watchdog_loop(proc, endpoint, server_log_path, log, project)
+
+
 def auto_start_embedding(logger_ref: logging.Logger | None = None,
                          endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> None:
     """Start embedding server if not running. Non-blocking after launch."""
@@ -182,10 +244,12 @@ def auto_start_embedding(logger_ref: logging.Logger | None = None,
         log.warning("[embed] failed to start embedding server")
         return
 
-    # Start watcher thread so the main application can continue booting
+    # M-18: watcher 就绪后交接给 watchdog 线程持续守护（崩溃自动重启）。
+    # 注意："server already running" 路径不挂 watchdog——进程不是本进程拉起的，
+    # 不归我们管（可能是别的应用/手动启动的共享实例）。
     watcher = threading.Thread(
-        target=_wait_for_ready,
-        args=(proc, endpoint, server_log_path, log),
+        target=_watch_then_guard,
+        args=(proc, endpoint, server_log_path, log, project),
         daemon=True,
     )
     watcher.start()

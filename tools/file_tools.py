@@ -85,6 +85,9 @@ def _path_in_allowed(filepath: str) -> str | None:
 class ReadFileTool(Tool):
     """Read content from a local text file with line numbers."""
 
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"path": ("filepath", "filename", "file", "directory", "dir", "folder")}
+
     timeout_seconds = 10.0
 
     def name(self) -> str:
@@ -271,6 +274,9 @@ SKIP_TREE_DIRS = {
 
 class FileTreeTool(Tool):
     """Return a concise directory tree so Agent can explore before reading files."""
+
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"path": ("filepath", "filename", "file", "directory", "dir", "folder")}
 
     MAX_DEPTH = 4
     MAX_FILES_PER_DIR = 10

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 class RecallTool(Tool):
     """Recall past memories about the user or shared experiences."""
 
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"query": ("search", "keyword", "question")}
+
     is_internal = True
     timeout_seconds = 10.0
 

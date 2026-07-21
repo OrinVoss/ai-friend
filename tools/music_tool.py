@@ -24,6 +24,9 @@ def _is_audio(filepath: str) -> bool:
 class MusicListTool(Tool):
     """List music files in the music directory."""
 
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"search": ("query", "keyword", "question")}
+
     timeout_seconds = 10.0
 
     def name(self) -> str:
@@ -116,6 +119,10 @@ class MusicListTool(Tool):
 
 class MusicPlayTool(Tool):
     """Play a music file."""
+
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）；
+    # execute() 内的 title/song_name/track 回退保留，双保险
+    ALIASES = {"song": ("song_name", "track", "title")}
 
     timeout_seconds = 10.0
 

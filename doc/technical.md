@@ -668,10 +668,7 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 
 #### 工具别名归一化
 
-`_normalize_args()` 自动处理参数别名:
-- `query/search/keyword/question` → `query`
-- `text/msg/content` → `content` (message 保留原样，供 notify 使用)
-- `person/who/user/target` → `name`
+KI-1（2026-07-21）：别名归一已下沉到各工具——每个工具在自己的 `ALIASES` 类属性中声明别名（如 `GrepTool.ALIASES = {"pattern": ("query", "search", ...)}`），dispatcher 在 `_execute_single` 中、参数校验前调用 `tool.normalize_args()`。dispatcher 不再有全局 `_normalize_args`，避免跨工具参数名冲突。
 
 #### 工具调用记录
 

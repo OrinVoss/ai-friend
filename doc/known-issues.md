@@ -11,7 +11,7 @@
 
 - 已修复：`title` 被错误映射为 `song`，导致 `notify` 工具标题丢失的问题
 - ✅ 2026-07-17 已修：dispatcher Tier 3 裸 JSON 兜底补 `isinstance` 守卫，非 dict 的 `arguments` 按空参数处理（#144/#260，见 `changes/2026-07-17-审计修复-阶段0-5汇总.md`）
-- 遗留风险：`_normalize_args` 仍是全局映射，未来可能再次冲突
+- ✅ 2026-07-21 根治：全局 `_normalize_args` 已删除，别名归一下沉为各工具的 `ALIASES` 声明（`tools/traits.py:Tool.normalize_args()`，见 `changes/2026-07-21-看门狗与别名下沉.md`）——全局映射不复存在，冲突通道已关闭
 
 ### 详情
 

@@ -111,20 +111,15 @@ agent._tool_registry = registry
 
 ### 第 3 步（可选）：加参数别名
 
-`dispatcher.py` 的 `_normalize_args()` 支持参数别名映射。如果你的工具有常见别名，加到那里：
+参数别名由各工具自己声明（KI-1，2026-07-21 起 dispatcher 的全局 `_normalize_args` 已删除）。在工具类上设置 `ALIASES` 类属性即可，dispatcher 会在执行前调用 `tool.normalize_args()` 归一：
 
 ```python
-def _normalize_args(args: dict) -> dict:
-    aliases = [
-        (("query", "search", "keyword", "question"), "query"),
-        (("text", "msg", "content"), "content"),
-        (("person", "who", "user", "target"), "name"),
-        (("filepath", "filename", "file", "path"), "path"),
-        (("song_name", "track"), "song"),
-        (("directory", "dir", "folder"), "path"),
-    ]
-    # 自动归一化...
+class WeatherTool(Tool):
+    # {规范参数名: (别名1, 别名2, ...)}；规范名已存在时别名不生效
+    ALIASES = {"city": ("location", "place", "town")}
 ```
+
+不要依赖任何全局映射——每个工具只声明自己认得的名字，避免跨工具冲突（历史上全局别名曾把 notify 的 `title` 当成 music 的 `song` 吃掉）。
 
 ---
 

@@ -75,6 +75,9 @@ def _should_skip_dir(dirpath: str) -> bool:
 class GlobTool(Tool):
     """Find files matching glob patterns."""
 
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）
+    ALIASES = {"path": ("filepath", "filename", "file", "directory", "dir", "folder")}
+
     timeout_seconds = 10.0
 
     def name(self) -> str:
@@ -170,6 +173,14 @@ class GlobTool(Tool):
 
 class GrepTool(Tool):
     """Search file contents using regex patterns."""
+
+    # KI-1: 本工具自己的参数别名（原 dispatcher 全局别名下沉）。
+    # 注意 pattern 也收 query/search——全局别名时代搜到 query 后 grep
+    # 反而拿不到 pattern，下沉后顺带修正
+    ALIASES = {
+        "pattern": ("query", "search", "keyword", "question"),
+        "path": ("filepath", "filename", "file", "directory", "dir", "folder"),
+    }
 
     MAX_SIZE = 500 * 1024  # 500KB per file
     MAX_RESULTS = 50

@@ -73,7 +73,8 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
             arguments = parsed.get("arguments", {})
             if not isinstance(arguments, dict):
                 arguments = {}
-            arguments = _normalize_args(arguments)
+            # KI-1: dispatcher 不再做全局参数改名；别名归一下沉到
+            # 各工具的 normalize_args（执行前由 _execute_single 调用）
             if name:
                 calls.append({"name": name, "arguments": arguments})
             else:
@@ -93,11 +94,9 @@ def parse_tool_calls(response: str) -> tuple[str, list[dict]]:
                 name = obj.get("name") or obj.get("tool", "")
                 if name:
                     args = obj.get("arguments", {})
-                    # #260: arguments 非 dict（字符串/列表等）时按空参数处理，
-                    # 避免 _normalize_args 中 dict(args) 抛 ValueError 外溢
+                    # #260: arguments 非 dict（字符串/列表等）时按空参数处理
                     if not isinstance(args, dict):
                         args = {}
-                    args = _normalize_args(args)
                     calls.append({"name": name, "arguments": args})
                     cleaned = ""
         except json.JSONDecodeError:
@@ -129,7 +128,7 @@ def _try_structured_json(text: str) -> list[dict]:
         if not isinstance(args, dict):
             args = {}
         if name:
-            parsed.append({"name": name, "arguments": _normalize_args(args)})
+            parsed.append({"name": name, "arguments": args})
     return parsed
 
 
@@ -269,6 +268,10 @@ def _execute_single(
             "elapsed_ms": 0.0,
         }
 
+    # KI-1: 参数别名归一下沉到各工具（原 dispatcher 全局别名已删除），
+    # 在校验前完成，required 检查看到的是规范参数名
+    args = tool.normalize_args(args)
+
     # Layer5-D4: pre-execution parameter validation
     schema = tool.parameters_schema()
     validation_error = _validate_args(args, schema)
@@ -401,28 +404,3 @@ def contains_fake_action(text: str) -> bool:
         "用web_fetch", "用read_file", "用grep",
     ]
     return any(p in text for p in narrative_patterns)
-
-
-def _normalize_args(args: dict) -> dict:
-    """Map common aliases to canonical field names."""
-    aliases = [
-        (("query", "search", "keyword", "question"), "query"),
-        (("text", "msg", "content"), "content"),
-        (("person", "who", "user", "target"), "name"),
-        # DI-007: more aliases
-        (("filepath", "filename", "file", "path"), "path"),
-        # "title" is a common parameter name (e.g. notify tool), don't globally
-        # steal it for music. MusicPlayTool handles title/song_name/track aliases
-        # in its own execute().
-        (("song_name", "track"), "song"),
-        (("directory", "dir", "folder"), "path"),
-    ]
-    result = dict(args)
-    for from_list, to in aliases:
-        if to in result:
-            continue
-        for alias in from_list:
-            if alias in result:
-                result[to] = result.pop(alias)
-                break
-    return result
