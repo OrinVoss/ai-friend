@@ -253,5 +253,63 @@ class TestSemanticSurface(unittest.TestCase):
         self.assertEqual(s.entries(), ["问问妹妹高考成绩"])
 
 
+class TestRecordOutcome(unittest.TestCase):
+    """L4-6a: 反馈闭环对 priority 与 resolved 的影响。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _state(self):
+        return InnerDriveState("outcome", state_dir=self.dir)
+
+    def test_positive_boosts_same_type_priority(self):
+        s = self._state()
+        s.apply_updates(add=[
+            {"content": "关心用户面试", "type": "care", "priority": 0.5},
+            {"content": "另一个挂念", "type": "care", "priority": 0.5},
+            {"content": "无关好奇", "type": "curiosity", "priority": 0.5},
+        ])
+        entry_id = s.active_entries()[0].id
+        self.assertTrue(s.record_outcome(entry_id, positive=True))
+        # The driven entry is resolved; the other care entry is boosted.
+        care_priorities = [e.priority for e in s.active_entries() if e.type == "care"]
+        self.assertEqual(care_priorities, [0.55])
+        # curiosity unaffected
+        self.assertEqual([e.priority for e in s.active_entries() if e.type == "curiosity"], [0.5])
+
+    def test_negative_dampens_same_type_priority(self):
+        s = self._state()
+        s.apply_updates(add=[{"content": "关心用户面试", "type": "care", "priority": 0.5}])
+        entry_id = s.active_entries()[0].id
+        self.assertTrue(s.record_outcome(entry_id, positive=False))
+        resolved = [e for e in s._entries if e.status == "resolved"][0]
+        self.assertAlmostEqual(resolved.priority, 0.45)
+
+    def test_positive_caps_at_one(self):
+        s = self._state()
+        s.apply_updates(add=[{"content": "高优先级", "type": "care", "priority": 0.98}])
+        entry_id = s.active_entries()[0].id
+        s.record_outcome(entry_id, positive=True)
+        resolved = [e for e in s._entries if e.status == "resolved"][0]
+        self.assertAlmostEqual(resolved.priority, 1.0)
+
+    def test_records_resolution(self):
+        s = self._state()
+        s.apply_updates(add=[{"content": "关心用户面试", "type": "care", "priority": 0.5}])
+        entry_id = s.active_entries()[0].id
+        s.record_outcome(entry_id, positive=True)
+        resolved = [e for e in s._entries if e.status == "resolved"]
+        self.assertEqual(len(resolved), 1)
+        self.assertIn("积极", resolved[0].resolution)
+
+    def test_missing_entry_noop(self):
+        s = self._state()
+        self.assertFalse(s.record_outcome("nonexistent", positive=True))
+
+
 if __name__ == "__main__":
     unittest.main()

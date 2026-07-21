@@ -538,6 +538,63 @@ class TestProactiveThinkLoop(unittest.TestCase):
         self.assertIn("问问用户考试结果", result.context_summary)
 
 
+class TestAgent3LightContext(unittest.TestCase):
+    """L3-3：一次 answer，Agent 1 全文 / Agent 3 轻量，memo 语义不变。"""
+
+    def setUp(self):
+        self.provider = MagicMock()
+        self.provider.generate.return_value = _no_tools_json()
+        self.personality = MagicMock()
+        self.personality.config.traits = []
+        self.personality.config.name = "TestBot"
+        self.personality.emotion.dominant_emotion = "neutral"
+        self.personality.emotion.valence = 0.4
+        self.personality.emotion.arousal = 0.5
+        self.personality.emotion.to_prompt_summary.return_value = {
+            "dominant_emotion": "neutral", "mood": "平静", "primary_hint": "",
+            "valence": 0.4, "arousal": 0.5, "valence_desc": "积极",
+            "arousal_desc": "平衡",
+            "behavior": "你心情平静。说话正常，不兴奋也不低落。",
+        }
+        self.retriever = MagicMock()
+        self.retriever.retrieve_for_query.return_value = _make_memory_mock()
+        self.short_term = MagicMock()
+        self.short_term.format_for_prompt.return_value = ""
+
+        self.memory_agent = MagicMock()
+        ev = MagicMock()
+        ev.source_type = "fact"
+        ev.content = "preference|最爱食物: 披萨"
+        ev.is_contradicted = False
+        ma_result = MagicMock(
+            answer="preference|最爱食物: 披萨", confidence=0.9,
+            contradictions=[], needs_more_evidence=False, evidences=[ev])
+        self.memory_agent.answer = AsyncMock(return_value=ma_result)
+
+        self.agent = InnerDriveAgent(
+            provider=self.provider,
+            personality=self.personality,
+            ltm=MagicMock(),
+            retriever=self.retriever,
+            short_term=self.short_term,
+            tool_registry=mock_tool_registry(),
+            memory_agent=self.memory_agent,
+        )
+
+    def test_context_summary_is_light_for_agent3(self):
+        result = self.agent.assess("本地有这个歌吗")
+        # Agent 3 收到轻量形态
+        self.assertIn("最爱食物", result.context_summary)
+        self.assertNotIn("置信度", result.context_summary)
+        # Agent 1 的 prompt 仍是全文（sys_prompt 里有置信度标注）
+        sys_prompt = self.provider.generate.call_args.args[0][0]["content"]
+        self.assertIn("置信度", sys_prompt)
+
+    def test_memo_single_answer_per_message(self):
+        self.agent.assess("同一问题")
+        self.memory_agent.answer.assert_called_once()
+
+
 class TestContextSummaryMemo(unittest.TestCase):
     """R1：同一条消息内 _context_summary_for 结果 memo，assess/review
     不再重复调用 memory_agent.answer()（2026-07-20）。"""

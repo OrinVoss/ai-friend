@@ -75,7 +75,7 @@ class TestInsightsV2V5Migration(unittest.TestCase):
         """content→hypothesis、significance→confidence、is_active→status；
         evidence 一律空、needs_more_evidence=1、created_by='migration'。"""
         # 注：用 sess_a 而非 default —— #SR-002 会把 default session 的数据
-        # 迁往角色 session（测试根目录 personality.json），干扰断言
+        # 迁往角色 session（原根目录 personality.json），干扰断言
         self._make_v4_db("""
             INSERT INTO reflections (content, insight_type, significance, is_active,
                                      session_id, created_at)

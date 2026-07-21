@@ -131,7 +131,7 @@ class TestFactsV2V4Migration(unittest.TestCase):
         """UNIQUE(session_id, category, fact_key) 冲突时跳过——facts_v2
         双写期间的数据更新鲜，不被旧表覆盖。"""
         # 注：用 sess_a 而非 default —— #SR-002 会把 default session 的数据
-        # 迁往角色 session（测试根目录 personality.json name=小星），干扰冲突构造
+        # 迁往角色 session（原根目录 personality.json name=小星），干扰冲突构造
         self._make_v3_db("""
             INSERT INTO user_facts (category, fact_key, fact_value, confidence,
                                     fact_type, session_id)
