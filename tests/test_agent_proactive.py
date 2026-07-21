@@ -20,7 +20,7 @@ class TestAgentProactive(unittest.TestCase):
 
         cfg = Config()
         cfg.max_tokens = 512
-        cfg.personality_file = os.path.join(self._tmpdir, "personality.json")
+        cfg.personality_file = os.path.join(self._tmpdir, "role.json")
 
         personality = MagicMock()
         personality.config.name = "TestBot"
@@ -138,7 +138,7 @@ class TestAgentSessionId(unittest.TestCase):
 
         self.cfg = Config()
         self.cfg.max_tokens = 512
-        self.cfg.personality_file = "personality.json"
+        self.cfg.personality_file = "personalities/default.json"
         self.cfg.db_path = ":memory:"
 
         personality = MagicMock()

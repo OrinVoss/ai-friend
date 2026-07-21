@@ -33,6 +33,11 @@ class PromptCache:
     def __init__(self) -> None:
         self._store: OrderedDict[tuple[str, str, str], tuple[str, float, float | None]] = OrderedDict()
         self._lock = threading.Lock()
+        # PC-002: lightweight hit/miss/saved_chars counters for observability
+        self.hits: int = 0
+        self.misses: int = 0
+        self.saved_chars: int = 0
+        self._stats_log_counter: int = 0
 
     @staticmethod
     def personality_version(personality_file: str) -> str:
@@ -79,6 +84,8 @@ class PromptCache:
                         f"[prompt_cache] hit: {component_name} "
                         f"session={session_id}"
                     )
+                    self.hits += 1
+                    self.saved_chars += len(value)
                     return value
                 logger.debug(
                     f"[prompt_cache] expired: {component_name} "
@@ -89,6 +96,7 @@ class PromptCache:
 
         with self._lock:
             self._store[key] = (value, now, ttl)
+            self.misses += 1
             while len(self._store) > self.MAX_ENTRIES:
                 self._store.popitem(last=False)  # L-02: FIFO 淘汰最旧 key
 
@@ -130,3 +138,46 @@ class PromptCache:
             count = len(self._store)
             self._store.clear()
         logger.debug(f"[prompt_cache] cleared {count} entries")
+
+    def stats(self) -> dict:
+        """Return cache counters: hits, misses, hit_rate, saved_chars."""
+        with self._lock:
+            total = self.hits + self.misses
+            hit_rate = self.hits / total if total > 0 else 0.0
+            return {
+                "hits": self.hits,
+                "misses": self.misses,
+                "hit_rate": hit_rate,
+                "saved_chars": self.saved_chars,
+            }
+
+    def reset_stats(self) -> None:
+        """Reset cache counters."""
+        with self._lock:
+            self.hits = 0
+            self.misses = 0
+            self.saved_chars = 0
+            self._stats_log_counter = 0
+
+    def maybe_log_stats(self, logger, tag: str = "") -> None:
+        """Log cumulative cache stats every 50 total calls, otherwise debug.
+
+        Args:
+            logger: A logging.Logger-like object.
+            tag: Optional tag appended to the log message (e.g. session id).
+        """
+        with self._lock:
+            total = self.hits + self.misses
+            self._stats_log_counter += 1
+            hit_rate = self.hits / total if total > 0 else 0.0
+            msg = (
+                f"[prompt_cache] stats: hit_rate={hit_rate:.1%} "
+                f"saved={self.saved_chars} chars "
+                f"hits={self.hits} misses={self.misses}"
+            )
+            if tag:
+                msg = f"{msg} tag={tag}"
+            if total > 0 and total % 50 == 0:
+                logger.info(msg)
+            else:
+                logger.debug(msg)

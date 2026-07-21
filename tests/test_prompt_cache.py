@@ -98,6 +98,95 @@ class TestPromptCache(unittest.TestCase):
         cache.get_or_build("sid", "v2", "comp_new", lambda: "x")
         self.assertNotIn(("sid", "v1", "comp0"), cache._store)
 
+    def test_stats_count_hits_and_misses(self):
+        # PC-002: counters track hits and misses
+        cache = PromptCache()
+
+        def builder():
+            return "block value"
+
+        cache.get_or_build("sid", "v1", "identity", builder, ttl=None)
+        cache.get_or_build("sid", "v1", "identity", builder, ttl=None)
+        cache.get_or_build("sid", "v1", "other", builder, ttl=None)
+        stats = cache.stats()
+        self.assertEqual(stats["hits"], 1)
+        self.assertEqual(stats["misses"], 2)
+        self.assertEqual(stats["saved_chars"], len("block value"))
+        self.assertAlmostEqual(stats["hit_rate"], 1 / 3)
+
+    def test_saved_chars_accumulates_on_hits(self):
+        cache = PromptCache()
+
+        def builder():
+            return "abcd" * 10
+
+        cache.get_or_build("sid", "v1", "identity", builder, ttl=None)
+        cache.get_or_build("sid", "v1", "identity", builder, ttl=None)
+        cache.get_or_build("sid", "v1", "identity", builder, ttl=None)
+        self.assertEqual(cache.saved_chars, len("abcd" * 10) * 2)
+
+    def test_stats_structure(self):
+        cache = PromptCache()
+        stats = cache.stats()
+        self.assertIn("hits", stats)
+        self.assertIn("misses", stats)
+        self.assertIn("hit_rate", stats)
+        self.assertIn("saved_chars", stats)
+        self.assertEqual(stats["hits"], 0)
+        self.assertEqual(stats["misses"], 0)
+        self.assertEqual(stats["saved_chars"], 0)
+        self.assertEqual(stats["hit_rate"], 0.0)
+
+    def test_reset_stats(self):
+        cache = PromptCache()
+        cache.get_or_build("sid", "v1", "identity", lambda: "x", ttl=None)
+        cache.get_or_build("sid", "v1", "identity", lambda: "x", ttl=None)
+        cache.reset_stats()
+        self.assertEqual(cache.hits, 0)
+        self.assertEqual(cache.misses, 0)
+        self.assertEqual(cache.saved_chars, 0)
+        self.assertEqual(cache._stats_log_counter, 0)
+
+    def test_maybe_log_stats_every_50th_info(self):
+        import logging
+        cache = PromptCache()
+        logger = logging.getLogger("test_prompt_cache")
+
+        class _Handler(logging.Handler):
+            def __init__(self):
+                super().__init__()
+                self.debug = []
+                self.info = []
+
+            def emit(self, record):
+                msg = self.format(record)
+                if record.levelno == logging.INFO:
+                    self.info.append(msg)
+                elif record.levelno == logging.DEBUG:
+                    self.debug.append(msg)
+
+        handler = _Handler()
+        handler.setLevel(logging.DEBUG)
+        old_level = logger.level
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        try:
+            # 49 hits + 1 miss = 50 total -> info
+            for _ in range(49):
+                cache.hits += 1
+            cache.misses += 1
+            cache.maybe_log_stats(logger)
+            self.assertEqual(len(handler.info), 1)
+            self.assertIn("hit_rate=98.0%", handler.info[0])
+            # one more -> debug
+            cache.misses += 1
+            cache.maybe_log_stats(logger)
+            self.assertEqual(len(handler.info), 1)
+            self.assertEqual(len(handler.debug), 1)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,11 @@
 """Tests for config.py — #255: degrade_threshold / max_fake_actions 接入 config。"""
+import json
 import os
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from config import Config, load_config
+from config import Config, load_config, reload_config
 
 _MISSING = "definitely_not_exists_config.json"
 
@@ -90,7 +91,7 @@ class TestAgentReadsConfig(unittest.TestCase):
         tmpdir = tempfile.mkdtemp()
         cfg = Config()
         cfg.db_path = os.path.join(tmpdir, "test.db")
-        cfg.personality_file = os.path.join(tmpdir, "personality.json")
+        cfg.personality_file = os.path.join(tmpdir, "role.json")
         cfg.degrade_threshold = 7
         cfg.max_fake_actions = 5
         agent = _make_agent(cfg)
@@ -101,10 +102,58 @@ class TestAgentReadsConfig(unittest.TestCase):
         tmpdir = tempfile.mkdtemp()
         cfg = Config()
         cfg.db_path = os.path.join(tmpdir, "test.db")
-        cfg.personality_file = os.path.join(tmpdir, "personality.json")
+        cfg.personality_file = os.path.join(tmpdir, "role.json")
         agent = _make_agent(cfg)
         self.assertEqual(agent._degrade_threshold, 3)
         self.assertEqual(agent._max_fake_actions, 3)
+
+
+class TestLoadConfigCache(unittest.TestCase):
+    """CF-010: load_config() process-level cache for default path."""
+
+    def setUp(self):
+        # Ensure a clean cache state for every test.
+        import config as _config_module
+        _config_module._CACHED_CONFIG = None
+
+    def tearDown(self):
+        import config as _config_module
+        _config_module._CACHED_CONFIG = None
+
+    def test_default_path_uses_cache(self):
+        # Use a real temp file as the default config path cannot be overridden
+        # without changing CONFIG_PATH; instead patch open to count disk reads.
+        with patch("config.open") as mock_open:
+            mock_open.return_value.__enter__.return_value.read.return_value = "{}"
+            cfg1 = load_config()
+            cfg2 = load_config()
+            self.assertIs(cfg1, cfg2)
+            # builder path: os.path.exists + open read = disk touches once
+            mock_open.assert_called_once()
+
+    def test_reload_config_clears_cache(self):
+        cfg1 = load_config()
+        with patch("config.open") as mock_open:
+            mock_open.return_value.__enter__.return_value.read.return_value = "{}"
+            cfg2 = reload_config()
+            mock_open.assert_called_once()
+        self.assertIsNot(cfg1, cfg2)
+
+    def test_custom_path_bypasses_cache(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as f:
+            json.dump({"max_tokens": 111}, f)
+            path1 = f.name
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", encoding="utf-8") as f:
+            json.dump({"max_tokens": 222}, f)
+            path2 = f.name
+        try:
+            cfg1 = load_config(path=path1)
+            cfg2 = load_config(path=path2)
+            self.assertEqual(cfg1.max_tokens, 111)
+            self.assertEqual(cfg2.max_tokens, 222)
+        finally:
+            os.unlink(path1)
+            os.unlink(path2)
 
 
 if __name__ == "__main__":

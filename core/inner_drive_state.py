@@ -246,6 +246,33 @@ class InnerDriveState:
                 self._save_quiet()
             return len(resolved)
 
+    def record_outcome(self, entry_id: str, positive: bool) -> bool:
+        """L4-6a: 反馈闭环。根据用户回应对被驱动的条目做奖惩。
+
+        positive → 同类型活跃条目 priority +0.05（封顶 1.0）；
+        negative → 同类型活跃条目 priority ×0.9；
+        被驱动的条目标记 resolved，resolution 记录结果。
+        """
+        with self._lock:
+            self._load_once()
+            target = next((e for e in self._entries
+                           if e.id == entry_id and e.status == "active"), None)
+            if target is None:
+                return False
+            for e in self._entries:
+                if e.status != "active" or e.type != target.type:
+                    continue
+                if positive:
+                    e.priority = round(min(1.0, e.priority + 0.05), 4)
+                else:
+                    e.priority = round(e.priority * 0.9, 4)
+            target.status = "resolved"
+            target.resolution = f"用户回应：{'积极' if positive else '消极'}"
+            logger.info(f"[inner_drive_state] outcome recorded: "
+                        f"{target.content[:50]} positive={positive}")
+            self._save_quiet()
+            return True
+
     # ── Lifecycle helpers ──
 
     def _refresh_statuses(self) -> None:

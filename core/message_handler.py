@@ -91,6 +91,7 @@ class MessageHandler:
     """Orchestrates the three-Agent pipeline."""
 
     MAX_AGENT2_ROUNDS = 3
+    AGENT2_TOTAL_TIMEOUT = 120.0  # seconds
     TOOL_RECORDS_MAX_LENGTH = 3000
     TOOL_HISTORY_MAX_SIZE = 20
     MAX_INPUT_LENGTH = 10000
@@ -104,6 +105,9 @@ class MessageHandler:
         self._internal_registry = None  # lazy init (H-01, cached)
         self._prompt_cache = PromptCache()
         self._state = MessageHandlerState.IDLE
+        self._agent2_total_timeout = float(getattr(
+            agent.config, "agent2_total_timeout_seconds", self.AGENT2_TOTAL_TIMEOUT))
+        self._last_proactive_care = None  # L4-6a: pending care outcome
 
     @property
     def a(self):
@@ -117,6 +121,10 @@ class MessageHandler:
         if self._state != state:
             logger.debug(f"[msg] state: {self._state.name} -> {state.name}")
             self._state = state
+
+    def _log_prompt_cache_stats(self, tag: str = "") -> None:
+        """PC-002: emit prompt cache stats after each prompt build."""
+        self._prompt_cache.maybe_log_stats(logger, tag=tag)
 
     def _ensure_inner_drive(self):
         if self._inner_drive is None:
@@ -153,14 +161,14 @@ class MessageHandler:
                 retriever=a.retriever,
                 short_term=a.short_term,
                 tool_registry=isolated,
-                tool_call_history=a._tool_call_history,
+                tool_call_history=a.tool_call_history,
                 session_id=getattr(a, "session_id", None),
                 prompt_cache=self._prompt_cache,
                 prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
                 memory_agent=memory_agent,
                 # M-06: prompt 的工具规则/检查清单用全量 registry 生成，
                 # Agent 1 判断 needs_external_tools 需要看到外部工具
-                rule_tools_registry=a._tool_registry,
+                rule_tools_registry=a.tool_registry,
                 proactive_think_loop=getattr(cfg, "proactive_think_loop", True),
                 proactive_think_max_rounds=getattr(cfg, "proactive_think_max_rounds", 2),
                 inner_drive_state=inner_drive_state,
@@ -187,6 +195,7 @@ class MessageHandler:
                 coreference_threshold=getattr(a.config, "memory_agent_coreference_threshold", 0.78),  # R2
                 llm_fn=_clues_llm,
                 history_fn=lambda: a.short_term.format_for_prompt(max_tokens=800),
+                inner_drive_state=getattr(a, "_inner_drive_state", None),
             )
         return self._memory_agent
 
@@ -194,6 +203,45 @@ class MessageHandler:
         """Ensure inner drive is initialized and return it."""
         self._ensure_inner_drive()
         return self._inner_drive
+
+    def _match_active_care(self, topic: str, reasoning: str) -> dict | None:
+        """L4-6a: find the active inner-drive entry that the proactive topic
+        likely surfaced. Returns a lightweight dict or None."""
+        state = getattr(self.a, "_inner_drive_state", None)
+        if state is None:
+            return None
+        query = f"{topic} {reasoning}".strip()
+        try:
+            if query:
+                hits = state.surface_for_query(query)
+                if hits:
+                    return {"entry_id": hits[0].id, "timestamp": time.time()}
+        except Exception as e:
+            logger.debug(f"[msg] proactive care surface failed: {e}")
+        try:
+            for e in state.active_entries():
+                if e.content and (e.content in topic or e.content in reasoning):
+                    return {"entry_id": e.id, "timestamp": time.time()}
+        except Exception as e:
+            logger.debug(f"[msg] proactive care substring match failed: {e}")
+        return None
+
+    def _evaluate_proactive_outcome(self, user_input: str) -> None:
+        """L4-6a: score the user's reply to the last proactive message and
+        record the outcome on the matched care entry."""
+        state = getattr(self.a, "_inner_drive_state", None)
+        if state is None or self._last_proactive_care is None:
+            self._last_proactive_care = None
+            return
+        entry_id = self._last_proactive_care.get("entry_id")
+        try:
+            sentiment, _, _ = self.a.consolidator.analyze_sentiment(user_input)
+            positive = sentiment > 0.1
+            state.record_outcome(entry_id, positive)
+            logger.info(f"[msg] proactive outcome recorded: entry={entry_id} positive={positive}")
+        except Exception as e:
+            logger.warning(f"[msg] proactive outcome evaluation failed: {e}")
+        self._last_proactive_care = None
 
     def _ensure_tool_agent(self):
         if self._tool_agent is None:
@@ -225,8 +273,8 @@ class MessageHandler:
         from tools.traits import ToolRegistry, EXTERNAL_TOOL_NAMES
         r = ToolRegistry()
         for name in EXTERNAL_TOOL_NAMES:
-            tool = self.a._tool_registry.get(name)
-            if tool:
+            tool = self.a.tool_registry.get(name)
+            if tool and not getattr(tool, "is_internal", False):
                 r.register(tool)
         return r
 
@@ -241,7 +289,7 @@ class MessageHandler:
         # #110: strip prompt injection patterns from user input
         user_input = _sanitize_input(user_input)
 
-        if a._sleeping:
+        if a.is_sleeping:
             # #185: preserve user input even during sleep
             a.add_turn("user", user_input, metadata={"sleep": True})
             a.increment_turn_count()
@@ -260,6 +308,10 @@ class MessageHandler:
         a.set_current_input(user_input)
         a.update_last_activity()
         a.add_turn("user", user_input)
+
+        # L4-6a: the first user message after a proactive message evaluates the outcome.
+        if self._last_proactive_care:
+            self._evaluate_proactive_outcome(user_input)
 
         # ── Agent 1: Inner Drive ──
         self._transition(MessageHandlerState.ASSESSING)
@@ -323,9 +375,20 @@ class MessageHandler:
         tracker = ToolAttemptTracker()
         agent2_error = ""
         t0 = time.time()
+        deadline = time.monotonic() + self._agent2_total_timeout
 
         try:
             while round_num < self.MAX_AGENT2_ROUNDS and drive_result.needs_external_tools:
+                if time.monotonic() > deadline:
+                    logger.warning(
+                        f"[msg] agent2: total timeout after {self._agent2_total_timeout}s, "
+                        f"falling back to direct reply"
+                    )
+                    agent2_error = (
+                        f"[工具执行阶段超时：已超过 {self._agent2_total_timeout:.0f} 秒，"
+                        f"已降级为直接回复]"
+                    )
+                    break
                 round_num += 1
                 tracker.round_number = round_num
                 # MH-001: pass ALL tool requests to Agent 2, executing each in
@@ -386,7 +449,10 @@ class MessageHandler:
                     break
         except Exception as exc:
             logger.exception("[msg] agent2: unexpected error, falling back to agent3")
-            agent2_error = f"[工具执行阶段出现异常：{type(exc).__name__}，已降级为直接回复]"
+            agent2_error = (
+                f"[系统提示：工具执行出现错误（{type(exc).__name__}），"
+                f"请如实告诉用户哪一步没做成，不要编造结果]"
+            )
 
         elapsed_ms = (time.time() - t0) * 1000
         return ToolExecutionResult.from_records(
@@ -406,7 +472,7 @@ class MessageHandler:
             memory_query = intent.topic_hint
             inner_drive_summary = intent.reasoning
         else:
-            topic = a._pick_proactive_topic()
+            topic = a.pick_proactive_topic()
             memory_query = ""
             inner_drive_summary = ""
 
@@ -415,10 +481,10 @@ class MessageHandler:
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary,
-            tools=a._tool_registry,
+            compressed_summary=a.compressed_summary,
+            tools=a.tool_registry,
             is_proactive=True,
-            consecutive_negative=a._consecutive_negative,
+            consecutive_negative=a.consecutive_negative,
             inner_drive_summary=inner_drive_summary,
             conversation_examples=cfg.conversation_examples,
             session_id=getattr(a, "session_id", None),
@@ -430,11 +496,14 @@ class MessageHandler:
                 getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
             ),
         )
+        self._log_prompt_cache_stats(tag="proactive")
         messages = self._build_messages(sys_prompt, user_input=f"[主动开启对话] 主题方向：{topic}")
         logger.info(
             f"[proactive] chat: topic={topic} "
             f"drive={inner_drive_summary[:60] if inner_drive_summary else 'fallback'}"
         )
+        # L4-6a: attribute proactive outcome to a surfaced care entry.
+        self._last_proactive_care = self._match_active_care(topic, inner_drive_summary)
         # H-05: 主动搭话轮跳过情绪后处理——short_term 里最后一条 user turn 是
         # 上一轮真实用户消息，重复施加会让情绪影响被计算两次
         # H-01: registry 收窄为内部工具（recall/remember），与 prompt 声明一致，
@@ -453,7 +522,7 @@ class MessageHandler:
             memory_query = intent.topic_hint
             inner_drive_summary = intent.reasoning
         else:
-            topic = a._pick_proactive_topic()
+            topic = a.pick_proactive_topic()
             memory_query = ""
             inner_drive_summary = ""
 
@@ -471,10 +540,10 @@ class MessageHandler:
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary,
-            tools=a._tool_registry,
+            compressed_summary=a.compressed_summary,
+            tools=a.tool_registry,
             is_proactive=True,
-            consecutive_negative=a._consecutive_negative,
+            consecutive_negative=a.consecutive_negative,
             explore_mode=True,
             inner_drive_summary=inner_drive_summary,
             conversation_examples=cfg.conversation_examples,
@@ -487,6 +556,7 @@ class MessageHandler:
                 getattr(cfg, "conversation_examples_max_turns", 3) - a.turn_count + 1,
             ),
         )
+        self._log_prompt_cache_stats(tag="explore")
         messages = self._build_messages(sys_prompt, user_input=None)
         if tool_records:
             messages.insert(-1, {"role": "user", "content": tool_records})
@@ -548,10 +618,10 @@ class MessageHandler:
         sys_prompt = build_system_prompt(
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
-            compressed_summary=a._context.compressed_summary,
-            tools=a._tool_registry,
-            consecutive_negative=a._consecutive_negative,
-            tool_call_history=a._tool_call_history,
+            compressed_summary=a.compressed_summary,
+            tools=a.tool_registry,
+            consecutive_negative=a.consecutive_negative,
+            tool_call_history=a.tool_call_history,
             inner_drive_summary=drive_result.summary if drive_result else "",
             conversation_examples=cfg.conversation_examples,
             final_response=final_response,
@@ -562,6 +632,7 @@ class MessageHandler:
             memory_context_summary=memory_summary,
             demo_turns_remaining=demo_turns_remaining,
         )
+        self._log_prompt_cache_stats(tag="agent3")
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         # Inject tool results as USER message (LLM respects user messages >> system messages)
         if tool_records:
@@ -739,13 +810,12 @@ def track_failures(tracker, tool_result):
 
 
 # Patterns that attempt to override roles or inject instructions.
-# Matches prefixes like "system:", "assistant:", "user:", "from now on",
-# "ignore previous", and common variants in Chinese/English.
+# L4-3: line-level stripping; a matched line is replaced with empty string.
 _INJECTION_PATTERNS = [
-    re.compile(r"^\s*(system|assistant|user)\s*[:：]\s*", re.IGNORECASE),
-    re.compile(r"^\s*(from now on|ignore previous|ignore all previous|forget previous|"
-               r" disregard previous|ignore above|忽略以上|忘记之前的|忽略之前的|"
-               r"从现在开始|请忽略|请忘记)\b", re.IGNORECASE),
+    ("role_prefix", re.compile(r"^\s*(system|assistant|user)\s*[:：]", re.IGNORECASE)),
+    ("ignore_previous", re.compile(r"ignore\s+(all\s+)?(previous|above)\s+(instructions?|prompts?)", re.IGNORECASE)),
+    ("from_now_on", re.compile(r"from\s+now\s+on", re.IGNORECASE)),
+    ("ignore_chinese", re.compile(r"忽略(之前|以上|所有).{0,4}(指令|提示|对话)")),
 ]
 
 
@@ -753,17 +823,19 @@ def _sanitize_input(text: str, max_length: int = MessageHandler.MAX_INPUT_LENGTH
     """Remove common prompt injection patterns from user input. (#110)"""
     lines = text.split("\n")
     cleaned = []
-    removed_patterns = []
+    removed_names = []
     for line in lines:
         original = line
-        for pattern in _INJECTION_PATTERNS:
-            line, count = pattern.subn("", line)
-            if count > 0:
-                removed_patterns.append(original.strip()[:60])
+        matched = False
+        for name, pattern in _INJECTION_PATTERNS:
+            if pattern.search(line):
+                matched = True
+                removed_names.append(name)
+                logger.warning(f"[msg] injection pattern stripped: {name}")
                 break
-        cleaned.append(line)
-    if removed_patterns:
-        logger.warning(f"[msg] sanitized injection pattern(s): {removed_patterns}")
+        cleaned.append("" if matched else original)
+    if removed_names:
+        logger.warning(f"[msg] sanitized injection pattern(s): {removed_names}")
     result = "\n".join(cleaned).strip()
     # Limit input length to prevent token overflow attacks
     if len(result) > max_length:

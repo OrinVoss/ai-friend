@@ -12,13 +12,14 @@ from tests.mocks import mock_tool_registry
 def _make_handler_agent():
     """MagicMock agent，与 tests/test_message_handler.py 的 setUp 同款。"""
     agent = MagicMock()
-    agent._sleeping = False
+    agent.is_sleeping = False
     agent.turn_count = 0
-    agent._consecutive_negative = 0
-    agent._tool_call_history = []
-    agent._tool_registry = mock_tool_registry()
+    agent.consecutive_negative = 0
+    agent.tool_call_history = []
+    agent.tool_registry = mock_tool_registry()
     agent._context = MagicMock()
     agent._context.compressed_summary = ""
+    agent.compressed_summary = ""
     agent.short_term.get_all_reversed.return_value = []
     agent.short_term.format_for_prompt.return_value = ""
     agent.short_term.get_all.return_value = []
@@ -34,7 +35,7 @@ def _make_handler_agent():
         "dominant_emotion": "neutral", "valence": 0.4, "arousal": 0.5,
     }
     agent._react_loop.return_value = "Hello!"
-    agent._pick_proactive_topic.return_value = "聊聊天气"
+    agent.pick_proactive_topic.return_value = "聊聊天气"
     agent.provider.generate.return_value = "NO_TOOLS"
     agent.config.prompt_cache_ttl_seconds = 60
     agent.config.conversation_examples_max_turns = 3
@@ -86,7 +87,7 @@ class TestProactiveEndToEnd(unittest.TestCase):
 
         cfg = Config()
         cfg.max_tokens = 512
-        cfg.personality_file = os.path.join(self._tmpdir, "personality.json")
+        cfg.personality_file = os.path.join(self._tmpdir, "role.json")
 
         personality = MagicMock()
         personality.config.name = "TestBot"

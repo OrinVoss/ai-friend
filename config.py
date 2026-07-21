@@ -36,6 +36,9 @@ def _validate(cfg: "Config") -> None:
     if cfg.max_fake_actions < 0:
         messages.append(f"max_fake_actions {cfg.max_fake_actions} < 0, clamped to 3")
         cfg.max_fake_actions = 3
+    if cfg.agent2_total_timeout_seconds < 1:
+        messages.append(f"agent2_total_timeout_seconds {cfg.agent2_total_timeout_seconds} < 1, clamped to 120")
+        cfg.agent2_total_timeout_seconds = 120
     for msg in messages:
         logger.warning(f"[config] validation: {msg}")
 
@@ -63,6 +66,7 @@ class Config:
     max_tool_iterations: int = 5  # #152: ReAct loop max tool call iterations
     degrade_threshold: int = 3    # #255: consecutive tool failures before degrading
     max_fake_actions: int = 3     # #255: max fake action corrections
+    agent2_total_timeout_seconds: int = 120  # L4-2: hard deadline for Agent 2 tool loop
     web_host: str = "0.0.0.0"
     web_port: int = 8000
     log_level: str = "INFO"
@@ -146,8 +150,16 @@ class Config:
 
 CONFIG_PATH = "config.json"
 
+_CACHED_CONFIG: Config | None = None
+
 
 def load_config(path: str = CONFIG_PATH) -> Config:
+    global _CACHED_CONFIG
+    # CF-010: process-level cache for default config path to avoid re-reading
+    # disk and logging on every tool call. Custom paths bypass cache.
+    if path == CONFIG_PATH and _CACHED_CONFIG is not None:
+        return _CACHED_CONFIG
+
     cfg = Config()
     if os.path.exists(path):
         try:
@@ -200,7 +212,16 @@ def load_config(path: str = CONFIG_PATH) -> Config:
             setattr(cfg, attr, typed)
 
     _validate(cfg)
+    if path == CONFIG_PATH:
+        _CACHED_CONFIG = cfg
     return cfg
+
+
+def reload_config(path: str = CONFIG_PATH) -> Config:
+    """Force reload config from disk, clearing the process-level cache."""
+    global _CACHED_CONFIG
+    _CACHED_CONFIG = None
+    return load_config(path)
 
 
 def save_config(cfg: Config, path: str = CONFIG_PATH) -> None:

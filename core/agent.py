@@ -63,6 +63,10 @@ class Agent:
         # rather than next to the personality file, which now lives in personalities/.
         sleep_dir = os.path.dirname(os.path.abspath(config.db_path))
         session_tag = session_id or "default"
+        # 存一份供外部只读（message_handler 的 getattr(a, "session_id", None)
+        # 依赖它做 InnerDriveState 命名/prompt 标记；此前从未存储，getattr
+        # 静默回退 None——2026-07-21 验收发现）
+        self.session_id = session_tag
         sleep_file = os.path.join(sleep_dir, f".sleep_state.{session_tag}")
         self._sleep = SleepManager(
             sleep_state_file=sleep_file,
@@ -147,6 +151,33 @@ class Agent:
     def get_consecutive_negative(self) -> int:
         return self._consecutive_negative
 
+    # ── Public thin accessors (L4-1: keep MessageHandler out of private attrs) ──
+
+    @property
+    def tool_registry(self):
+        """Full tool registry; MessageHandler splits it into internal/external."""
+        return self._tool_registry
+
+    @property
+    def tool_call_history(self) -> list[dict]:
+        """Recent tool call records (read-only view)."""
+        return self._tool_call_history
+
+    @property
+    def is_sleeping(self) -> bool:
+        return self._sleeping
+
+    @property
+    def compressed_summary(self) -> str:
+        return self._context.compressed_summary
+
+    @property
+    def consecutive_negative(self) -> int:
+        return self._consecutive_negative
+
+    def pick_proactive_topic(self) -> str:
+        return self._pick_proactive_topic()
+
     def compress_context(self, messages: list[dict]) -> None:
         """Trigger context compression when the token budget is exceeded."""
         self._context.compress(messages)
@@ -172,6 +203,12 @@ class Agent:
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
                     tool_registry=None, skip_post_process: bool = False) -> str:
+        """Orchestration entry for the ReAct-style tool/response loop.
+
+        Kept as a single-underscore method because it is an internal
+        orchestration primitive, but it is deliberately invoked by
+        MessageHandler and is therefore part of the Agent public surface.
+        """
         registry = tool_registry if tool_registry is not None else self._tool_registry
         # H-07: 每条消息重置降级计数——否则上一条消息消耗的失败额度会让
         # 本条消息 1 次失败就触发降级
