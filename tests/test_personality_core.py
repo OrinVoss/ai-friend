@@ -119,7 +119,7 @@ class TestSaveMerge(unittest.TestCase):
         )
         self.p = Personality(config)
         self.tmpdir = tempfile.mkdtemp()
-        self.path = os.path.join(self.tmpdir, "personality.json")
+        self.path = os.path.join(self.tmpdir, "role.json")
 
     def _read_disk(self):
         with open(self.path, encoding="utf-8") as f:

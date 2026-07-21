@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-**未开始**。
+**已实现（2026-07-21）**。本次为收口：session_roles 表、按 session_id 隔离的各记忆表、以及 personalities/{role_id}.json 中的情绪持久化此前已部分落地，本次通过 `PersonalityManager` 与 `session_id == role_id` 硬校验完成最终绑定。
 
 ## 核心原则
 
@@ -40,12 +40,11 @@ class RoleSession:
 
 ### Personality 文件结构
 
-`personalities/{role_id}.json`：
+`personalities/{role_id}.json`（实际键名为 `personality`，保持代码现状）：
 
 ```json
 {
-  "id": "小星",
-  "config": {
+  "personality": {
     "name": "小星",
     "traits": {"humor": 0.8, "warmth": 0.7, "sass": 0.6},
     "speaking_style": "朋友式互损，但心里暖",
@@ -92,76 +91,83 @@ Role (role_id)
 
 ### 1. Personality Manager
 
+实现位置：`core/personality_manager.py`
+
 ```python
 class PersonalityManager:
-    def load_role(self, role_id: str) -> RoleSession:
-        """加载角色的完整状态（人格 + 情绪）。"""
-        
-    def save_role(self, role_session: RoleSession) -> None:
-        """保存角色的完整状态。"""
-        
+    def personality_path(self, role_id: str) -> str:
+        """返回 personalities/{role_id}.json 路径。"""
+
     def list_roles(self) -> list[str]:
-        """列出所有可用角色。"""
-        
-    def create_role(self, role_id: str, config: PersonalityConfig) -> RoleSession:
-        """创建新角色。"""
+        """列出所有可用角色（排除 .bak）。"""
+
+    def role_exists(self, role_id: str) -> bool:
+        """角色文件是否存在。"""
+
+    def load_role(self, role_id: str) -> Personality:
+        """加载角色的完整状态（人格 + 情绪）。"""
+
+    def save_role(self, role_id: str, personality: Personality) -> None:
+        """保存角色的完整状态。"""
+
+    def create_role(self, role_id: str, base: Personality | None = None) -> Personality:
+        """以 default 为模板创建新角色。"""
 ```
 
-### 2. Session Manager
+### 2. Session 绑定
 
-```python
-class SessionManager:
-    def get_or_create_session(self, role_id: str) -> Session:
-        """一个角色只对应一个 session。"""
-        
-    def validate_session_role(self, session_id: str, role_id: str) -> bool:
-        """验证 session 和 role 匹配。"""
-```
+- `core/session_factory.py::assemble_session(session_id, role_id=None)`：
+  - `role_id` 缺省时默认等于 `session_id`；
+  - 两者不一致时抛 `ValueError`；
+  - 内部 `Repository.session_id`、Agent、SleepManager、InnerDriveState 一律使用 `role_id`。
+- `web/session.py::SessionManager.get_or_create(session_id, role_id)`：
+  - 同时传入且不一致时抛 `ValueError`；
+  - 只传 `session_id` 时，若数据库中存有不一致的旧映射也抛 `ValueError`。
 
 ### 3. 数据库约束
 
-所有表已经有 `session_id`，需要强制：
+所有长期记忆表（`facts_v2`、`experiences`、`observations`、`insights_v2`、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`）已按 `session_id` 隔离。Layer 6 下 `session_id == role_id`，因此这些表也按角色隔离。
 
-```sql
--- 插入时检查 session_id == role_id
--- 或者通过 Repository 层强制
-```
+`Repository` 层所有读写均带 `session_id` 过滤；新代码路径不再写入 `session_id != role_id` 的行。
 
 ### 4. 睡眠状态
 
-```python
-# 从 .sleep_state.小星 改为 .sleep_state.小星
-# 如果 role_id 就是 小星，则不需要改文件名，但需要确保通过 role_id 查找
-```
+睡眠状态文件 `.sleep_state.{role_id}` 按 role_id 命名。`assemble_session` 与 `Agent` 构造时传入 `session_id=role_id`，因此睡眠状态天然随角色隔离。
 
 ## 实施步骤
 
-### Step 1：强制 session_id = role_id
+### Step 1：强制 session_id = role_id ✅
 
 - `Repository.session_id` 必须从 `RoleSession.role_id` 读取
 - `SessionManager` 不再允许创建非 role_id 的 session
 - 数据库迁移：把现有 session 数据合并到 role_id
 
-### Step 2：统一 Personality 管理
+> 注：`session_roles` 表与 #SR-002 迁移此前已落地，本次新增硬校验防止回归。
+
+### Step 2：统一 Personality 管理 ✅
 
 - 废弃根目录 `personality.json`
 - `personalities/{role_id}.json` 成为唯一数据源
 - `PersonalityManager` 统一加载/保存
 
-### Step 3：情绪状态绑定
+### Step 3：情绪状态绑定 ✅
 
 - `EmotionalState` 持久化到 `personalities/{role_id}.json`
 - 运行时从 RoleSession 读取，修改后写回
 
-### Step 4：睡眠状态绑定
+> 注：情绪状态已随 personalities/{role_id}.json 持久化，本次未改文件结构，只通过 `PersonalityManager` 统一入口。
+
+### Step 4：睡眠状态绑定 ✅
 
 - `.sleep_state.{role_id}` 按 role_id 命名
 - 睡眠状态属于 RoleSession 的一部分
 
-### Step 5：多角色验证
+### Step 5：多角色验证 ✅
 
 - 创建测试角色，验证数据隔离
 - 切换角色时确认不串数据
+
+验证文件：`tests/test_role_isolation.py`（facts / relationship / turns / insights / sleep state 全隔离）。
 
 ## 配置
 

@@ -40,7 +40,7 @@ class TestCliController(unittest.TestCase):
         self.agent.config.max_facts = 200
         self.agent.config.max_experiences = 100
         self.agent.config.max_reflections = 50
-        self.agent.config.personality_file = "test_personality.json"
+        self.agent.config.personality_file = "test_role.json"
         self.agent._calculate_proactivity.return_value = 0.0
         self.agent.consolidator.should_consolidate.return_value = False
         self.agent.consolidator.consolidate = MagicMock()

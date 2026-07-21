@@ -26,6 +26,7 @@ Thumbs.db
 .sleep_state
 .sleep_state.*
 .inner_drive_state.*
+personalities/*.bak
 
 # Logs
 *.log

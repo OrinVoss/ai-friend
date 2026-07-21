@@ -14,7 +14,7 @@ from typing import Optional
 
 from config import Config
 from core.agent import Agent
-from core.personality import Personality
+from core.personality_manager import PersonalityManager
 from core.provider import LLMProvider, DeepSeekProvider
 from memory.consolidation import MemoryConsolidator
 from memory.embeddings import EmbeddingEngine
@@ -89,7 +89,9 @@ class SessionBundle:
 
 
 def assemble_session(config: Config, db: Database, session_id: str,
-                     personality: Personality, provider: LLMProvider,
+                     role_id: Optional[str] = None,
+                     personality_manager: Optional[PersonalityManager] = None,
+                     provider: LLMProvider = None,
                      embed_engine: Optional[EmbeddingEngine] = None,
                      ui: Optional[ConsoleInterface] = None,
                      include_file_tree: bool = False,
@@ -104,9 +106,21 @@ def assemble_session(config: Config, db: Database, session_id: str,
     - `include_file_tree`: CLI registers FileTreeTool, Web does not.
     - `enable_llm_rerank`: CLI passes an LLM rerank fn to the retriever,
       Web does not.
+
+    Layer 6: session_id must equal role_id. role_id defaults to session_id.
     """
+    if role_id is None:
+        role_id = session_id
+    if session_id != role_id:
+        raise ValueError(
+            f"Layer 6: session_id must equal role_id, got {session_id!r} != {role_id!r}"
+        )
+    if personality_manager is None:
+        personality_manager = PersonalityManager()
+    personality = personality_manager.load_role(role_id)
+
     repo = Repository(db)
-    repo.session_id = session_id
+    repo.session_id = role_id
     ltm = LongTermMemory(repo)
     short_term = ConversationBuffer(maxlen=config.short_term_capacity)
 
@@ -129,7 +143,7 @@ def assemble_session(config: Config, db: Database, session_id: str,
     if getattr(config, "proactive_think_loop", True):
         from core.inner_drive_state import InnerDriveState
         inner_drive_state = InnerDriveState(
-            session_id=session_id,
+            session_id=role_id,
             max_entries=getattr(config, "inner_drive_care_list_size", 20),
             embedding_engine=embed_engine,
             surface_top_k=getattr(config, "inner_drive_surface_top_k", 8),
@@ -160,12 +174,12 @@ def assemble_session(config: Config, db: Database, session_id: str,
         personality=personality, provider=provider, ltm=ltm,
         retriever=retriever, consolidator=consolidator,
         short_term=short_term, ui=ui, config=config,
-        session_id=session_id,
+        session_id=role_id,
     )
     agent._tool_registry = tool_registry
     agent._inner_drive_state = inner_drive_state
 
-    logger.debug(f"[factory] session assembled: {session_id} "
+    logger.debug(f"[factory] session assembled: {role_id} "
                  f"({len(tool_registry.list_specs())} tools)")
     return SessionBundle(
         repo=repo, ltm=ltm, short_term=short_term, retriever=retriever,

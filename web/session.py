@@ -2,19 +2,18 @@ import asyncio
 import time
 import uuid
 import logging
-import os
-import shutil
 from threading import Lock
 from typing import Optional
 
+from pathlib import Path
+
 from config import Config
 from core.async_utils import run_async
-from core.personality import Personality
+from core.personality_manager import PersonalityManager
 from core.provider import LLMProvider
 from core.session_factory import (assemble_session, build_embed_engine,
                                   build_provider, make_embedding_sampler)
 from memory.embeddings import EmbeddingEngine, schedule_embedding_self_check
-from models.personality import PersonalityConfig
 from storage.database import Database
 from storage.repository import Repository
 
@@ -30,9 +29,19 @@ class WebAgent:
         self.config = config
         self.db = db
         self.session_id = session_id
-        self.role_id = role_id or "default"
-        self.personality_path = self._ensure_personality_file(self.role_id)
-        self.personality = Personality.load(self.personality_path)
+        self.role_id = role_id or session_id
+        # Layer 6: session_id 与 role_id 强制一一对应
+        if self.session_id != self.role_id:
+            raise ValueError(
+                f"Layer 6: session_id must equal role_id, got {session_id!r} != {self.role_id!r}"
+            )
+
+        personality_dir = str(Path(config.personality_file).parent)
+        self.personality_manager = PersonalityManager(personality_dir)
+        if not self.personality_manager.role_exists(self.role_id):
+            self.personality_manager.create_role(self.role_id)
+        self.personality_path = self.personality_manager.personality_path(self.role_id)
+        self.personality = self.personality_manager.load_role(self.role_id)
 
         # Unified assembly (unified-pipeline P0). Each session gets its own
         # Repository — the previous shared repo with a mutated `session_id`
@@ -48,7 +57,8 @@ class WebAgent:
             embed_engine = build_embed_engine(config)
 
         bundle = assemble_session(
-            config, db, session_id=session_id, personality=self.personality,
+            config, db, session_id=session_id, role_id=self.role_id,
+            personality_manager=self.personality_manager,
             provider=self.provider, embed_engine=embed_engine,
         )
         self.repo = bundle.repo
@@ -102,21 +112,6 @@ class WebAgent:
             self.personality.save(self.personality_path)
         except Exception as e:
             logger.warning(f"[session] close save personality failed: {e}")
-
-    def _ensure_personality_file(self, role_id: str) -> str:
-        """Return the path to the role-specific personality file, copying the
-        configured template if the role file does not yet exist."""
-        os.makedirs("personalities", exist_ok=True)
-        path = os.path.join("personalities", f"{role_id}.json")
-        if not os.path.exists(path):
-            template = self.config.personality_file
-            if os.path.exists(template):
-                shutil.copy(template, path)
-                logger.info(f"[session] copied personality template {template} -> {path}")
-            else:
-                Personality(PersonalityConfig()).save(path)
-                logger.info(f"[session] created default personality at {path}")
-        return path
 
     def _ensure_relationship_defaults(self) -> None:
         """Seed relationship metric rows for this session if missing."""
@@ -183,7 +178,7 @@ class WebAgent:
 
     @property
     def is_sleeping(self):
-        return self.agent._sleeping
+        return self.agent.is_sleeping
 
     def add_turn(self, role: str, content: str, metadata: dict | None = None) -> None:
         """Persist a conversation turn through the Agent facade."""
@@ -259,30 +254,35 @@ class SessionManager:
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:
         with self._lock:
-            # 一个角色只有一个 session：session_id 与 role_id 保持一致
-            if role_id:
+            # Layer 6: 一个角色只有一个 session，session_id 与 role_id 必须一致。
+            if role_id is not None:
+                if session_id is not None and session_id != role_id:
+                    raise ValueError(
+                        f"Layer 6: session_id must equal role_id, got {session_id!r} != {role_id!r}"
+                    )
                 sid = role_id
-            elif session_id:
+            elif session_id is not None:
                 sid = session_id
+                # 若数据库中存有旧映射，Layer 6 要求映射结果必须等于 session_id。
+                try:
+                    mapped = run_async(self.repo.get_role_for_session(sid))
+                except Exception as e:
+                    logger.warning(f"[session] get_role_for_session failed: {e}")
+                    mapped = None
+                if mapped is not None and mapped != sid:
+                    raise ValueError(
+                        f"Layer 6: session_id {sid!r} maps to role {mapped!r}; they must be equal"
+                    )
+                role_id = sid
             else:
                 sid = "default"
+                role_id = "default"
 
             if sid in self._sessions:
                 # M-12: 复用存活 session（重连/刷新）→ 取消宽限期内的延迟销毁
                 self._cancel_pending_remove(sid)
                 logger.debug(f"[session] restore: {sid}")
                 return sid, self._sessions[sid]
-
-            # Restore role mapping for an existing DB session when caller
-            # did not supply a role_id.
-            if role_id is None:
-                try:
-                    mapped = run_async(self.repo.get_role_for_session(sid))
-                    if mapped:
-                        role_id = mapped
-                except Exception as e:
-                    logger.warning(f"[session] get_role_for_session failed: {e}")
-            role_id = role_id or "default"
 
             logger.info(f"[session] create: {sid} role={role_id}")
             agent = WebAgent(

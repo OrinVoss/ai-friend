@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from config import Config
-from core.personality import Personality
+from core.personality_manager import PersonalityManager
 from core.session_factory import (assemble_session, build_embed_engine,
                                   build_provider)
 from models.personality import PersonalityConfig
@@ -25,11 +25,19 @@ class TestSessionFactory(unittest.TestCase):
         asyncio.run(self.db.close())
         self.tmp.cleanup()
 
-    def _bundle(self, session_id, **kw):
-        personality = Personality(PersonalityConfig())
+    def _bundle(self, session_id, role_id=None, **kw):
+        # Layer 6: 为测试提供临时 personalities 目录，按需创建角色文件。
+        pm = PersonalityManager(self.tmp.name)
+        from core.personality import Personality
+        if not pm.role_exists("default"):
+            Personality(PersonalityConfig()).save(pm.personality_path("default"))
+        target_role = role_id if role_id is not None else session_id
+        if not pm.role_exists(target_role):
+            pm.create_role(target_role)
         provider = build_provider(self.cfg)
-        return assemble_session(self.cfg, self.db, session_id, personality,
-                                provider, **kw)
+        return assemble_session(self.cfg, self.db, session_id,
+                                role_id=role_id, personality_manager=pm,
+                                provider=provider, **kw)
 
     def test_per_session_repositories_are_independent(self):
         """Each session gets its own Repository — no shared session_id race."""
@@ -79,6 +87,17 @@ class TestSessionFactory(unittest.TestCase):
     def test_embed_engine_optional(self):
         bundle = self._bundle("sess", embed_engine=build_embed_engine(self.cfg))
         self.assertIsNotNone(bundle.retriever._embed)
+
+    def test_session_id_must_equal_role_id(self):
+        """Layer 6: session_id 与 role_id 不一致时必须抛 ValueError。"""
+        with self.assertRaises(ValueError):
+            self._bundle("sess_a", role_id="sess_b")
+
+    def test_role_id_defaults_to_session_id(self):
+        """Layer 6: role_id 缺省时默认等于 session_id，装配正常。"""
+        bundle = self._bundle("sess_default")
+        self.assertEqual(bundle.repo.session_id, "sess_default")
+        self.assertEqual(bundle.agent._sleep._session_id, "sess_default")
 
 
 if __name__ == "__main__":

@@ -5,10 +5,12 @@ import asyncio
 import logging
 import sys
 
+from pathlib import Path
+
 from config import load_config
 from core.embedding_server import auto_start_embedding
-from core.personality import Personality
 from core.logging_setup import setup_logging
+from core.personality_manager import PersonalityManager
 from core.session_factory import (assemble_session, build_embed_engine,
                                   build_provider, make_embedding_sampler)
 from memory.embeddings import schedule_embedding_self_check
@@ -32,21 +34,24 @@ async def main():
                       backup_keep=config.db_backup_keep)
         await db.open()
 
-        # Initialize personality
-        personality = Personality.load(config.personality_file)
-
         # Unified session assembly (unified-pipeline P0): provider and
         # embedding engine are process-shared, the rest is per session.
         provider = build_provider(config)
         embed_engine = build_embed_engine(config)
+
+        # Layer 6: role_id 由配置的 personality_file 文件名推导；
+        # session_id 与 role_id 强制一一对应。
+        personality_manager = PersonalityManager(Path(config.personality_file).parent)
+        role_id = Path(config.personality_file).stem
 
         # Initialize UI — CL-001: pass typing_speed from config so the display
         # engine actually uses the user-configured value instead of the default 0.02.
         ui = ConsoleInterface(typing_speed=config.typing_speed)
 
         bundle = assemble_session(
-            config, db, session_id="default", personality=personality,
-            provider=provider, embed_engine=embed_engine, ui=ui,
+            config, db, session_id=role_id, role_id=role_id,
+            personality_manager=personality_manager, provider=provider,
+            embed_engine=embed_engine, ui=ui,
             include_file_tree=True, enable_llm_rerank=True,
         )
         agent = bundle.agent

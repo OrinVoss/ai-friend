@@ -13,7 +13,7 @@ class TestSessionManagerRoleBinding(unittest.TestCase):
     def setUp(self):
         self.cfg = Config()
         self.cfg.db_path = ":memory:"
-        self.cfg.personality_file = "personality.json"
+        self.cfg.personality_file = "personalities/default.json"
         self.cfg.api_endpoint = "http://localhost"
         self.cfg.api_key = "test"
         self.cfg.api_model = "test"
@@ -64,6 +64,11 @@ class TestSessionManagerRoleBinding(unittest.TestCase):
         role = asyncio.run(self.manager.repo.get_role_for_session("小星"))
         self.assertEqual(role, "小星")
 
+    def test_session_id_role_id_mismatch_rejected(self):
+        """Layer 6: 同时传入且不一致的 session_id/role_id 必须拒绝。"""
+        with self.assertRaises(ValueError):
+            self.manager.get_or_create(session_id="小星", role_id="小明")
+
     def test_remove_session(self):
         sid, agent = self.manager.get_or_create(role_id="小星")
         self.assertIn(sid, self.manager._sessions)
@@ -77,7 +82,7 @@ class TestScheduleRemove(unittest.TestCase):
     def setUp(self):
         self.cfg = Config()
         self.cfg.db_path = ":memory:"
-        self.cfg.personality_file = "personality.json"
+        self.cfg.personality_file = "personalities/default.json"
         self.cfg.api_endpoint = "http://localhost"
         self.cfg.api_key = "test"
         self.cfg.api_model = "test"
@@ -160,7 +165,7 @@ class TestOpenIdempotent(unittest.TestCase):
     def test_open_concurrent_idempotent(self):
         cfg = Config()
         cfg.db_path = ":memory:"
-        cfg.personality_file = "personality.json"
+        cfg.personality_file = "personalities/default.json"
         cfg.api_endpoint = "http://localhost"
         cfg.api_key = "test"
         cfg.api_model = "test"
@@ -217,7 +222,7 @@ class TestSavePersonalityDebounced(unittest.TestCase):
     def setUp(self):
         self.cfg = Config()
         self.cfg.db_path = ":memory:"
-        self.cfg.personality_file = "personality.json"
+        self.cfg.personality_file = "personalities/default.json"
         self.cfg.api_endpoint = "http://localhost"
         self.cfg.api_key = "test"
         self.cfg.api_model = "test"

@@ -1,5 +1,4 @@
 import asyncio
-import glob
 import json
 import logging
 import os
@@ -16,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import load_config
 from core.conversation_engine import ConversationEngine, Frontend
+from core.personality_manager import PersonalityManager
 from core.runtime_driver import RuntimeDriver
 from web.session import SessionManager
 from web.schemas import ChatRequest, ChatResponse, StatusResponse, HistoryResponse
@@ -227,16 +227,14 @@ async def roles_api():
     """List available roles from personalities/*.json."""
     await ensure_session()
     logger.info("[rest] roles")
+    pm = PersonalityManager()
     roles = []
-    for path in sorted(glob.glob("personalities/*.json")):
+    for role_id in pm.list_roles():
         try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            cfg = data.get("personality", data)
-            role_id = data.get("id") or os.path.splitext(os.path.basename(path))[0]
-            roles.append({"id": role_id, "name": cfg.get("name", role_id)})
+            personality = pm.load_role(role_id)
+            roles.append({"id": role_id, "name": personality.config.name})
         except Exception as e:
-            logger.warning(f"[api/roles] failed to read {path}: {e}")
+            logger.warning(f"[api/roles] failed to read {role_id}: {e}")
     return {"roles": roles}
 
 
@@ -315,6 +313,13 @@ async def monitor_clear():
     from core.monitor import get_monitor
     get_monitor().clear()
     return {"status": "cleared"}
+
+
+@app.get("/api/tools/metrics")
+async def tools_metrics_api():
+    """Return per-tool success / latency / retry metrics."""
+    from core.monitor import get_tool_metrics
+    return get_tool_metrics()
 
 
 @app.get("/monitor")

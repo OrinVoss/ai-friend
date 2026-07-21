@@ -16,7 +16,7 @@ class TestPersonalitySaveLock(unittest.TestCase):
 
     def setUp(self):
         self._tmpdir = tempfile.mkdtemp()
-        self.path = os.path.join(self._tmpdir, "personality.json")
+        self.path = os.path.join(self._tmpdir, "role.json")
         self.p = Personality(PersonalityConfig())
 
     def test_concurrent_save_and_mutation(self):

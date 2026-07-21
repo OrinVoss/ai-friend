@@ -13,7 +13,7 @@ class TestWebAgentProactive(unittest.TestCase):
 
         cfg = Config()
         cfg.max_tokens = 512
-        cfg.personality_file = "personality.json"
+        cfg.personality_file = "personalities/default.json"
         cfg.web_port = 8000
 
         self.agent = WebAgent.__new__(WebAgent)
