@@ -79,11 +79,14 @@ function getCookie(name) {
 }
 
 function setCookie(name, value) {
-    document.cookie = name + '=' + value + '; path=/; max-age=86400';
+    // SameSite=Lax: 防止跨站请求附带此 cookie。
+    // 不加 HttpOnly: session_id 需要被 JS 读取后放进 WebSocket init 消息。
+    // 不加 Secure: 本地开发使用 http，Secure 会导致 cookie 无法写入。
+    document.cookie = name + '=' + value + '; path=/; max-age=86400; SameSite=Lax';
 }
 
 function clearCookie(name) {
-    document.cookie = name + '=; path=/; max-age=0';
+    document.cookie = name + '=; path=/; max-age=0; SameSite=Lax';
 }
 
 function connect() {

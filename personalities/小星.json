@@ -453,6 +453,9 @@
     ],
     "consecutive_negative": 0,
     "turns_without_anger": 4,
+    "_valence_boundary_count": 0,
+    "last_decay_at": 0.0,
+    "turn_seconds": 300.0,
     "dominant_emotion": "trusting"
   }
 }

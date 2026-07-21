@@ -43,5 +43,21 @@ class TestSetupLoggingReentrant(unittest.TestCase):
             root.setLevel(saved_level)
 
 
+class TestCookieSameSite(unittest.TestCase):
+    def test_session_cookie_has_samesite_lax(self):
+        # T1 #244: session_id cookie 必须带 SameSite=Lax；
+        # HttpOnly/Secure 因 JS 需要读取且本地为 http 而不适用。
+        from pathlib import Path
+        src = (Path(__file__).parent.parent / "web" / "static" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("SameSite=Lax", src)
+        # setCookie 与 clearCookie 两处都要带
+        set_cookie = src[src.find("function setCookie") : src.find("function clearCookie")]
+        clear_cookie = src[src.find("function clearCookie") :]
+        self.assertIn("SameSite=Lax", set_cookie)
+        self.assertIn("SameSite=Lax", clear_cookie)
+
+
 if __name__ == "__main__":
     unittest.main()

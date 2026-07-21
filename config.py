@@ -150,6 +150,9 @@ class Config:
             ],
         },
     ])
+    # M-001: 记忆固化统一调用开关。True = 常规 L1 批次合并 3 次 LLM
+    # 调用为 1 次；False = 走旧三次调用路径（灰度回退）。
+    consolidation_unified_call: bool = True
     # Web security: extra allowed CORS origins beyond localhost
     allowed_origins: list[str] = field(default_factory=list)
 

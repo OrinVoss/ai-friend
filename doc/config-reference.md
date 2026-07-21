@@ -36,6 +36,7 @@
 |------|------|--------|------|
 | `short_term_capacity` | int | `500` | 短期记忆最大轮数 |
 | `consolidation_interval` | int | `5` | 每 N 轮触发记忆合并 |
+| `consolidation_unified_call` | bool | `true` | #164 记忆固化统一调用：常规 L1 批次把事实提取+体验总结+L1 insight 合并为 1 次 LLM 调用；`false` 回退旧三次调用路径 |
 | `max_facts` | int | `200` | 最大活跃用户事实数，超量修剪 |
 | `max_experiences` | int | `100` | 最大共享体验数，超量修剪 |
 | `max_reflections` | int | `50` | 最大反思数，超量修剪 |

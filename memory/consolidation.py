@@ -22,6 +22,7 @@ from prompts.templates import (
     EMOTION_ANALYSIS_PROMPT,
     CARE_CLUE_PROMPT,
     CONTRADICTION_VERIFY_PROMPT,
+    CONSOLIDATION_UNIFIED_PROMPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,35 +123,65 @@ class MemoryConsolidator:
         except Exception as e:
             logger.warning(f"[consolidate] observation creation failed: {e}")
 
-        # Step 1: Extract user facts
-        try:
-            self._extract_facts(turn_text, observation_ids=lifecycle_obs_ids)
-        except Exception as e:
-            logger.warning(f"Fact extraction failed: {e}")
-            errors.append("facts")
+        # Step 1-3: Extract user facts, summarize experiences, generate insight.
+        # #164: L1 常规批次使用统一调用，L2/L3 节奏批次或开关关闭时走旧路径。
+        use_unified = getattr(self.config, 'consolidation_unified_call', True)
+        self._consolidation_count += 1
+        is_l2 = self._consolidation_count % 3 == 0
+        is_l3 = self._consolidation_count % 10 == 0
+        is_l1 = not is_l2 and not is_l3
 
-        # Step 2: Summarize experiences
-        if len(turn_text) > 200:
-            try:
-                self._summarize_experience(turn_text, short_term)
-            except Exception as e:
-                logger.warning(f"Experience summarization failed: {e}")
-                errors.append("experiences")
+        if use_unified and is_l1:
+            unified_errors = self._consolidate_unified(
+                turn_text, short_term, personality, lifecycle_obs_ids
+            )
+            if "unified" in unified_errors:
+                # 统一输出整体无法解析：本批回退旧三次调用路径，不丢数据。
+                try:
+                    self._extract_facts(turn_text, observation_ids=lifecycle_obs_ids)
+                except Exception as e:
+                    logger.warning(f"Fact extraction failed: {e}")
+                    errors.append("facts")
 
-        # Step 3: Generate insight — tiered L1/L2/L3 (#5)
-        # Layer 1 二期（2026-07-20）：输出由开放式 Reflection 改为结构化
-        # Insight（hypothesis + evidence + confidence），落 insights_v2。
-        try:
-            self._consolidation_count += 1
-            if self._consolidation_count % 10 == 0:
-                self._generate_reflection_l3(personality)
-            elif self._consolidation_count % 3 == 0:
-                self._generate_reflection_l2()
+                if len(turn_text) > 200:
+                    try:
+                        self._summarize_experience(turn_text, short_term)
+                    except Exception as e:
+                        logger.warning(f"Experience summarization failed: {e}")
+                        errors.append("experiences")
+
+                try:
+                    self._generate_reflection_l1(personality)
+                except Exception as e:
+                    logger.warning(f"Insight generation failed: {e}")
+                    errors.append("reflections")
             else:
-                self._generate_reflection_l1(personality)
-        except Exception as e:
-            logger.warning(f"Insight generation failed: {e}")
-            errors.append("reflections")
+                errors.extend(unified_errors)
+        else:
+            # 旧三次调用路径（含 L2/L3 节奏判断）
+            try:
+                self._extract_facts(turn_text, observation_ids=lifecycle_obs_ids)
+            except Exception as e:
+                logger.warning(f"Fact extraction failed: {e}")
+                errors.append("facts")
+
+            if len(turn_text) > 200:
+                try:
+                    self._summarize_experience(turn_text, short_term)
+                except Exception as e:
+                    logger.warning(f"Experience summarization failed: {e}")
+                    errors.append("experiences")
+
+            try:
+                if is_l3:
+                    self._generate_reflection_l3(personality)
+                elif is_l2:
+                    self._generate_reflection_l2()
+                else:
+                    self._generate_reflection_l1(personality)
+            except Exception as e:
+                logger.warning(f"Insight generation failed: {e}")
+                errors.append("reflections")
 
         # Step 4: Update relationship
         try:
@@ -275,116 +306,125 @@ class MemoryConsolidator:
         try:
             prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
             result = self._call_llm(prompt, temperature=0.2)
-            new_facts = []
-            for line in result.strip().split("\n"):
-                line = line.strip()
-                if re.match(r'FACT\s*\|', line):  # #141: tolerate whitespace around |
-                    parts = line.split("|")
-                    if len(parts) >= 5:
-                        _, category, key, value, conf_str = parts[:5]
-                        importance = 0.5
-                        if len(parts) >= 6:
-                            try:
-                                importance = float(parts[5])
-                            except ValueError:
-                                pass
-                        fact_type = "user_fact"  # default
-                        if len(parts) >= 7:
-                            fact_type = parts[6].strip() or "user_fact"
-                        try:
-                            confidence = float(conf_str)
-                        except ValueError:
-                            confidence = 0.5
-                        # #127: only store user_fact, skip agent_fact/system_fact
-                        if fact_type != "user_fact":
-                            logger.debug(f"Skipped non-user fact: {key} type={fact_type}")
-                            continue
-                        if confidence > 0.3:
-                            category = category.strip()
-                            key = key.strip()
-                            value = value.strip()
-                            new_facts.append((category, key, value, confidence, importance))
-                            logger.debug(f"Extracted fact: {key} = {value} (imp={importance})")
-
-            # FactChecker: check new facts against existing ones for contradictions.
-            # 保持在写入前逐条检测：get_similar_facts 读 facts_v2，此时新事实
-            # 尚未落库，检测语义与旧流程（先检测后批量写）一致。
-            # Bug 3（2026-07-20）：embedding 候选矛盾先过 LLM 复核，复述/近义不 decay
-            if self._fact_checker and new_facts:
-                for cat, key, val, conf, _imp in new_facts:
-                    similar = self.ltm.get_similar_facts(cat, key, limit=5)
-                    new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
-                    old_f = self._fact_checker.detect_contradiction(
-                        new_f, similar, verify_fn=self._verify_contradiction_llm)
-                    if old_f:
-                        self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
-
-            # ML-001 完整上线（2026-07-18）：单写 facts_v2 —— 每条 fact 经
-            # lifecycle promote 落库（替代 #161 的 store_facts_bulk 旧表批量写；
-            # 每批事实数量小，逐条写可接受）。upsert ON CONFLICT 自带 #217 复活语义。
-            for cat, key, val, conf, imp in new_facts:
-                try:
-                    run_async(self._lifecycle.promote_fact(
-                        observation_ids=observation_ids or [],
-                        category=cat,
-                        key=key,
-                        value=val,
-                        confidence=conf,
-                        stability=0.5,
-                        freshness=1.0,
-                        importance=imp,
-                        created_by="consolidation",
-                    ))
-                except Exception as e:
-                    logger.warning(f"[consolidate] promote fact failed: {e}")
-            if new_facts:
-                self._batch_new_info = True  # R3: 本批有新事实
-                logger.debug(f"Promoted {len(new_facts)} facts to facts_v2")
+            self._parse_fact_lines(result, observation_ids=observation_ids)
         except Exception as e:
             logger.warning(f"Fact extraction failed: {e}")
+
+    def _parse_fact_lines(self, text: str,
+                          observation_ids: Optional[list[int]] = None) -> None:
+        """解析 FACT|... 行，做矛盾检测后落库 facts_v2。"""
+        new_facts = []
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if re.match(r'FACT\s*\|', line):  # #141: tolerate whitespace around |
+                parts = line.split("|")
+                if len(parts) >= 5:
+                    _, category, key, value, conf_str = parts[:5]
+                    importance = 0.5
+                    if len(parts) >= 6:
+                        try:
+                            importance = float(parts[5])
+                        except ValueError:
+                            pass
+                    fact_type = "user_fact"  # default
+                    if len(parts) >= 7:
+                        fact_type = parts[6].strip() or "user_fact"
+                    try:
+                        confidence = float(conf_str)
+                    except ValueError:
+                        confidence = 0.5
+                    # #127: only store user_fact, skip agent_fact/system_fact
+                    if fact_type != "user_fact":
+                        logger.debug(f"Skipped non-user fact: {key} type={fact_type}")
+                        continue
+                    if confidence > 0.3:
+                        category = category.strip()
+                        key = key.strip()
+                        value = value.strip()
+                        new_facts.append((category, key, value, confidence, importance))
+                        logger.debug(f"Extracted fact: {key} = {value} (imp={importance})")
+
+        # FactChecker: check new facts against existing ones for contradictions.
+        # 保持在写入前逐条检测：get_similar_facts 读 facts_v2，此时新事实
+        # 尚未落库，检测语义与旧流程（先检测后批量写）一致。
+        # Bug 3（2026-07-20）：embedding 候选矛盾先过 LLM 复核，复述/近义不 decay
+        if self._fact_checker and new_facts:
+            for cat, key, val, conf, _imp in new_facts:
+                similar = self.ltm.get_similar_facts(cat, key, limit=5)
+                new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
+                old_f = self._fact_checker.detect_contradiction(
+                    new_f, similar, verify_fn=self._verify_contradiction_llm)
+                if old_f:
+                    self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
+
+        # ML-001 完整上线（2026-07-18）：单写 facts_v2 —— 每条 fact 经
+        # lifecycle promote 落库（替代 #161 的 store_facts_bulk 旧表批量写；
+        # 每批事实数量小，逐条写可接受）。upsert ON CONFLICT 自带 #217 复活语义。
+        for cat, key, val, conf, imp in new_facts:
+            try:
+                run_async(self._lifecycle.promote_fact(
+                    observation_ids=observation_ids or [],
+                    category=cat,
+                    key=key,
+                    value=val,
+                    confidence=conf,
+                    stability=0.5,
+                    freshness=1.0,
+                    importance=imp,
+                    created_by="consolidation",
+                ))
+            except Exception as e:
+                logger.warning(f"[consolidate] promote fact failed: {e}")
+        if new_facts:
+            self._batch_new_info = True  # R3: 本批有新事实
+            logger.debug(f"Promoted {len(new_facts)} facts to facts_v2")
 
     def _summarize_experience(self, turn_text: str,
                                short_term: ConversationBuffer) -> None:
         try:
             prompt = safe_format(EXPERIENCE_SUMMARIZATION_PROMPT, text=turn_text)
             result = self._call_llm(prompt, temperature=0.3)
-
-            summary = ""
-            tone = "neutral"
-            significance = 0.5
-            importance = 0.5
-            tags = []
-
-            for line in result.strip().split("\n"):
-                line = line.strip()
-                if line.startswith("SUMMARY:"):
-                    summary = line[len("SUMMARY:"):].strip()
-                elif line.startswith("TONE:"):
-                    tone = line[len("TONE:"):].strip()
-                elif line.startswith("SIGNIFICANCE:"):
-                    try:
-                        significance = float(line[len("SIGNIFICANCE:"):].strip())
-                    except ValueError:
-                        pass
-                elif line.startswith("IMPORTANCE:"):
-                    try:
-                        importance = float(line[len("IMPORTANCE:"):].strip())
-                    except ValueError:
-                        pass
-                elif line.startswith("TAGS:"):
-                    tags_raw = line[len("TAGS:"):].strip()
-                    tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
-
-            if summary and significance > 0.3:
-                start_id = min((t.turn_id for t in self._pending_buffer), default=None)
-                end_id = max((t.turn_id for t in self._pending_buffer), default=None)
-                self.ltm.store_experience(
-                    summary, tone, significance, tags, start_id, end_id, importance
-                )
-                self._batch_new_info = True  # R3: 本批有新体验
-                logger.info(f"Stored experience ({significance:.2f}): {summary[:50]}")
+            self._parse_experience_block(result, short_term)
         except Exception as e:
             logger.warning(f"Experience summarization failed: {e}")
+
+    def _parse_experience_block(self, text: str,
+                                short_term: ConversationBuffer) -> None:
+        """解析 EXPERIENCE 分块并落库共享体验。"""
+        summary = ""
+        tone = "neutral"
+        significance = 0.5
+        importance = 0.5
+        tags = []
+
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("SUMMARY:"):
+                summary = line[len("SUMMARY:"):].strip()
+            elif line.startswith("TONE:"):
+                tone = line[len("TONE:"):].strip()
+            elif line.startswith("SIGNIFICANCE:"):
+                try:
+                    significance = float(line[len("SIGNIFICANCE:"):].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("IMPORTANCE:"):
+                try:
+                    importance = float(line[len("IMPORTANCE:"):].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("TAGS:"):
+                tags_raw = line[len("TAGS:"):].strip()
+                tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+        if summary and significance > 0.3:
+            start_id = min((t.turn_id for t in self._pending_buffer), default=None)
+            end_id = max((t.turn_id for t in self._pending_buffer), default=None)
+            self.ltm.store_experience(
+                summary, tone, significance, tags, start_id, end_id, importance
+            )
+            self._batch_new_info = True  # R3: 本批有新体验
+            logger.info(f"Stored experience ({significance:.2f}): {summary[:50]}")
 
     # ── Insight generation（Layer 1 二期，2026-07-20）──
     # 方法名保留 _generate_reflection_l1/l2/l3（层级节奏与既有测试不变），
@@ -413,9 +453,112 @@ class MemoryConsolidator:
                                  facts=fact_text, experiences=exp_text)
             result = self._call_llm(prompt, temperature=0.4)
             # min_confidence 沿用旧 L1 的 significance>0.4 门槛
-            self._store_insight_from_json(result, min_confidence=0.4, level="L1")
+            self._parse_insight_block(result, personality,
+                                      min_confidence=0.4, level="L1")
         except Exception as e:
             logger.warning(f"L1 insight generation failed: {e}")
+
+    def _parse_insight_block(self, text: str, personality: Personality,
+                             min_confidence: float, level: str,
+                             default_type: Optional[str] = None) -> None:
+        """解析 INSIGHT 分块（JSON）并落库 insights_v2。"""
+        self._store_insight_from_json(text, min_confidence=min_confidence,
+                                      level=level, default_type=default_type)
+
+    def _split_unified_output(self, text: str) -> Optional[dict[str, str]]:
+        """把统一 prompt 的输出拆成 FACTS / EXPERIENCE / INSIGHT 三段。
+        若完全找不到任何段标题，返回 None（触发整体回退）。"""
+        sections: dict[str, str] = {}
+        current: Optional[str] = None
+        current_lines: list[str] = []
+        order = {"FACTS", "EXPERIENCE", "INSIGHT"}
+        for raw in text.split("\n"):
+            stripped = raw.strip().rstrip(":")
+            if stripped in order:
+                if current is not None:
+                    sections[current] = "\n".join(current_lines).strip()
+                current = stripped
+                current_lines = []
+            elif current is not None:
+                current_lines.append(raw)
+        if current is not None:
+            sections[current] = "\n".join(current_lines).strip()
+        return sections if sections else None
+
+    def _consolidate_unified(self, turn_text: str,
+                             short_term: ConversationBuffer,
+                             personality: Personality,
+                             observation_ids: list[int]) -> list[str]:
+        """#164: 一次 LLM 调用完成事实提取、体验总结、L1 insight 生成。
+
+        返回本节产生的 step 错误列表。若返回列表含 "unified"，表示整体
+        输出无法解析，调用方应回退到旧三次调用路径。
+        """
+        errors: list[str] = []
+        try:
+            experiences = self.ltm.get_recent_experiences(limit=5)
+            facts = self.ltm.get_all_active_facts(limit=10)
+            exp_text = "\n".join(
+                f"- [{e.emotional_tone}] {e.summary} (id={e.id})"
+                for e in experiences
+            ) or "暂无"
+            fact_text = "\n".join(
+                f"- {f.fact_key}: {f.fact_value} (id={f.id})" for f in facts
+            ) or "暂无"
+            prompt = safe_format(CONSOLIDATION_UNIFIED_PROMPT,
+                                 text=turn_text,
+                                 facts=fact_text,
+                                 experiences=exp_text)
+            result = self._call_llm(prompt, temperature=0.3)
+            if not result:
+                return ["unified"]
+
+            sections = self._split_unified_output(result)
+            if sections is None:
+                logger.warning("[consolidate] unified output has no sections, fallback")
+                return ["unified"]
+
+            # Step 1: facts
+            if "FACTS" in sections:
+                try:
+                    self._parse_fact_lines(sections["FACTS"],
+                                           observation_ids=observation_ids)
+                except Exception as e:
+                    logger.warning(f"[consolidate] unified FACTS parse failed: {e}")
+                    errors.append("facts")
+            else:
+                logger.warning("[consolidate] unified output missing FACTS section")
+                errors.append("facts")
+
+            # Step 2: experience（仅当文本足够长时）
+            if len(turn_text) > 200:
+                if "EXPERIENCE" in sections:
+                    try:
+                        self._parse_experience_block(sections["EXPERIENCE"], short_term)
+                    except Exception as e:
+                        logger.warning(f"[consolidate] unified EXPERIENCE parse failed: {e}")
+                        errors.append("experiences")
+                else:
+                    logger.warning("[consolidate] unified output missing EXPERIENCE section")
+                    errors.append("experiences")
+
+            # Step 3: L1 insight（沿用 R3 短路：本批无新信息则跳过）
+            if self._batch_new_info:
+                if "INSIGHT" in sections:
+                    try:
+                        self._parse_insight_block(sections["INSIGHT"], personality,
+                                                  min_confidence=0.4, level="L1")
+                    except Exception as e:
+                        logger.warning(f"[consolidate] unified INSIGHT parse failed: {e}")
+                        errors.append("reflections")
+                else:
+                    logger.warning("[consolidate] unified output missing INSIGHT section")
+                    errors.append("reflections")
+
+            return errors
+        except Exception as e:
+            logger.warning(f"[consolidate] unified call failed: {e}")
+            return ["unified"]
 
     def _generate_reflection_l2(self) -> None:
         """L2: 每 3 次合并，基于近期 insight 归纳行为模式假设。"""

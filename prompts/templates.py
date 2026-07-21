@@ -191,6 +191,41 @@ INSIGHT_L3_PROMPT = """基于你和用户的长期互动，提出一个**长期�
 """
 
 
+# ── Unified Consolidation Prompt (#164) ──
+# 把事实提取、体验总结、L1 insight 生成合并为一次 LLM 调用。
+# 输出三段：FACTS（与 FACT_EXTRACTION_PROMPT 同格式）、EXPERIENCE（与
+# EXPERIENCE_SUMMARIZATION_PROMPT 同格式）、INSIGHT（与
+# INSIGHT_GENERATION_PROMPT 同格式 JSON）。
+CONSOLIDATION_UNIFIED_PROMPT = """请根据以下对话，一次性完成三件事：提取用户事实、总结共享体验、生成一个假设性洞察。
+
+对话：
+{text}
+
+近期事实：
+{facts}
+
+近期体验：
+{experiences}
+
+请严格按以下格式输出三段，段标题必须保留：
+
+FACTS:
+FACT|分类|关键词|值|置信度|重要性|fact_type
+（每行一条，没有则写 NONE；只提取用户亲口说的关于自身的信息）
+
+EXPERIENCE:
+SUMMARY: <一行总结>
+TONE: <情感色调>
+SIGNIFICANCE: <0.0~1.0>
+IMPORTANCE: <0.0~1.0>
+TAGS: <逗号分隔关键词>
+
+INSIGHT:
+{{"hypothesis": "...", "insight_type": "pattern", "evidence": [1, 2], "confidence": 0.5, "needs_more_evidence": true}}
+（若本批无新信息可洞察，输出 {{"hypothesis": ""}}）
+"""
+
+
 # ── Emotional Analysis ──
 EMOTION_ANALYSIS_PROMPT = """分析用户这条消息的情感倾向。
 输出格式（一行JSON）：
