@@ -64,12 +64,14 @@ class TestMemoryAgentIntegration(unittest.TestCase):
         result = drive.assess("我想知道按照你的记忆我平时最喜欢吃的东西是什么")
 
         self.assertIn("披萨", result.context_summary)
-        self.assertIn("置信度", result.context_summary)
+        # L3-3: Agent 3 收到轻量上下文（无置信度标注）
+        self.assertNotIn("置信度", result.context_summary)
         retriever.retrieve_for_query.assert_not_called()
         ma.answer.assert_awaited_once_with("我想知道按照你的记忆我平时最喜欢吃的东西是什么")
-        # Agent 1 的 prompt 也应携带同一份摘要（一个替换点升级两个消费方）
+        # Agent 1 的 prompt 仍携带全文摘要（含置信度标注）
         messages = provider.generate.call_args.args[0]
         self.assertIn("披萨", messages[0]["content"])
+        self.assertIn("置信度", messages[0]["content"])
 
     def test_memory_agent_failure_falls_back(self):
         ma = MagicMock()

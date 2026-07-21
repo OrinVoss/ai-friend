@@ -219,9 +219,9 @@ class InnerDriveAgent:
         self._think_loop = proactive_think_loop
         self._think_max_rounds = _positive_int(proactive_think_max_rounds, 2)  # F2: 默认 2 轮
         self._inner_drive_state = inner_drive_state
-        # R1: 同一条消息内 _context_summary_for 的结果缓存，避免 assess/review/re_decide
+        # R1: 同一条消息内 _memory_answer_for 的结果缓存，避免 assess/review/re_decide
         # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实下条消息可见。
-        self._cs_memo: tuple[str, str] | None = None
+        self._cs_memo: tuple[str, object] | None = None  # (user_input, MemoryAnswer | None)
 
     def assess(self, user_input: str) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema."""
@@ -235,15 +235,23 @@ class InnerDriveAgent:
         # Agent 3 (memory-agent.md 7.1). Otherwise the classic retriever path.
         use_ma = self._memory_agent is not None
         mem_ctx = None
+        ma = self._memory_answer_for(user_input) if use_ma else None
         cs = self._context_summary_for(user_input) if use_ma else ""
         if not use_ma:
             mem_ctx = self._retriever.retrieve_for_query(user_input)
             cs = self._build_context_summary(mem_ctx)
+        # Agent 3 的轻量上下文（L3-3）：与 Agent 1 的同一份记忆，按 profile 渲染
+        if ma is not None:
+            from memory.retrieval_pipeline import ContextBuilder
+            light = ContextBuilder().build("agent3", ma)
+            cs_agent3 = light if light else cs   # 轻量为空（无相关记忆）时退回 cs
+        else:
+            cs_agent3 = cs
         # 二期 4.2：对话触发的挂念浮现——用户聊到的事和某条挂念相关时，
         # 它自然浮上来，经 context_summary 链路同流到 Agent 3，调用侧零改动
         care_block = self._surface_care_for(user_input)
         if care_block:
-            cs = f"{cs}\n\n{care_block}" if cs else care_block
+            cs_agent3 = f"{cs_agent3}\n\n{care_block}" if cs_agent3 else care_block
 
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
         sys_prompt = build_inner_drive_prompt(
@@ -259,6 +267,8 @@ class InnerDriveAgent:
             memory_context_summary=cs if use_ma else "",
             rule_tools=self._rule_tools_registry,
         )
+        if self._prompt_cache is not None:
+            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive")
 
         messages = [
             {"role": "system", "content": sys_prompt},
@@ -277,7 +287,7 @@ class InnerDriveAgent:
                     needs_external_tools=False,
                     reasoning="解析失败，默认不需要外部工具",
                     summary="",
-                    context_summary=cs,
+                    context_summary=cs_agent3,
                 )
 
             # If recall_query is set, execute internal recall and loop
@@ -295,7 +305,7 @@ class InnerDriveAgent:
                 f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
                 f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
             )
-            result.context_summary = cs
+            result.context_summary = cs_agent3
             return result
 
         logger.warning("[inner_drive] max iterations, defaulting to no tools")
@@ -303,7 +313,7 @@ class InnerDriveAgent:
             needs_external_tools=False,
             reasoning="达到最大迭代次数，默认不需要外部工具",
             summary="",
-            context_summary=cs,
+            context_summary=cs_agent3,
         )
 
     def _surface_care_for(self, user_input: str) -> str:
@@ -335,53 +345,45 @@ class InnerDriveAgent:
         ]
         return "\n\n".join(p for p in parts if p)
 
-    def _context_summary_for(self, user_input: str) -> str:
-        """context_summary via MemoryAgent when enabled; falls back to the
-        classic retriever path on failure or empty result."""
-        # R1: 同一条消息内 memo 缓存，避免 assess/review/re_decide
-        # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实
-        # 下条消息可见——同一条消息内的略微过期可接受。
+    def _memory_answer_for(self, user_input: str):
+        """R1 memo：同一条消息内 memory_agent.answer() 只跑一次。
+        返回 MemoryAnswer 或 None（未启用/失败/空 query）。"""
         if self._cs_memo and self._cs_memo[0] == user_input:
-            logger.debug(f"[inner_drive] context memo hit ({user_input[:30]})")
             return self._cs_memo[1]
-        # F3: 空 query（proactive 等无用户输入路径）不需要 MemoryAgent 的
-        # 置信度/证据链管线——空查询会得到"全部最近记忆 + 虚假高置信度"，
-        # 直接用 retriever 的概览即可
-        if not (user_input or "").strip():
-            cs = self._build_context_summary(self._retriever.retrieve_for_query(user_input))
-            self._cs_memo = (user_input, cs)
-            return cs
-        if self._memory_agent is not None:
+        ma = None
+        if self._memory_agent is not None and (user_input or "").strip():
             try:
                 from core.async_utils import run_async
                 ma = run_async(self._memory_agent.answer(user_input))
-                formatted = self._format_memory_answer(ma)
-                if formatted:
-                    logger.debug(f"[inner_drive] context via memory agent "
-                                 f"(confidence={ma.confidence})")
-                    self._cs_memo = (user_input, formatted)
-                    return formatted
-                logger.debug("[inner_drive] memory agent empty, retriever fallback")
             except Exception as e:
                 logger.warning(f"[inner_drive] memory agent failed, retriever fallback: {e}")
-        cs = self._build_context_summary(self._retriever.retrieve_for_query(user_input))
-        self._cs_memo = (user_input, cs)
-        return cs
+                ma = None
+        self._cs_memo = (user_input, ma)
+        return ma
+
+    def _context_summary_for(self, user_input: str) -> str:
+        """Agent 1 prompt 的记忆上下文（全文）。memo 缓存 MemoryAnswer，
+        Agent 3 的轻量渲染复用同一对象（L3-3）。"""
+        if not (user_input or "").strip():
+            # F3: 空 query 走 retriever 概览（现状逻辑保留）
+            return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+        ma = self._memory_answer_for(user_input)
+        if ma is not None:
+            from memory.retrieval_pipeline import ContextBuilder
+            full = ContextBuilder().build("agent1", ma)
+            if full:
+                logger.debug(f"[inner_drive] context via memory agent "
+                             f"(confidence={ma.confidence})")
+                return full
+            logger.debug("[inner_drive] memory agent empty, retriever fallback")
+        return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
 
     @staticmethod
     def _format_memory_answer(ma) -> str:
-        """Format a MemoryAnswer for prompt injection: answer text plus
-        explicit confidence/contradiction markers so Agent 1/3 treat
-        uncertain memory as uncertain (memory-agent.md 7.1)."""
-        if ma is None or not ma.answer:
-            return ""
-        parts = [f"=== 记忆检索（置信度 {ma.confidence:.0%}）===", ma.answer]
-        if ma.contradictions:
-            parts.append("⚠️ 矛盾记忆：" + "；".join(ma.contradictions[:3])
-                         + "（如需引用请先向用户确认）")
-        if ma.needs_more_evidence or ma.confidence < 0.4:
-            parts.append("（以上记忆证据不足，当作待确认信息，不要当作确定事实）")
-        return "\n".join(parts)
+        """Thin wrapper around ContextBuilder for backward compatibility.
+        Agent 1 receives the full memory context with confidence markers."""
+        from memory.retrieval_pipeline import ContextBuilder
+        return ContextBuilder().build("agent1", ma)
 
     def assess_proactive(self, idle_duration: float,
                          recent_topics: list | None = None) -> ProactiveIntent:
@@ -619,6 +621,8 @@ class InnerDriveAgent:
             memory_context_summary=cs,
             rule_tools=self._rule_tools_registry,
         )
+        if self._prompt_cache is not None:
+            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_review")
 
         review_msg = (
             f"用户原始输入：{user_input}\n\n"
@@ -698,6 +702,8 @@ class InnerDriveAgent:
             memory_context_summary=cs,
             rule_tools=self._rule_tools_registry,
         )
+        if self._prompt_cache is not None:
+            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_redecide")
 
         messages = [
             {"role": "system", "content": sys_prompt},
@@ -770,6 +776,8 @@ class InnerDriveAgent:
             memory_context_summary=cs,
             rule_tools=self._rule_tools_registry,
         )
+        if self._prompt_cache is not None:
+            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_intent")
 
         intent_to_tool = {
             "play_music": "music_play",

@@ -207,6 +207,29 @@ class TestVerifyFact(unittest.TestCase):
         self.assertIn("披萨", result.answer)
         self.assertGreaterEqual(result.confidence, 0.3)
 
+    def test_verify_fact_contradiction_writes_curiosity(self):
+        """L4-6b: a contradiction during verify_fact writes a curiosity entry."""
+        qvec = _unit([1, 0, 0, 0])
+        fact = _fact(1, key="最爱食物", value="披萨", qvec=qvec)
+        other = _fact(2, key="最爱食物", value="寿司", qvec=qvec)
+        inner_state = MagicMock()
+        agent, ltm, _, _ = _agent(
+            facts=[fact, other], qvec=qvec, inner_drive_state=inner_state)
+        ltm.repo.get_fact_v2_by_id = AsyncMock(return_value=fact)
+        ltm.repo.search_facts_v2 = AsyncMock(return_value=[other])
+
+        result = asyncio.run(agent.verify_fact(1))
+
+        self.assertTrue(result.contradictions)
+        inner_state.apply_updates.assert_called_once()
+        args, kwargs = inner_state.apply_updates.call_args
+        self.assertEqual(kwargs.get("source"), "memory_agent")
+        added = kwargs.get("add") or args[0] if args else []
+        if not added and kwargs.get("add"):
+            added = kwargs["add"]
+        self.assertEqual(added[0]["type"], "curiosity")
+        self.assertIn("最爱食物", added[0]["content"])
+
     def test_batch_verify_decays_low_confidence(self):
         fact = _fact(1, qvec=None)
         agent, ltm, _, _ = _agent(facts=[fact])

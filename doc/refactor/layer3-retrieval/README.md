@@ -6,7 +6,12 @@
 
 ## 当前状态
 
-**实施计划已制定**（2026-07-20，见 `implementation-plan.md`）。核对结论：约 70% 已建成（内嵌在 MemoryAgent 中），剩余工作为抽取共享管线 + 按 Agent 分 Profile + Agent 3 轻量上下文。
+**P0-P2 已实现**（2026-07-21，见 `changes/2026-07-21-layer3-retrieval-pipeline.md`）。
+
+- `memory/retrieval_pipeline.py` 已抽取为共享检索管线（QueryClues / retrieve_bundle / cross_verify / ContextBuilder）。
+- `ContextBuilder` 按 Agent Profile 渲染：Agent 1 全文、Agent 3 轻量、Agent 2 空。
+- Agent 3 的 `context_summary` 已切换为轻量上下文；Agent 1 prompt 仍使用全文。
+- P3 的 `fact_extractor` 仅留 profile 桩，未接线（现状提取输入为整批 turn 文本，够用）。
 
 ## 核心问题
 
@@ -134,27 +139,28 @@ Memory Agent 是 Layer 3 的**用户**，它调用 Parallel Retriever 和 Cross 
 
 ### P0：基础多源检索
 
-- [ ] `QueryClues` 数据模型
-- [ ] `ParallelRetriever` 并行检索
-- [ ] `ContextBuilder` 按 Agent 类型组装
-- [ ] `tests/test_parallel_retriever.py`
+- [x] `QueryClues` 数据模型（`memory/retrieval_pipeline.py`）
+- [x] 五源串行检索（`retrieve_bundle`；强制串行，见设计偏离）
+- [x] `ContextBuilder` 按 Agent 类型组装
+- [x] `tests/test_retrieval_pipeline.py`
 
 ### P1：交叉验证
 
-- [ ] `CrossVerifier` 一致性/时间线/矛盾/新鲜度检查
-- [ ] 与 `FactChecker` 集成
-- [ ] `tests/test_cross_verifier.py`
+- [x] `cross_verify` 一致性/时间线/矛盾/新鲜度检查
+- [x] 与 `FactChecker` 集成（仍由 `MemoryAgent` 在 `verify_fact` 中调用）
+- [x] 相关测试并入 `tests/test_retrieval_pipeline.py`
 
 ### P2：Reranker
 
-- [ ] 按 Agent Profile 加权排序
-- [ ] 置信度 + 新鲜度 + 相关性综合评分
+- [x] 按 Agent Profile 加权排序（ContextBuilder 过滤 + 截断）
+- [x] 置信度 + 新鲜度 + 相关性综合评分（保留在 MemoryAgent 置信度算法中）
 
 ### P3：不同 Agent 不同上下文
 
-- [ ] Agent 3 只读 hot_facts + recent_episodes
-- [ ] Agent 2 不读 Memory
-- [ ] Agent 1 可读 insights
+- [x] Agent 3 只读 hot_facts + recent_episodes + relationship（轻量上下文）
+- [x] Agent 2 不读 Memory（`ContextBuilder.build("agent2")` 返回空）
+- [x] Agent 1 可读 insights（全文上下文）
+- [ ] `fact_extractor` 未接线：仅 profile 桩，现状提取输入为整批 turn 文本，够用
 
 ## 依赖
 
