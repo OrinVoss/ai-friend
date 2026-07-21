@@ -16,6 +16,11 @@ from core.monitor import record_call
 STREAM_MAX_BYTES = 1_048_576  # 1 MiB
 
 
+class TruncatedResponseError(Exception):
+    """A2（2026-07-21，provider.md P0-1）：response_format 调用发生截断——
+    半截 JSON 对下游等同于格式错误，视为可重试错误（与网络错误同级）。"""
+
+
 class LLMProvider(ABC):
     """Abstract base class for LLM providers.
 
@@ -119,7 +124,15 @@ class DeepSeekProvider(LLMProvider):
         for attempt in range(3):
             try:
                 t0 = time.monotonic()
-                resp_text = self._do_request(chat_url, payload, stream, on_token)
+                resp_text, meta = self._do_request(chat_url, payload, stream, on_token)
+                # A2: response_format 调用截断 → 半截 JSON 等同可重试错误
+                if meta["truncated"] and response_format:
+                    raise TruncatedResponseError(
+                        f"response truncated ({meta['truncation_reason']})")
+                if meta["truncated"]:
+                    # 纯文本聊天路径保持现状（半截回复好于报错），仅记录
+                    logger.warning(f"[api] response truncated: {meta['truncation_reason']} "
+                                   f"(returning partial)")
                 elapsed = (time.monotonic() - t0) * 1000
                 # MN-001: record every successful API call to the monitor buffer
                 record_call(
@@ -131,11 +144,18 @@ class DeepSeekProvider(LLMProvider):
                     temperature=self.temperature,
                     response_format=response_format,
                     source=source,
+                    truncated=meta["truncated"],
+                    finish_reason=meta["finish_reason"],
                 )
                 # F6: circuit breaker — 成功时重置
                 self._circuit_failures = 0
                 self._circuit_open_until = 0.0
                 return resp_text
+            except TruncatedResponseError as e:
+                last_error = e
+                wait = min(2 ** attempt * 2, 15)
+                logger.warning(f"[api] truncated attempt={attempt+1}/3 retry_in={wait}s: {e}")
+                time.sleep(wait)
             except requests.exceptions.ConnectionError as e:
                 last_error = e
                 wait = min(2 ** attempt * 2, 15)  # F6: 2/4/8s (原 1/2/4s)
@@ -180,7 +200,10 @@ class DeepSeekProvider(LLMProvider):
         raise ConnectionError(f"API request failed after 3 retries: {last_error}")
 
     def _do_request(self, url: str, payload: dict, stream: bool,
-                    on_token: Optional[callable]) -> str:
+                    on_token: Optional[callable]) -> tuple[str, dict]:
+        """返回 (content, meta)。meta: truncated/finish_reason/truncation_reason
+        ——A2：截断显式化，不再静默当成功。"""
+        meta = {"truncated": False, "finish_reason": "", "truncation_reason": ""}
         t0 = time.monotonic()  # PR-006
         input_chars = sum(len(m.get("content", "")) for m in payload.get("messages", []))
 
@@ -196,7 +219,13 @@ class DeepSeekProvider(LLMProvider):
 
             if not stream:
                 data = resp.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                choice = data.get("choices", [{}])[0]
+                content = choice.get("message", {}).get("content", "")
+                finish_reason = choice.get("finish_reason", "") or ""
+                meta["finish_reason"] = finish_reason
+                if finish_reason == "length":
+                    meta["truncated"] = True
+                    meta["truncation_reason"] = "finish_reason=length"
                 usage = data.get("usage", {})
                 elapsed = time.monotonic() - t0  # PR-006
                 logger.info(
@@ -204,26 +233,32 @@ class DeepSeekProvider(LLMProvider):
                     f"tok_in={usage.get('prompt_tokens', '?')} tok_out={usage.get('completion_tokens', '?')} "
                     f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
                 )
-                return content
+                return content, meta
 
             full_response = []
             stream_size = 0  # PR-013: accumulated bytes
+            saw_done = False  # A2: 缺 [DONE] 也视为截断（断流）
             stream_deadline = time.monotonic() + self.timeout  # PR-006
             for line in resp.iter_lines(decode_unicode=True):
                 if time.monotonic() > stream_deadline:  # PR-006
                     logger.warning(f"[api] stream timeout after {self.timeout}s")
+                    meta["truncated"] = True
+                    meta["truncation_reason"] = "stream_timeout"
                     break
                 if not line:
                     continue
                 if line.startswith("data: "):
                     data_str = line[6:]
                     if data_str.strip() == "[DONE]":
+                        saw_done = True
                         break
                     try:
                         o = json.loads(data_str)
                         choices = o.get("choices", [])
                         if not choices:
                             continue
+                        if choices[0].get("finish_reason"):
+                            meta["finish_reason"] = choices[0]["finish_reason"]
                         delta = choices[0].get("delta", {})
                         token = delta.get("content") or ""
                         if token and on_token:
@@ -232,9 +267,15 @@ class DeepSeekProvider(LLMProvider):
                         stream_size += len(token.encode("utf-8"))
                         if stream_size > STREAM_MAX_BYTES:
                             logger.warning(f"[api] stream exceeded 1 MB, truncating")
+                            meta["truncated"] = True
+                            meta["truncation_reason"] = "stream_max_bytes"
                             break
                     except json.JSONDecodeError:
                         continue
+
+            if not saw_done and not meta["truncated"]:
+                meta["truncated"] = True
+                meta["truncation_reason"] = "missing_done"
 
             content = "".join(full_response)
             elapsed = time.monotonic() - t0  # PR-006
@@ -242,6 +283,6 @@ class DeepSeekProvider(LLMProvider):
                 f"[api] model={self.model} stream=on "
                 f"duration={elapsed:.2f}s chars_in={input_chars} chars_out={len(content)}"
             )
-            return content
+            return content, meta
         finally:
             resp.close()

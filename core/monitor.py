@@ -28,6 +28,10 @@ class MonitorRecord:
     messages: list = field(default_factory=list)      # 完整 messages（含 system/user/assistant）
     response: str = ""                                 # 完整响应文本
     source: str = ""                                   # "assess" / "review" / "re_decide" / "tool_agent" / "react" / "dream"
+    # A2（2026-07-21，provider.md P0-1）：截断显式化。
+    # 可选字段带默认值，旧记录兼容。
+    truncated: bool = False                            # 响应被截断（finish_reason=length / 流超时 / 超 1MB / 缺 [DONE]）
+    finish_reason: str = ""                            # API 返回的 finish_reason（如可见）
 
 
 @dataclass
@@ -184,6 +188,8 @@ def record_call(
     temperature: float = 0.0,
     response_format: dict | None = None,
     source: str = "",
+    truncated: bool = False,
+    finish_reason: str = "",
 ) -> None:
     """记录一次完整的 LLM API 调用（若监控被禁用则忽略）。"""
     if not _monitor_enabled:
@@ -198,5 +204,7 @@ def record_call(
         messages=messages,
         response=response,
         source=source,
+        truncated=truncated,
+        finish_reason=finish_reason,
     )
     _monitor.record(rec)

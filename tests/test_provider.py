@@ -307,5 +307,83 @@ class TestProviderRetry(unittest.TestCase):
         self.assertEqual(call_count[0], 2)
 
 
+class TestTruncationSemantics(unittest.TestCase):
+    """A2（2026-07-21，provider.md P0-1）：截断显式化。"""
+
+    def setUp(self):
+        from core.provider import DeepSeekProvider
+        self.provider = DeepSeekProvider(
+            endpoint="https://test.api/v1",
+            api_key="sk-test",
+            model="test-model",
+            timeout=5,
+        )
+
+    def _non_stream_resp(self, content, finish_reason):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": content},
+                         "finish_reason": finish_reason}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5},
+        }
+        return mock_resp
+
+    @patch('core.provider.time.sleep', lambda *_: None)
+    @patch('core.provider.record_call')
+    @patch('requests.Session.post')
+    def test_json_mode_truncation_retried_then_fails(self, mock_post,
+                                                     mock_record):
+        """response_format 调用截断 → 可重试错误，耗尽后报错而不是交半截 JSON。"""
+        mock_post.return_value = self._non_stream_resp('{"a": 1', "length")
+        from core.provider import TruncatedResponseError  # noqa: 确保类存在
+        with self.assertRaises(ConnectionError):
+            self.provider.generate(
+                [{"role": "user", "content": "hi"}], stream=False,
+                response_format={"type": "json_object"})
+        self.assertEqual(mock_post.call_count, 3)
+        mock_record.assert_not_called()  # 失败调用不记录成功记录
+
+    @patch('core.provider.record_call')
+    @patch('requests.Session.post')
+    def test_text_truncation_returns_partial_and_records(self, mock_post,
+                                                         mock_record):
+        """纯文本路径保持现状（半截好于报错），但记录 truncated=True。"""
+        mock_post.return_value = self._non_stream_resp("半截回复", "length")
+        result = self.provider.generate([{"role": "user", "content": "hi"}],
+                                        stream=False)
+        self.assertEqual(result, "半截回复")
+        self.assertTrue(mock_record.call_args.kwargs["truncated"])
+        self.assertEqual(mock_record.call_args.kwargs["finish_reason"], "length")
+
+    @patch('core.provider.record_call')
+    @patch('requests.Session.post')
+    def test_stream_missing_done_marked_truncated(self, mock_post, mock_record):
+        """流缺 [DONE]（断流）→ truncated 记录。"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_lines.return_value = [
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+        ]
+        mock_post.return_value = mock_resp
+        result = self.provider.generate([{"role": "user", "content": "hi"}],
+                                        stream=True)
+        self.assertEqual(result, "Hello")
+        self.assertTrue(mock_record.call_args.kwargs["truncated"])
+
+    @patch('core.provider.record_call')
+    @patch('requests.Session.post')
+    def test_stream_normal_done_not_truncated(self, mock_post, mock_record):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.iter_lines.return_value = [
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+            'data: [DONE]',
+        ]
+        mock_post.return_value = mock_resp
+        self.provider.generate([{"role": "user", "content": "hi"}], stream=True)
+        self.assertFalse(mock_record.call_args.kwargs["truncated"])
+
+
 if __name__ == "__main__":
     unittest.main()
