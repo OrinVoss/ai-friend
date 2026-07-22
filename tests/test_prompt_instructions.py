@@ -427,3 +427,28 @@ class TestTemplateBraceSafety(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTimeQueryNoToolRule(unittest.TestCase):
+    """2026-07-22 Review：Agent 1 prompt 必须明示'问时间直接用上下文，
+    不要调工具'——防止 Inner Drive 为时间问题触发工具链空转。"""
+
+    def test_checklist_has_time_no_tool_rule(self):
+        from prompts.instructions import INNER_DRIVE_CHECKLIST
+        self.assertIn("问时间/日期/星期", INNER_DRIVE_CHECKLIST)
+        self.assertIn("永远不需要为此调用工具", INNER_DRIVE_CHECKLIST)
+
+    def test_agent1_prompt_contains_time_and_rule(self):
+        from prompts.system import build_inner_drive_prompt
+        from models.personality import PersonalityConfig, EmotionalState
+        from models.conversation import MemoryContext
+        personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                       backstory="", interests=[])
+        ctx = MemoryContext(facts=[], experiences=[], reflections=[],
+                            relationship={"trust": 0.5})
+        prompt = build_inner_drive_prompt(
+            personality=personality, emotion=EmotionalState(),
+            memory_context=ctx, conversation_history="",
+        )
+        self.assertIn("当前时间：", prompt)
+        self.assertIn("永远不需要为此调用工具", prompt)
