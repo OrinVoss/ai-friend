@@ -107,6 +107,7 @@ class AgentWiring:
             self._tool_agent = ToolAgent(
                 provider=self.agent.provider,
                 tool_registry=self.make_external_registry(),
+                output_cap=getattr(self.agent.config, "dispatcher_output_cap", None),
             )
 
     # ── Registries ──

@@ -67,13 +67,15 @@ class ToolAttemptTracker:
 class ToolAgent:
     """Phase 1 agent that ONLY calls external tools, no roleplay."""
 
-    def __init__(self, provider, tool_registry: ToolRegistry, max_iterations: int = 5):
+    def __init__(self, provider, tool_registry: ToolRegistry, max_iterations: int = 5,
+                 output_cap: int | None = None):
         self._provider = provider
         # 注册表由调用方装配好后注入 — 唯一装配路径是
         # message_handler._make_external_registry()（已只含外部工具），
         # 此处不再重复过滤 EXTERNAL_TOOL_NAMES。
         self._registry = tool_registry
         self._max_iterations = max_iterations
+        self._output_cap = output_cap
 
     def run(self, user_input: str) -> ToolAgentResult:
         """Run Phase 1: decide and execute external tools, return records."""
@@ -300,7 +302,7 @@ class ToolAgent:
             }
             for r in result.records
         ]
-        return format_tool_results(records)
+        return format_tool_results(records, output_cap=self._output_cap)
 
 
 def _summarize_failure(results: list[dict]) -> dict | None:

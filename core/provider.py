@@ -64,7 +64,8 @@ class DeepSeekProvider(LLMProvider):
                  thinking: Optional[str] = None,
                  reasoning_effort: Optional[str] = None,
                  timeout: int = 180,
-                 monitor_enabled: bool = True):
+                 monitor_enabled: bool = True,
+                 stream_max_bytes: int = STREAM_MAX_BYTES):
         self.endpoint = endpoint.rstrip("/")
         # #261: endpoint 以 /v1 结尾时剥掉，避免拼出 /v1/v1/chat/completions
         if self.endpoint.endswith("/v1"):
@@ -77,6 +78,7 @@ class DeepSeekProvider(LLMProvider):
         self.reasoning_effort = reasoning_effort
         self.timeout = timeout
         self.monitor_enabled = monitor_enabled
+        self.stream_max_bytes = stream_max_bytes
         # MN-002: apply monitor switch at provider level
         from core.monitor import set_monitor_enabled
         set_monitor_enabled(monitor_enabled)
@@ -270,8 +272,8 @@ class DeepSeekProvider(LLMProvider):
                             on_token(token)
                         full_response.append(token)
                         stream_size += len(token.encode("utf-8"))
-                        if stream_size > STREAM_MAX_BYTES:
-                            logger.warning(f"[api] stream exceeded 1 MB, truncating")
+                        if stream_size > self.stream_max_bytes:
+                            logger.warning(f"[api] stream exceeded {self.stream_max_bytes} bytes, truncating")
                             meta["truncated"] = True
                             meta["truncation_reason"] = "stream_max_bytes"
                             break

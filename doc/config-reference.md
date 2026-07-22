@@ -55,6 +55,8 @@
 | `db_backup_enabled` | bool | `true` | 数据库自动备份：检测到 schema 迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/` |
 | `db_backup_keep` | int | `5` | 备份滚动保留份数，超出时按最旧优先删除 |
 | `react_history_budget_chars` | int | `16000` | Agent 3 (ReAct) 对话历史字符预算：历史消息总字符超过此值时从最旧开始丢弃，由记忆系统兜底。设为 `0` 禁用。默认 16000 ≈ 8-10k tokens |
+| `dispatcher_output_cap` | int | `2000` | Layer5-D1：dispatcher 格式化工具结果时，单条输出截断上限（字符）。影响 Agent 2 返回给 Agent 3 的工具结果长度 |
+| `stream_max_bytes` | int | `1048576` | PR-013：流式响应安全上限（字节），防止无界内存增长，默认 1 MiB |
 
 ### 主动行为
 

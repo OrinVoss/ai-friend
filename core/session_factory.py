@@ -46,6 +46,7 @@ def build_provider(config: Config) -> DeepSeekProvider:
         thinking=config.thinking,
         reasoning_effort=config.reasoning_effort,
         timeout=config.api_timeout,
+        stream_max_bytes=config.stream_max_bytes,
         monitor_enabled=getattr(config, "monitor_enabled", True),
     )
 

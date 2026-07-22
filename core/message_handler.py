@@ -69,8 +69,8 @@ class ToolExecutionResult:
 
         records_text = "\n".join(parts)
         has_error = bool(error_message)
-        if has_error:
-            records_text = f"{error_message}\n{records_text}"
+        # #1: error_message 不再混入 records_text，由调用方以 agent2_error 参数
+        # 传入 _run_agent3，作为系统指令附加到 system prompt。
         if len(records_text) > max_length:
             records_text = records_text[:max_length] + "\n...(后续结果已截断)"
 
@@ -355,6 +355,7 @@ class MessageHandler:
             user_input, drive_result, None,
             tool_records=exec_result.records_text, on_token=on_token,
             final_response=True, state=state,
+            agent2_error=exec_result.error_message,
         )
         logger.debug(
             f"[state] mem_chars={len(state.memory_summary)} "
@@ -583,10 +584,14 @@ class MessageHandler:
 
     def _run_agent3(self, user_input: str, drive_result, tool_result,
                     on_token=None, tool_records: str = "", final_response: bool = False,
-                    state: CognitiveState | None = None) -> str:
+                    state: CognitiveState | None = None,
+                    agent2_error: str = "") -> str:
         """Run Agent 3: emotional expression with inner drive + tool results.
 
         WS-12: 优先从 CognitiveState 读取记忆与决策摘要，保持与旧路径数据一致。
+
+        agent2_error: 系统级错误（如 Agent 2 超时/异常），作为系统指令附加到
+        system prompt，而不是混入 user message 的 tool_records。
         """
         from prompts.system import build_system_prompt
         a = self.a
@@ -656,6 +661,9 @@ class MessageHandler:
             demo_turns_remaining=demo_turns_remaining,
             emotion_summary=state.emotion_summary if state is not None else None,
         )
+        # #1: Agent 2 系统级错误作为系统指令附加，不要混进 tool_records 的 user message
+        if agent2_error:
+            sys_prompt = f"{sys_prompt}\n\n[系统状态] {agent2_error}"
         self._log_prompt_cache_stats(tag="agent3")
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
         # Inject tool results as USER message (LLM respects user messages >> system messages)
@@ -736,6 +744,7 @@ class MessageHandler:
                 user_input, drive_result, None,
                 tool_records=exec_result.records_text, on_token=on_token,
                 final_response=True,
+                agent2_error=exec_result.error_message,
             )
 
             # If Agent 3 still emits an intent after tools, loop again (rare)

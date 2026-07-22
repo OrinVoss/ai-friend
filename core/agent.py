@@ -277,7 +277,7 @@ class Agent:
                     self._tool_failures = 0  # reset on success
                 for r in results:
                     self.record_tool_call(r["name"], r["success"], r["output"])
-                messages.append({"role": "user", "content": format_tool_results(results)})
+                messages.append({"role": "user", "content": format_tool_results(results, output_cap=self.config.dispatcher_output_cap)})
             except Exception:
                 logger.exception("[react] unexpected error in iteration")
                 if not final_text:

@@ -348,14 +348,18 @@ def execute_tool_calls(
     return results
 
 
-def format_tool_results(results: list[dict]) -> str:
-    """Format tool execution results into prompt-friendly text."""
+def format_tool_results(results: list[dict], output_cap: int | None = None) -> str:
+    """Format tool execution results into prompt-friendly text.
+
+    output_cap: overrides the module default _OUTPUT_CAP (Layer5-D1).
+    """
+    cap = output_cap if output_cap is not None else _OUTPUT_CAP
     parts = []
     for r in results:
         tag = "成功" if r["success"] else "失败"
         output = r["output"]
-        if len(output) > _OUTPUT_CAP:
-            output = output[:_OUTPUT_CAP] + f"\n...(截断, 剩余 {len(output)-_OUTPUT_CAP} 字符)"
+        if len(output) > cap:
+            output = output[:cap] + f"\n...(截断, 剩余 {len(output)-cap} 字符)"
         error_hint = ""
         if not r.get("success"):
             error_type = r.get("error_type", "")
