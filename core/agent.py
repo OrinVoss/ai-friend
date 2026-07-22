@@ -26,6 +26,17 @@ from core.message_handler import MessageHandler
 
 logger = logging.getLogger(__name__)
 
+# _react_loop 的降级/兜底文案（:259/:269/:274/:277）。命中时 assistant turn
+# 标记 metadata.error_fallback=True：DB 与界面保留，但不再注入后续 prompt
+# 历史——防止模型把 API 故障期的兜底当成真实对话，污染情绪与人格一致性
+_FALLBACK_TEXTS = frozenset({
+    "抱歉，我暂时无法获取外部信息，让我直接回复你吧。",
+    "抱歉，我暂时无法处理，让我直接回复你吧。",
+    "抱歉，我暂时无法获取信息，让我直接回复你吧。",
+    "让我直接回复你吧。",
+})
+
+
 class AgentState(Enum):
     BOOT = "boot"
     IDLE = "idle"
@@ -284,7 +295,13 @@ class Agent:
                     final_text.strip().startswith(p)
                     for p in ['（调用', '(调用', '（前奏', '(前奏', '（搜索', '(搜索']
                 )
-                self.add_turn("assistant", final_text, metadata={"is_tool_claim": is_claim})
+                # 错误兜底文案（:259/:269/:274/:277 四处降级文本）打标：
+                # DB/界面照常保留，但 _build_messages 会跳过它们，
+                # 不让模型把 API 故障期的兜底当成真实对话历史
+                is_fallback = final_text.strip() in _FALLBACK_TEXTS
+                self.add_turn("assistant", final_text,
+                              metadata={"is_tool_claim": is_claim,
+                                        "error_fallback": is_fallback})
                 self.increment_turn_count()
 
         if not skip_post_process:

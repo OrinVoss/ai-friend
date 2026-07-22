@@ -10,6 +10,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from core.cognitive_state import CognitiveState
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,7 @@ class InnerDriveResult:
     summary: str = ""                          # Compact summary for Agent 3
     recall_query: str = ""                     # Internal recall query (if needed)
     context_summary: str = ""                  # Formatted memory/relationship for Agent 3
+    memory_confidence: float | None = None     # WS-20: memory_agent 置信度透传
 
 
 @dataclass
@@ -223,35 +226,61 @@ class InnerDriveAgent:
         # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实下条消息可见。
         self._cs_memo: tuple[str, object] | None = None  # (user_input, MemoryAnswer | None)
 
-    def assess(self, user_input: str) -> InnerDriveResult:
-        """Run inner drive reasoning, return structured decision via JSON schema."""
+    def assess(self, user_input: str,
+               cognitive_state: CognitiveState | None = None) -> InnerDriveResult:
+        """Run inner drive reasoning, return structured decision via JSON schema.
+
+        WS-21: cognitive_state 存在时，跳过本方法内部的记忆检索，直接消费状态
+        中的 memory_summary / emotion_summary，实现每轮只检索一次。
+        """
         from prompts.system import build_inner_drive_prompt
         from core.dispatcher import execute_tool_calls
 
         logger.info(f"[inner_drive] start len={len(user_input)}")
 
-        # MA-001: with use_memory_agent, one MemoryAgent.answer() call feeds
-        # both this prompt's memory block and the context_summary passed to
-        # Agent 3 (memory-agent.md 7.1). Otherwise the classic retriever path.
-        use_ma = self._memory_agent is not None
-        mem_ctx = None
-        ma = self._memory_answer_for(user_input) if use_ma else None
-        cs = self._context_summary_for(user_input) if use_ma else ""
-        if not use_ma:
-            mem_ctx = self._retriever.retrieve_for_query(user_input)
-            cs = self._build_context_summary(mem_ctx)
-        # Agent 3 的轻量上下文（L3-3）：与 Agent 1 的同一份记忆，按 profile 渲染
-        if ma is not None:
-            from memory.retrieval_pipeline import ContextBuilder
-            light = ContextBuilder().build("agent3", ma)
-            cs_agent3 = light if light else cs   # 轻量为空（无相关记忆）时退回 cs
+        if cognitive_state is not None:
+            # WS-22: 使用统一状态中的记忆与情绪快照
+            cs_agent1 = cognitive_state.memory_summary
+            memory_confidence = cognitive_state.memory_confidence
+            ma = getattr(cognitive_state, "memory_answer", None)
+            if ma is not None:
+                from memory.retrieval_pipeline import ContextBuilder
+                light = ContextBuilder().build("agent3", ma)
+                cs_agent3 = light if light else cs_agent1
+            else:
+                cs_agent3 = cs_agent1
+            # 二期 4.2：挂念浮现仍由 InnerDrive 处理（轻量向量操作，不增加 LLM 成本）
+            care_block = self._surface_care_for(user_input)
+            if care_block:
+                cs_agent3 = f"{cs_agent3}\n\n{care_block}" if cs_agent3 else care_block
+            mem_ctx = None
+            emotion_summary = cognitive_state.emotion_summary
         else:
-            cs_agent3 = cs
-        # 二期 4.2：对话触发的挂念浮现——用户聊到的事和某条挂念相关时，
-        # 它自然浮上来，经 context_summary 链路同流到 Agent 3，调用侧零改动
-        care_block = self._surface_care_for(user_input)
-        if care_block:
-            cs_agent3 = f"{cs_agent3}\n\n{care_block}" if cs_agent3 else care_block
+            # MA-001: with use_memory_agent, one MemoryAgent.answer() call feeds
+            # both this prompt's memory block and the context_summary passed to
+            # Agent 3 (memory-agent.md 7.1). Otherwise the classic retriever path.
+            use_ma = self._memory_agent is not None
+            mem_ctx = None
+            ma = self._memory_answer_for(user_input) if use_ma else None
+            cs = self._context_summary_for(user_input) if use_ma else ""
+            if not use_ma:
+                mem_ctx = self._retriever.retrieve_for_query(user_input)
+                cs = self._build_context_summary(mem_ctx)
+            # Agent 3 的轻量上下文（L3-3）：与 Agent 1 的同一份记忆，按 profile 渲染
+            if ma is not None:
+                from memory.retrieval_pipeline import ContextBuilder
+                light = ContextBuilder().build("agent3", ma)
+                cs_agent3 = light if light else cs   # 轻量为空（无相关记忆）时退回 cs
+            else:
+                cs_agent3 = cs
+            # 二期 4.2：对话触发的挂念浮现——用户聊到的事和某条挂念相关时，
+            # 它自然浮上来，经 context_summary 链路同流到 Agent 3，调用侧零改动
+            care_block = self._surface_care_for(user_input)
+            if care_block:
+                cs_agent3 = f"{cs_agent3}\n\n{care_block}" if cs_agent3 else care_block
+            cs_agent1 = cs
+            memory_confidence = ma.confidence if ma is not None else None
+            emotion_summary = None
 
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
         sys_prompt = build_inner_drive_prompt(
@@ -264,8 +293,9 @@ class InnerDriveAgent:
             session_id=self._session_id,
             prompt_cache=self._prompt_cache,
             prompt_cache_ttl=self._prompt_cache_ttl,
-            memory_context_summary=cs if use_ma else "",
+            memory_context_summary=cs_agent1,
             rule_tools=self._rule_tools_registry,
+            emotion_summary=emotion_summary,
         )
         if self._prompt_cache is not None:
             self._prompt_cache.maybe_log_stats(logger, tag="inner_drive")
@@ -279,6 +309,7 @@ class InnerDriveAgent:
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_assess,
                 response_format=INNER_DRIVE_SCHEMA, source="inner_drive",
+                temperature=0.3,  # 决策类任务低温（原默认 0.8 易格式抖动）
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -288,6 +319,7 @@ class InnerDriveAgent:
                     reasoning="解析失败，默认不需要外部工具",
                     summary="",
                     context_summary=cs_agent3,
+                    memory_confidence=memory_confidence,
                 )
 
             # If recall_query is set, execute internal recall and loop
@@ -306,6 +338,7 @@ class InnerDriveAgent:
                 f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
             )
             result.context_summary = cs_agent3
+            result.memory_confidence = memory_confidence
             return result
 
         logger.warning("[inner_drive] max iterations, defaulting to no tools")
@@ -314,6 +347,7 @@ class InnerDriveAgent:
             reasoning="达到最大迭代次数，默认不需要外部工具",
             summary="",
             context_summary=cs_agent3,
+            memory_confidence=memory_confidence,
         )
 
     def _surface_care_for(self, user_input: str) -> str:
@@ -453,6 +487,7 @@ class InnerDriveAgent:
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_proactive,
                 response_format=PROACTIVE_LOOP_SCHEMA, source="proactive",
+                temperature=0.3,
             )
             parsed = self._parse_proactive_json(resp)
             if parsed is None:
@@ -516,7 +551,7 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] proactive assess idle={idle_duration:.0f}s")
-        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_proactive, source="proactive")
+        resp = self._provider.generate(messages, stream=False, max_tokens=self._max_tokens_proactive, source="proactive", temperature=0.3)
         intent = self._parse_proactive_intent(resp)
         logger.info(
             f"[inner_drive] proactive decision: action={intent.action} "
@@ -641,6 +676,7 @@ class InnerDriveAgent:
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_review,
             response_format=INNER_DRIVE_SCHEMA, source="review",
+            temperature=0.3,
         )
         result = self._parse_json_decision(resp)
         if result is None:
@@ -661,6 +697,7 @@ class InnerDriveAgent:
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_review,
                 response_format=INNER_DRIVE_SCHEMA, source="review",
+            temperature=0.3,
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -714,6 +751,7 @@ class InnerDriveAgent:
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_review,
             response_format=INNER_DRIVE_SCHEMA, source="re_decide",
+            temperature=0.3,
         )
         result = self._parse_json_decision(resp)
         if result is None:
@@ -734,6 +772,7 @@ class InnerDriveAgent:
             resp = self._provider.generate(
                 messages, stream=False, max_tokens=self._max_tokens_review,
                 response_format=INNER_DRIVE_SCHEMA, source="re_decide",
+            temperature=0.3,
             )
             result = self._parse_json_decision(resp)
             if result is None:
@@ -810,6 +849,7 @@ class InnerDriveAgent:
         resp = self._provider.generate(
             messages, stream=False, max_tokens=self._max_tokens_assess,
             response_format=INNER_DRIVE_SCHEMA, source="assess_intent",
+            temperature=0.3,
         )
         result = self._parse_json_decision(resp)
         if result is None:

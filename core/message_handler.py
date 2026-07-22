@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from core.cognitive_state import CognitiveState
 from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
 from core.prompt_cache import PromptCache
 
@@ -121,6 +122,48 @@ class MessageHandler:
         if self._state != state:
             logger.debug(f"[msg] state: {self._state.name} -> {state.name}")
             self._state = state
+
+    def _idle_seconds(self) -> float:
+        """WS-9: 距上次用户活动的时间；无法计算时返回 0.0。"""
+        last = getattr(self.a, "last_activity_time", None)
+        try:
+            return time.time() - float(last) if last is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _relationship_snapshot(self) -> dict:
+        """WS-10: 关系快照；测试用 mock 可能返回非 dict，做防御。"""
+        rel = self.a.ltm.get_relationship()
+        if isinstance(rel, dict):
+            return rel
+        return {}
+
+    def _context_for_state(self, user_input: str) -> tuple[str, float | None, object | None]:
+        """WS-23: 每轮消息只检索一次记忆，返回 (summary, confidence, raw_answer)。
+
+        summary 是给 Agent 1 使用的完整形态；若走 memory_agent，原始 MemoryAnswer
+        会一并存入 CognitiveState，供 Agent 3 按轻量 profile 渲染，保持 prompt 等价。
+        """
+        self._ensure_inner_drive()
+        use_ma = (
+            getattr(self.a.config, "use_memory_agent", False)
+            and self._inner_drive._memory_agent is not None
+        )
+        if use_ma:
+            from core.async_utils import run_async
+            from memory.retrieval_pipeline import ContextBuilder
+            ma = run_async(self._inner_drive._memory_agent.answer(user_input))
+            if ma is not None:
+                full = ContextBuilder().build("agent1", ma)
+                if full:
+                    return full, ma.confidence, ma
+            # 记忆 agent 无结果时回退到 retriever
+            mem_ctx = self.a.retriever.retrieve_for_query(user_input)
+            summary = self._inner_drive._build_context_summary(mem_ctx)
+            return summary, None, None
+        mem_ctx = self.a.retriever.retrieve_for_query(user_input)
+        summary = self._inner_drive._build_context_summary(mem_ctx)
+        return summary, None, None
 
     def _log_prompt_cache_stats(self, tag: str = "") -> None:
         """PC-002: emit prompt cache stats after each prompt build."""
@@ -313,6 +356,7 @@ class MessageHandler:
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
         a.set_current_input(user_input)
+        idle_seconds = self._idle_seconds()
         a.update_last_activity()
         a.add_turn("user", user_input)
 
@@ -322,9 +366,26 @@ class MessageHandler:
 
         # ── Agent 1: Inner Drive ──
         self._transition(MessageHandlerState.ASSESSING)
-        self._ensure_inner_drive()
+        # WS-24: 记忆检索前移到状态装配处，保证每条用户消息只检索一次。
+        memory_summary, memory_confidence, memory_answer = self._context_for_state(user_input)
+
+        # WS-11: 装配统一运行时状态；情绪在轮次开始一次性冻结，后续 Agent 1/3 共用。
+        emotion_summary = a.personality.emotion.to_prompt_summary()
+        state = CognitiveState(
+            personality_name=a.personality.config.name,
+            emotion_summary=emotion_summary if isinstance(emotion_summary, dict) else {},
+            relationship=self._relationship_snapshot(),
+            memory_summary=memory_summary,
+            memory_confidence=memory_confidence,
+            memory_answer=memory_answer,
+            care_surface=[],  # 挂念块由 InnerDrive 在 assess 中追加到 context_summary
+            turn_count=a.turn_count,
+            idle_seconds=idle_seconds,
+            is_sleeping=False,
+        )
+
         try:
-            drive_result = self._inner_drive.assess(user_input)
+            drive_result = self._inner_drive.assess(user_input, cognitive_state=state)
         except Exception as exc:
             # #146: Agent 1 异常不再穿透——REST chat_api 路径没有外层 try，
             # 穿透会直接 500。降级为直走 Agent 3（同 agent2_error 先例）。
@@ -337,13 +398,28 @@ class MessageHandler:
                 summary="",
             )
 
+        # WS-25: Agent 3 消费评估后的 context_summary（含挂念浮现等后处理）。
+        state.memory_summary = drive_result.context_summary or state.memory_summary
+        state.memory_confidence = drive_result.memory_confidence or state.memory_confidence
+        state.pending = {
+            "needs_tools": drive_result.needs_external_tools,
+            "summary": drive_result.summary,
+        }
+
         if not drive_result.needs_external_tools:
             # No external tools needed → straight to Agent 3
             logger.info(f"[msg] agent1: no external tools needed")
             self._transition(MessageHandlerState.GENERATING_RESPONSE)
-            agent3_output = self._run_agent3(user_input, drive_result, tool_result=None,
-                                            on_token=on_token)
+            agent3_output = self._run_agent3(
+                user_input, drive_result, tool_result=None,
+                on_token=on_token, state=state,
+            )
             result = self._handle_agent3_intent(user_input, agent3_output, on_token=on_token)
+            logger.debug(
+                f"[state] mem_chars={len(state.memory_summary)} "
+                f"confidence={state.memory_confidence} care={len(state.care_surface)} "
+                f"pending={state.pending}"
+            )
             self._transition(MessageHandlerState.DONE)
             return result
 
@@ -367,7 +443,12 @@ class MessageHandler:
         result = self._run_agent3(
             user_input, drive_result, None,
             tool_records=exec_result.records_text, on_token=on_token,
-            final_response=True,
+            final_response=True, state=state,
+        )
+        logger.debug(
+            f"[state] mem_chars={len(state.memory_summary)} "
+            f"confidence={state.memory_confidence} care={len(state.care_surface)} "
+            f"pending={state.pending}"
         )
         self._transition(MessageHandlerState.DONE)
         return result
@@ -590,17 +671,32 @@ class MessageHandler:
         return None
 
     def _run_agent3(self, user_input: str, drive_result, tool_result,
-                    on_token=None, tool_records: str = "", final_response: bool = False) -> str:
-        """Run Agent 3: emotional expression with inner drive + tool results."""
+                    on_token=None, tool_records: str = "", final_response: bool = False,
+                    state: CognitiveState | None = None) -> str:
+        """Run Agent 3: emotional expression with inner drive + tool results.
+
+        WS-12: 优先从 CognitiveState 读取记忆与决策摘要，保持与旧路径数据一致。
+        """
         from prompts.system import build_system_prompt
         a = self.a
         cfg = a.config
 
-        # Reuse Agent 1's formatted memory/relationship summary when available.
+        # WS-13: 记忆摘要优先从统一状态读取；Phase 1 其内容等同于
+        # drive_result.context_summary，仅数据源改变。
         memory_summary = ""
-        if drive_result and getattr(drive_result, "context_summary", ""):
+        if state is not None:
+            memory_summary = state.memory_summary
+            # 若保存了原始 MemoryAnswer，按 Agent 3 的轻量 profile 渲染。
+            if getattr(state, "memory_answer", None) is not None:
+                from memory.retrieval_pipeline import ContextBuilder
+                light = ContextBuilder().build("agent3", state.memory_answer)
+                if light:
+                    memory_summary = light
+        elif drive_result and getattr(drive_result, "context_summary", ""):
             memory_summary = drive_result.context_summary
-            # Still keep the memory context object around for downstream code.
+
+        # Still keep the memory context object around for downstream code.
+        if memory_summary:
             mem_ctx = a.current_memory_context
             if mem_ctx is None:
                 mem_ctx = a.retriever.retrieve_for_query(user_input)
@@ -616,6 +712,15 @@ class MessageHandler:
         if not tool_records:
             tool_records = self._tool_agent.format_for_phase2(tool_result) if tool_result else ""
 
+        # WS-14: inner_drive_summary 优先用当前 drive_result；无 drive_result 时
+        # 回退到 state.pending，兼容测试与 intent 路径。
+        if drive_result is not None:
+            inner_drive_summary = drive_result.summary
+        elif state is not None:
+            inner_drive_summary = state.pending.get("summary", "")
+        else:
+            inner_drive_summary = ""
+
         personality_file = getattr(a, "personality_path", cfg.personality_file)
         demo_turns_remaining = max(
             0,
@@ -629,7 +734,7 @@ class MessageHandler:
             tools=a.tool_registry,
             consecutive_negative=a.consecutive_negative,
             tool_call_history=a.tool_call_history,
-            inner_drive_summary=drive_result.summary if drive_result else "",
+            inner_drive_summary=inner_drive_summary,
             conversation_examples=cfg.conversation_examples,
             final_response=final_response,
             session_id=getattr(a, "session_id", None),
@@ -638,6 +743,7 @@ class MessageHandler:
             prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
             memory_context_summary=memory_summary,
             demo_turns_remaining=demo_turns_remaining,
+            emotion_summary=state.emotion_summary if state is not None else None,
         )
         self._log_prompt_cache_stats(tag="agent3")
         messages = self._build_messages(sys_prompt, user_input=f"用户输入：{user_input}")
@@ -778,12 +884,25 @@ class MessageHandler:
         # reversed; this avoids a full-history scan on every request.
         running_total = 0
         history_messages = []
+        is_first = True
         for t in agent.short_term.get_all_reversed():
+            # 修复：当前输入在 handle_message 时已 add_turn 入历史，末尾还会
+            # 以"用户输入：..."形式再追加一次——跳过历史里的这份（即倒序首个
+            # 元素），避免同一句话在 prompt 中出现两次（模型会误以为用户在刷屏）
+            if is_first and user_input and t.role == "user" \
+                    and t.content.strip() and t.content.strip() in user_input:
+                is_first = False
+                continue
+            is_first = False
             # #130: skip turns with stage directions / fake tool claims
             if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
                 continue
             # R4: skip sleep turns (zzzz, 我去午睡了, etc.) — 同 short_term.format_for_prompt 的过滤逻辑
             if getattr(t, 'metadata', None) and t.metadata.get('sleep'):
+                continue
+            # 修复：错误兜底文案（API 故障期的"抱歉，我暂时无法处理…"）不进
+            # prompt 历史——保留在 DB/界面记录，但不让模型误以为发生过系统错误
+            if getattr(t, 'metadata', None) and t.metadata.get('error_fallback'):
                 continue
             if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
                 continue

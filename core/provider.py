@@ -34,7 +34,8 @@ class LLMProvider(ABC):
                  on_token: Optional[callable] = None,
                  max_tokens: Optional[int] = None,
                  response_format: Optional[dict] = None,
-                 source: str = "") -> str:
+                 source: str = "",
+                 temperature: Optional[float] = None) -> str:
         """Generate a text completion from the LLM.
 
         Args:
@@ -44,6 +45,7 @@ class LLMProvider(ABC):
             max_tokens: Optional override for the default output token limit.
             response_format: Optional JSON schema / response_format dict.
             source: Optional caller label for the monitor (e.g. "react", "tool_agent").
+            temperature: Optional per-call override; None uses the instance default.
 
         Returns:
             The full generated text.
@@ -94,7 +96,8 @@ class DeepSeekProvider(LLMProvider):
                  on_token: Optional[callable] = None,
                  max_tokens: Optional[int] = None,
                  response_format: Optional[dict] = None,
-                 source: str = "") -> str:
+                 source: str = "",
+                 temperature: Optional[float] = None) -> str:
         chat_url = f"{self.endpoint}/v1/chat/completions"
 
         # F6: circuit breaker — 连续 3 次完全失败后 60 秒内跳过 HTTP
@@ -107,7 +110,8 @@ class DeepSeekProvider(LLMProvider):
             "model": self.model,
             "messages": messages,
             "stream": stream,
-            "temperature": self.temperature,
+            # 按调用覆盖温度（决策类任务用低温，角色扮演保持实例默认 0.8）
+            "temperature": temperature if temperature is not None else self.temperature,
             "max_tokens": max_tokens or self.max_tokens,
         }
 
@@ -141,7 +145,8 @@ class DeepSeekProvider(LLMProvider):
                     response=resp_text,
                     duration_ms=elapsed,
                     max_tokens=max_tokens or self.max_tokens,
-                    temperature=self.temperature,
+                    # 与实际发送的 payload 温度一致（可能被按调用覆盖）
+                    temperature=temperature if temperature is not None else self.temperature,
                     response_format=response_format,
                     source=source,
                     truncated=meta["truncated"],

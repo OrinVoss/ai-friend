@@ -387,3 +387,42 @@ class TestTruncationSemantics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPerCallTemperature(unittest.TestCase):
+    """按调用覆盖温度（决策类任务低温）。"""
+
+    def setUp(self):
+        from core.provider import DeepSeekProvider
+        self.provider = DeepSeekProvider(
+            endpoint="https://api.deepseek.com", api_key="k",
+            model="m", temperature=0.8)
+
+    @patch('requests.Session.post')
+    def test_temperature_override_in_payload(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"total_tokens": 5, "prompt_tokens": 3, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_resp
+
+        self.provider.generate([{"role": "user", "content": "hi"}],
+                               stream=False, temperature=0.3)
+        payload = mock_post.call_args[1]["json"]
+        self.assertEqual(payload["temperature"], 0.3)
+
+    @patch('requests.Session.post')
+    def test_default_temperature_unchanged(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"total_tokens": 5, "prompt_tokens": 3, "completion_tokens": 2},
+        }
+        mock_post.return_value = mock_resp
+
+        self.provider.generate([{"role": "user", "content": "hi"}], stream=False)
+        payload = mock_post.call_args[1]["json"]
+        self.assertEqual(payload["temperature"], 0.8)
