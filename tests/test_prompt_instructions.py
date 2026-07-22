@@ -14,6 +14,7 @@ from prompts.system import (
     _build_instructions_block,
     _build_internal_tools_block,
     _build_output_rules_block,
+    _build_tool_history_block,
     build_inner_drive_prompt,
     build_system_prompt,
     build_tool_agent_prompt,
@@ -31,6 +32,16 @@ class TestCentralizedInstructions(unittest.TestCase):
         self.assertIn("你不是一个只会等指令的客服机器人", text)
         self.assertIn("内驱检查清单", text)
         self.assertIn("用户指令优先", text)
+
+    def test_inner_drive_no_personality_inference_rule(self):
+        """R1: Agent 1 禁止人格/心理动机推断。"""
+        from models.personality import PersonalityConfig
+        personality = PersonalityConfig(name="TestBot")
+        text = _build_inner_drive_instructions_block(personality)
+        self.assertIn("用户的意图是什么", text)
+        self.assertIn("不要推断用户的人格、心理动机", text)
+        self.assertIn("禁止出现在 reasoning 里", text)
+        self.assertIn("不写心理分析", text)
 
     def test_tool_agent_prompt_uses_constants(self):
         registry = ToolRegistry()
@@ -251,6 +262,133 @@ class TestInternalToolsBlock(unittest.TestCase):
     def test_empty_registry_returns_empty(self):
         self.assertEqual(_build_internal_tools_block(ToolRegistry()), "")
         self.assertEqual(_build_internal_tools_block(None), "")
+
+
+class TestAgent3PromptConstraints(unittest.TestCase):
+    """R2 + R5：Agent 3 prompt 不再被 inner_drive_summary 带偏，
+    且记忆/工具历史块瘦身。"""
+
+    def _make_context(self):
+        from models.conversation import MemoryContext
+        from models.memory import Reflection
+        reflections = [
+            Reflection(content="洞察一" + "x" * 200),
+            Reflection(content="洞察二" + "y" * 200),
+            Reflection(content="洞察三" + "z" * 200),
+        ]
+        return MemoryContext(
+            facts=[], experiences=[], reflections=reflections,
+            relationship={"trust": 0.5, "familiarity": 0.5},
+        )
+
+    def test_inner_drive_summary_truncated_and_disclaimed(self):
+        """R2: 超长 inner_drive_summary 截断到 300 字符并带免责声明标题。"""
+        from models.personality import PersonalityConfig, EmotionalState
+        long_summary = "分析开始：" + "u" * 500
+        ctx = self._make_context()
+        prompt = build_system_prompt(
+            personality=PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                         backstory="", interests=[]),
+            emotion=EmotionalState(),
+            memory_context=ctx,
+            conversation_history="",
+            inner_drive_summary=long_summary,
+        )
+        self.assertIn("你刚才的分析（仅供参考，不要在回复里复述或展开）", prompt)
+        self.assertNotIn("=== 你之前的判断 ===", prompt)
+        # "分析开始：" 占 5 字符，截断后保留前 300 字符：5 + 295 个 u
+        self.assertIn("分析开始：" + "u" * 295, prompt)
+        self.assertNotIn("u" * 350, prompt)
+
+    def test_agent3_no_psychoanalysis_rule(self):
+        """R2: Agent 3 指令块含'不要分析用户'约束。"""
+        from models.personality import PersonalityConfig, EmotionalState
+        ctx = self._make_context()
+        prompt = build_system_prompt(
+            personality=PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                         backstory="", interests=[]),
+            emotion=EmotionalState(),
+            memory_context=ctx,
+            conversation_history="",
+        )
+        self.assertIn("不要分析用户", prompt)
+        self.assertIn("她在跟你聊天，不是来做心理咨询", prompt)
+        self.assertIn("不要替她下结论", prompt)
+
+    def _section_lines(self, prompt: str, header: str) -> list[str]:
+        """提取 prompt 中某个 === 标题块下的 - 条目。"""
+        start = prompt.find(header)
+        self.assertGreater(start, -1)
+        end = prompt.find("\n===", start + len(header))
+        section = prompt[start:end] if end > -1 else prompt[start:]
+        return [line for line in section.split("\n") if line.startswith("- ")]
+
+    def test_reflections_truncated_to_two_and_120_chars(self):
+        """R5: reflection 最多 2 条，每条 ≤120 字符。"""
+        from models.personality import PersonalityConfig, EmotionalState
+        ctx = self._make_context()
+        prompt = build_system_prompt(
+            personality=PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                         backstory="", interests=[]),
+            emotion=EmotionalState(),
+            memory_context=ctx,
+            conversation_history="",
+        )
+        lines = self._section_lines(prompt, "=== 你的最近思考 ===")
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertLessEqual(len(line), 120 + len("- ") + 1)  # 含 "- " 与可能的 "…"
+            self.assertIn("…", line)
+
+    def test_tool_history_limited_to_three_and_60_chars(self):
+        """R5: tool history 最多 3 条，output 摘要 ≤60 字符。"""
+        from models.personality import PersonalityConfig, EmotionalState
+        from models.conversation import MemoryContext
+        tool_history = [
+            {"name": f"tool_{i}", "success": True,
+             "output": f"结果{i}: " + "o" * 200}
+            for i in range(5)
+        ]
+        prompt = build_system_prompt(
+            personality=PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                         backstory="", interests=[]),
+            emotion=EmotionalState(),
+            memory_context=MemoryContext(),
+            conversation_history="",
+            tool_call_history=tool_history,
+        )
+        lines = self._section_lines(prompt, "=== 你的工具调用记录 ===")
+        self.assertEqual(len(lines), 3)
+        # output 摘要截断到 60 字符（含 "…" 后缀）
+        for line in lines:
+            # line 格式: "- ✅ tool_i: 结果i: ooooo…"
+            prefix, output_part = line.split(": ", 1)
+            self.assertLessEqual(len(output_part), 61, output_part)
+            self.assertIn("…", output_part)
+
+    def test_memory_block_slimmer_than_untrimmed(self):
+        """R5: _build_memory_block 对长 reflection 截断后明显变短。"""
+        from models.conversation import MemoryContext
+        from models.memory import Reflection
+        reflections = [Reflection(content="洞察" + "x" * 250) for _ in range(3)]
+        ctx = MemoryContext(reflections=reflections)
+        from prompts.system import _build_memory_block
+        block = _build_memory_block(ctx)
+        # 未截断基线 = 3 * 254；截断后 = 2 * (120 + "…") + 标题/前缀
+        self.assertLess(len(block), sum(len(r.content) for r in reflections))
+        self.assertIn("=== 你的最近思考 ===", block)
+
+    def test_tool_history_block_slimmer_than_untrimmed(self):
+        """R5: _build_tool_history_block 截断后明显变短。"""
+        tool_history = [
+            {"name": f"tool_{i}", "success": True,
+             "output": f"结果{i}: " + "o" * 200}
+            for i in range(5)
+        ]
+        block = _build_tool_history_block(tool_history)
+        # 未截断基线 = 5 * 200+；截断后 = 3 * 60
+        self.assertLess(len(block), sum(len(t["output"]) for t in tool_history))
+        self.assertIn("=== 你的工具调用记录 ===", block)
 
 
 class TestTemplateBraceSafety(unittest.TestCase):

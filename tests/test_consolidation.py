@@ -481,6 +481,53 @@ class TestCareClueExtraction(unittest.TestCase):
         self.assertIsNone(c._inner_drive_state)
 
 
+class TestR3FactPromptConstraints(unittest.TestCase):
+    """R3：fact/insight 存取口径——推断只能进 insight，不能当事实存。"""
+
+    def setUp(self):
+        from memory.consolidation import MemoryConsolidator
+        self.ltm = MagicMock()
+        self.llm = MagicMock()
+        self.consolidator = MemoryConsolidator(self.ltm, self.llm)
+        self.consolidator._lifecycle = MagicMock()
+        self.consolidator._lifecycle.promote_fact = AsyncMock(return_value=MagicMock())
+        self.ltm.get_similar_facts.return_value = []
+
+    def test_extract_facts_prompt_rejects_personality_profile(self):
+        """AI 评价用户'你真幽默'时，prompt 必须强调不要提取性格画像。"""
+        text = "AI：你真幽默，观察力很强。\n用户：哈哈还好。"
+        self.consolidator._extract_facts(text)
+        prompt = self.llm.call_args.args[0]
+        self.assertIn("性格/心理/动机画像", prompt)
+        self.assertIn("那是推断，不是事实", prompt)
+        self.assertIn("亲口陈述", prompt)
+
+    def test_consolidate_unified_prompt_rejects_personality_profile(self):
+        """统一 consolidation prompt 的 FACTS 段同步包含新约束。"""
+        from unittest.mock import MagicMock
+        self.consolidator._pending_buffer = [
+            MagicMock(role="assistant", content="你真幽默"),
+            MagicMock(role="user", content="哈哈还好"),
+        ]
+        self.consolidator._batch_new_info = True
+        self.ltm.get_recent_experiences.return_value = []
+        self.ltm.get_all_active_facts.return_value = []
+        self.llm.return_value = (
+            "FACTS:\nNONE\n\nINSIGHT:\n"
+            '{"hypothesis": "", "insight_type": "pattern", "evidence": [], '
+            '"confidence": 0.5, "needs_more_evidence": true}\n\n'
+            "EXPERIENCE:\nSUMMARY: 测试\nTONE: 平静\n"
+            "SIGNIFICANCE: 0.5\nIMPORTANCE: 0.5\nTAGS: 测试"
+        )
+        with patch("memory.consolidation.run_async",
+                   lambda coro: coro.send(None)):
+            self.consolidator._consolidate_unified(
+                "你真幽默", MagicMock(), MagicMock(), [1])
+        prompt = self.llm.call_args.args[0]
+        self.assertIn("性格/心理/动机画像不要入 FACT", prompt)
+        self.assertIn("那类内容放 INSIGHT", prompt)
+
+
 class TestInsightForcedRules(unittest.TestCase):
     """R3：needs_more_evidence 强制规则 + 功能性批次短路（2026-07-20）。"""
 

@@ -98,6 +98,45 @@ class TestDecayElapsed(unittest.TestCase):
         self.assertLess(e.valence, v_before)  # 已向 baseline 回落
 
 
+class TestR4SoftBoundary(unittest.TestCase):
+    """R4：valence/arousal 软边界，防止长期钉死在硬钳制值上。"""
+
+    def test_positive_delta_near_top_does_not_clamp(self):
+        """valence=0.95 时再施 +0.3，应 <1.0 且 >0.95。"""
+        e = EmotionalState(valence=0.95, arousal=0.5, inertia=0.0)
+        e.shift(0.3, 0.0)
+        self.assertLess(e.valence, 1.0)
+        self.assertGreater(e.valence, 0.95)
+
+    def test_negative_delta_near_top_moves_freely(self):
+        """valence=0.95 时施 -0.3，正常下移不受递减影响（负向 ×1.2 仍生效）。"""
+        e = EmotionalState(valence=0.95, arousal=0.5, inertia=0.0)
+        e.shift(-0.3, 0.0)
+        # -0.3 × 1.2 = -0.36，软边界不作用于反向
+        self.assertAlmostEqual(e.valence, 0.59, places=4)
+
+    def test_neutral_zone_small_delta_unaffected(self):
+        """valence=0.5 时小增量基本无衰减。"""
+        e = EmotionalState(valence=0.5, arousal=0.5, inertia=0.0)
+        e.shift(0.1, 0.0)
+        self.assertAlmostEqual(e.valence, 0.6, places=4)
+
+    def test_repeated_small_positive_deltas_asymptote(self):
+        """连续 10 次 +0.1 输入，valence 渐近但不到 1.0。"""
+        e = EmotionalState(valence=0.0, arousal=0.5, inertia=0.0)
+        for _ in range(10):
+            e.shift(0.1, 0.0)
+        self.assertLess(e.valence, 1.0)
+        self.assertGreater(e.valence, 0.5)
+
+    def test_arousal_soft_boundary_respected(self):
+        """arousal 上边界同样应用软边界。"""
+        e = EmotionalState(valence=0.0, arousal=0.95, inertia=0.0)
+        e.shift(0.0, 0.3)
+        self.assertLess(e.arousal, 1.0)
+        self.assertGreater(e.arousal, 0.95)
+
+
 class TestShift(unittest.TestCase):
     def setUp(self):
         self.e = _make_default_state()

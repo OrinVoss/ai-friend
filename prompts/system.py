@@ -98,9 +98,17 @@ def _build_inner_emotion_block(emotion: EmotionalState) -> str:
     # M-07: 统一读活 EmotionalState，摘要由 block 内部现取，
     # 不再接收调用方预冻结的 emotion_summary（消除双路径发散）
     emotion_summary = emotion.to_prompt_summary()
+    return _build_inner_emotion_block_from_summary(emotion_summary)
+
+
+def _build_inner_emotion_block_from_summary(emotion_summary: dict) -> str:
+    # WS-16: CognitiveState 携带的轮次开始情绪快照；缺失字段防御性回退。
+    dominant = emotion_summary.get("dominant_emotion", "neutral")
+    valence = emotion_summary.get("valence", 0.0)
+    arousal = emotion_summary.get("arousal", 0.5)
     return (
-        f"你现在的情绪：{emotion_summary['dominant_emotion']}"
-        f"（效价 {emotion_summary['valence']:+.2f}，唤醒度 {emotion_summary['arousal']:.2f}）"
+        f"你现在的情绪：{dominant}"
+        f"（效价 {valence:+.2f}，唤醒度 {arousal:.2f}）"
     )
 
 
@@ -192,6 +200,7 @@ def build_inner_drive_prompt(
     prompt_cache_ttl: float = 60.0,
     memory_context_summary: str = "",
     rule_tools=None,
+    emotion_summary: dict | None = None,
 ) -> str:
     """Agent 1: Inner drive reasoning prompt -- assess what the AI needs to do.
 
@@ -206,6 +215,9 @@ def build_inner_drive_prompt(
 
     `rule_tools` is the registry used to derive tool rules/checklist lines
     (M-06: Agent 1 判断外部工具需求需要看到全量规则)；defaults to `tools`.
+
+    WS-17: emotion_summary 为轮次开始冻结的情绪快照；缺省时回退到活对象，
+    保持旧调用方兼容。
     """
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -221,7 +233,10 @@ def build_inner_drive_prompt(
         )
     )
 
-    blocks.append(_build_inner_emotion_block(emotion))
+    if emotion_summary is not None:
+        blocks.append(_build_inner_emotion_block_from_summary(emotion_summary))
+    else:
+        blocks.append(_build_inner_emotion_block(emotion))
 
     if memory_context_summary:
         blocks.append(memory_context_summary)
@@ -490,10 +505,20 @@ def _build_emotion_block(emotion: EmotionalState) -> str:
     # prompt builder renders a lightweight summary instead of raw dimensions.
     # M-07: 统一读活 EmotionalState，摘要内部现取，消除双路径发散。
     s = emotion.to_prompt_summary()
+    return _build_emotion_block_from_summary(s)
+
+
+def _build_emotion_block_from_summary(s: dict) -> str:
+    # WS-18: CognitiveState 的情绪快照直接渲染；缺失字段防御性回退。
+    mood = s.get("mood", "平静")
+    primary_hint = s.get("primary_hint", "")
+    valence_desc = s.get("valence_desc", "中性")
+    arousal_desc = s.get("arousal_desc", "平衡")
+    behavior = s.get("behavior", "")
     return (
         f"""=== 你现在啥状态 ===
-{s['mood']}{s['primary_hint']}，{s['valence_desc']}、{s['arousal_desc']}的那种。
-{s['behavior']}
+{mood}{primary_hint}，{valence_desc}、{arousal_desc}的那种。
+{behavior}
 你的说话风格、语气、用词必须完全跟这个情绪一致。暂时放下你的人设中的幽默和嘴贫——如果情绪是负面的，别强行搞笑。"""
     )
 
@@ -555,8 +580,9 @@ def _build_memory_block(memory_context: MemoryContext) -> str:
             parts.append(f"- {dream_prefix}[{e.emotional_tone}] {e.summary}")
     if memory_context.reflections:
         parts.append("=== 你的最近思考 ===")
-        for r in memory_context.reflections[:3]:
-            parts.append(f"- {r.content}")
+        for r in memory_context.reflections[:2]:
+            content = r.content[:120] + ("…" if len(r.content) > 120 else "")
+            parts.append(f"- {content}")
     return "\n".join(parts)
 
 
@@ -618,9 +644,10 @@ def _build_tool_history_block(tool_call_history: list | None) -> str:
     if not tool_call_history:
         return ""
     lines = ["=== 你的工具调用记录 ==="]
-    for tc in tool_call_history[-5:]:
+    for tc in tool_call_history[-3:]:
         status = "✅" if tc.get("success", False) else "❌"
-        lines.append(f"- {status} {tc['name']}: {tc['output'][:100]}")
+        output = tc['output'][:60] + ("…" if len(tc['output']) > 60 else "")
+        lines.append(f"- {status} {tc['name']}: {output}")
     return "\n".join(lines)
 
 
@@ -720,6 +747,7 @@ def build_system_prompt(
     personality_file: str | None = None,
     prompt_cache_ttl: float = 60.0,
     memory_context_summary: str = "",
+    emotion_summary: dict | None = None,
 ) -> str:
     """Agent 3 / proactive / explore system prompt.
 
@@ -727,6 +755,9 @@ def build_system_prompt(
     (relationship, memory), and dynamic (time, emotion, tool history,
     conversation, instructions).  Static and slow blocks are cached when
     ``prompt_cache`` is provided.
+
+    WS-19: emotion_summary 为轮次开始冻结的情绪快照；缺省时回退到活对象，
+    保持旧调用方兼容。
     """
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -740,7 +771,8 @@ def build_system_prompt(
 
     # Dynamic: Inner drive summary (Agent 1's reasoning)
     if inner_drive_summary:
-        blocks.append(f"=== 你之前的判断 ===\n{inner_drive_summary}")
+        summary = inner_drive_summary[:300] + ("…" if len(inner_drive_summary) > 300 else "")
+        blocks.append(f"=== 你刚才的分析（仅供参考，不要在回复里复述或展开）===\n{summary}")
 
     # Static: Identity
     blocks.append(
@@ -757,7 +789,10 @@ def build_system_prompt(
         blocks.append(examples_block)
 
     # Dynamic: Current Emotional State + resentment + recent events
-    blocks.append(_build_emotion_block(emotion))
+    if emotion_summary is not None:
+        blocks.append(_build_emotion_block_from_summary(emotion_summary))
+    else:
+        blocks.append(_build_emotion_block(emotion))
     resentment_block = _build_resentment_block(emotion)
     if resentment_block:
         blocks.append(resentment_block)

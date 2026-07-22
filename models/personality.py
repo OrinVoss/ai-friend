@@ -216,8 +216,23 @@ class EmotionalState:
         delta_a *= inertia_factor
 
         old_valence = self.valence
-        self.valence = max(-1.0, min(1.0, self.valence + delta_v))
-        self.arousal = max(0.0, min(1.0, self.arousal + delta_a))
+        # R4: 软边界——接近 ±1/1 时同向增量收益递减（反向不受影响），
+        # 防止 valence 长期钉死在硬钳制值上失去分辨力
+        def _soft_apply(current: float, delta: float, lo: float, hi: float) -> float:
+            danger_zone = 0.4  # 距离边界 0.4 以内开始衰减
+            min_factor = 0.05
+            if delta > 0:
+                room = hi - current
+                if room < danger_zone:
+                    delta *= max(min_factor, room / danger_zone)
+            elif delta < 0:
+                room = current - lo
+                if room < danger_zone:
+                    delta *= max(min_factor, room / danger_zone)
+            return max(lo, min(hi, current + delta))
+
+        self.valence = _soft_apply(self.valence, delta_v, -1.0, 1.0)
+        self.arousal = _soft_apply(self.arousal, delta_a, 0.0, 1.0)
         # R5: 连续边界停留跟踪——5 次以上仍顶格则升级为 warning
         if abs(self.valence) >= 1.0 or self.arousal >= 1.0 or self.arousal <= 0.0:
             self._valence_boundary_count += 1

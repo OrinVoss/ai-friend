@@ -109,7 +109,8 @@ class MemoryRetriever:
         if reflections:
             parts.append("相关反思：")
             for r in reflections:
-                parts.append(f"- {r.content}")
+                content = r.content[:120] + ("…" if len(r.content) > 120 else "")
+                parts.append(f"- {content}")
         result = "\n".join(parts) if parts else None
         # #192: limit total output to 2000 chars to avoid context bloat
         if result and len(result) > 2000:
