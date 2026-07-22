@@ -25,6 +25,11 @@ class MemoryRetriever:
         self.llm_rerank_fn = llm_rerank_fn
         self._embed = embedding_engine
 
+    @property
+    def embedding_engine(self):
+        """Public read-only access to the embedding engine (T3: history_search semantic mode)."""
+        return self._embed
+
     def retrieve_for_query(self, query: str) -> MemoryContext:
         """Layer 1 + Layer 2: build context for a user message."""
         logger.info(f"[retrieval] query_len={len(query)}")

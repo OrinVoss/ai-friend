@@ -187,3 +187,175 @@ class RememberTool(Tool):
                 error_type=ERROR_TYPE_INTERNAL,
                 retryable=False,
             )
+
+
+class HistorySearchTool(Tool):
+    """Search original conversation history — keyword LIKE, semantic vector, or batch range read.
+
+    T3: history after M-03 unify memory (2026-07-22): this is the channel for
+    raw-turn retrieval when the char-budget in _build_messages has dropped older
+    turns from the prompt.
+    """
+
+    ALIASES = {
+        "query": ("search", "keyword"),
+        "turn_number": ("turn", "from_turn", "start"),
+    }
+
+    is_internal = True
+    timeout_seconds = 15.0
+
+    def __init__(self, retriever, ltm):
+        self.retriever = retriever
+        self.ltm = ltm
+        self._embed_cache = None  # {turn_number: np.ndarray}, lazy init
+
+    def name(self) -> str:
+        return "history_search"
+
+    def description(self) -> str:
+        return (
+            "搜索原始对话历史。用一两个关键词精准搜索，如'摄影'、'歌名'；"
+            "想语义模糊查找用 mode=semantic；按 turn_number 批量读整段上下文。"
+            "recall 查提炼记忆（facts/experiences/insights），"
+            "history_search 查原始对话。"
+        )
+
+    def parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词（一两个词即可，不用整句）",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["keyword", "semantic"],
+                    "description": "搜索模式：keyword=精确匹配（默认），semantic=向量语义",
+                },
+                "turn_number": {
+                    "type": "integer",
+                    "description": "按轮次起始号批量读一段对话（给了此参数忽略 query/mode）",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "返回条数，默认6，上限15",
+                },
+            },
+        }
+
+    def execute(self, args: dict[str, Any]) -> ToolResult:
+        try:
+            query = (args.get("query") or "").strip()
+            mode = (args.get("mode") or "keyword").strip().lower()
+            turn_number = int(args.get("turn_number") or 0)
+            limit = min(int(args.get("limit") or 6), 15)
+
+            # Batch mode: read by turn range
+            if turn_number > 0:
+                return self._batch_read(turn_number, limit)
+
+            # No query → latest N turns
+            if not query:
+                return self._batch_read(0, limit)
+
+            # Keyword or semantic search
+            if mode == "semantic":
+                result = self._semantic_search(query, limit)
+                if result is not None:
+                    return result
+                # Semantic failed — fall through to keyword
+                logger.info("[tool] history_search semantic failed, keyword fallback")
+
+            # Keyword (LIKE) search
+            return self._keyword_search(query, limit)
+
+        except Exception as e:
+            logger.exception(f"[tool] history_search failed: {e}")
+            return ToolResult.fail(
+                f"搜索对话失败: {e}",
+                error_type=ERROR_TYPE_INTERNAL,
+                retryable=False,
+            )
+
+    def _format_turns(self, turns: list[dict]) -> str:
+        """Format turns for output with char limits."""
+        parts = []
+        total_chars = 0
+        for t in turns:
+            role = "用户" if t.get("role") == "user" else "你"
+            tn = t.get("turn_number", "?")
+            created = t.get("created_at", "")
+            content = (t.get("content") or "")[:200]
+            line = f"[#{tn}] {role} ({created}): {content}"
+            if total_chars + len(line) > 1500:
+                break
+            parts.append(line)
+            total_chars += len(line)
+        return "\n".join(parts)
+
+    def _keyword_search(self, query: str, limit: int) -> ToolResult:
+        turns = self.ltm.search_turns(query, limit=limit)
+        if not turns:
+            return ToolResult.ok("没找到相关对话")
+        return ToolResult.ok(self._format_turns(turns))
+
+    def _semantic_search(self, query: str, limit: int) -> ToolResult | None:
+        """Semantic search. Returns None when embedding unavailable (caller falls back)."""
+        embed = self.retriever.embedding_engine
+        if not embed or not embed.health_check():
+            return None
+
+        try:
+            import numpy as np
+        except ImportError:
+            return None
+
+        # Get recent 200 turns from DB
+        recent = self.ltm.repo.get_recent_turns_sync(limit=200)
+
+        # Init cache lazily
+        if self._embed_cache is None:
+            self._embed_cache = {}
+
+        # Encode new turns only
+        for t in recent:
+            tn = t.get("turn_number")
+            if tn is None or tn in self._embed_cache:
+                continue
+            try:
+                vec = embed.encode_single(t.get("content", ""))
+                self._embed_cache[tn] = vec
+            except Exception:
+                continue
+
+        # Encode query
+        try:
+            query_vec = embed.encode_single(query)
+        except Exception:
+            return None
+
+        # Score by cosine similarity
+        scored = []
+        for t in recent:
+            tn = t.get("turn_number")
+            vec = self._embed_cache.get(tn)
+            if vec is None:
+                continue
+            sim = float(np.dot(vec, query_vec))
+            if sim >= 0.5:
+                scored.append((t, sim))
+
+        if not scored:
+            return ToolResult.ok("没找到相关对话")
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        results = [t for t, _ in scored[:limit]]
+        return ToolResult.ok(self._format_turns(results))
+
+    def _batch_read(self, turn_number: int, count: int) -> ToolResult:
+        turns = self.ltm.get_turns_range(turn_number, count)
+        if not turns:
+            return ToolResult.ok("没找到相关对话")
+        return ToolResult.ok(self._format_turns(turns))

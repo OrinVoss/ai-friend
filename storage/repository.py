@@ -707,14 +707,15 @@ class Repository:
         async with self.db.cursor() as c:
             sid = session_id or self.session_id
             await c.execute("""
-                SELECT role, content FROM conversation_turns
+                SELECT role, content, turn_number, created_at FROM conversation_turns
                 WHERE session_id = ?
                 ORDER BY id DESC LIMIT ?
             """, (sid, limit))
             rows = await c.fetchall()
         rows = list(rows)
         rows.reverse()
-        return [{"role": r[0], "content": r[1]} for r in rows]
+        return [{"role": r[0], "content": r[1],
+                 "turn_number": r[2], "created_at": r[3]} for r in rows]
 
     async def get_max_turn_number(self, session_id: str | None = None) -> int:
         """Return the largest turn_number persisted for this session."""
@@ -726,6 +727,35 @@ class Repository:
             """, (sid,))
             row = await c.fetchone()
             return row[0] if row else 0
+
+    async def search_turns(self, query: str, limit: int = 6) -> list[dict]:
+        """关键词 LIKE 搜索原始对话（T3: history_search 工具使用）。"""
+        async with self.db.cursor() as c:
+            await c.execute("""
+                SELECT turn_number, role, content, created_at FROM conversation_turns
+                WHERE session_id = ? AND content LIKE ?
+                ORDER BY turn_number DESC LIMIT ?
+            """, (self.session_id, f"%{query}%", limit))
+            return [dict(r) for r in await c.fetchall()]
+
+    async def get_turns_range(self, turn_from: int, count: int = 10) -> list[dict]:
+        """按轮次范围批量读取（定位后看上下文 / 无参时取最新 count 条）。"""
+        async with self.db.cursor() as c:
+            if turn_from > 0:
+                await c.execute("""
+                    SELECT turn_number, role, content, created_at FROM conversation_turns
+                    WHERE session_id = ? AND turn_number BETWEEN ? AND ?
+                    ORDER BY turn_number ASC
+                """, (self.session_id, turn_from, turn_from + count - 1))
+            else:
+                await c.execute("""
+                    SELECT turn_number, role, content, created_at FROM conversation_turns
+                    WHERE session_id = ? ORDER BY turn_number DESC LIMIT ?
+                """, (self.session_id, count))
+            rows = [dict(r) for r in await c.fetchall()]
+            if turn_from <= 0:
+                rows.sort(key=lambda r: r["turn_number"])
+            return rows
 
     # ── Pruning ──
 

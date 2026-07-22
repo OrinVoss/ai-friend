@@ -121,3 +121,9 @@ class LongTermMemory:
         return run_async(self.repo.get_similar_facts(category, key, limit))
     def get_relationship_history(self, days: int = 30):  # #195: explicit params
         return run_async(self.repo.get_relationship_history(days))
+    # T3: history_search 工具支持
+    def search_turns(self, query: str, limit: int = 6):
+        return run_async(self.repo.search_turns(query, limit))
+    def get_turns_range(self, turn_from: int, count: int = 10):
+        return run_async(self.repo.get_turns_range(turn_from, count))
+        return run_async(self.repo.get_relationship_history(days))

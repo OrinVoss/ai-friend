@@ -109,6 +109,9 @@ class Config:
     # A6（2026-07-21）：情绪按真实时间衰减——「一轮」对应的真实秒数
     emotion_turn_seconds: int = 300
     inner_drive_care_similarity_threshold: float = 0.7  # 语义浮现/对照解决阈值
+    # A3: Agent 3 (react) 对话历史字符预算。历史消息总字符超过此值时，
+    # 从最旧开始丢弃。设为 0 表示不限（默认 16000 ≈ 8-10k tokens）。
+    react_history_budget_chars: int = 16000
     # DB backup: VACUUM INTO snapshot before schema migrations (P0-3)
     db_backup_enabled: bool = True
     db_backup_keep: int = 5

@@ -54,6 +54,7 @@
 | `inner_drive_care_similarity_threshold` | float | `0.7` | 内驱状态二期：语义浮现与对照解决的相似度阈值 |
 | `db_backup_enabled` | bool | `true` | 数据库自动备份：检测到 schema 迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/` |
 | `db_backup_keep` | int | `5` | 备份滚动保留份数，超出时按最旧优先删除 |
+| `react_history_budget_chars` | int | `16000` | Agent 3 (ReAct) 对话历史字符预算：历史消息总字符超过此值时从最旧开始丢弃，由记忆系统兜底。设为 `0` 禁用。默认 16000 ≈ 8-10k tokens |
 
 ### 主动行为
 

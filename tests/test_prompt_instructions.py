@@ -29,8 +29,8 @@ class TestCentralizedInstructions(unittest.TestCase):
         text = _build_inner_drive_instructions_block(personality)
         self.assertIn("=== 内驱推理 ===", text)
         self.assertIn("TestBot", text)
-        self.assertIn("你不是一个只会等指令的客服机器人", text)
-        self.assertIn("内驱检查清单", text)
+        self.assertIn("有自主判断力", text)
+        self.assertIn("检查清单（逐条过）", text)
         self.assertIn("用户指令优先", text)
 
     def test_inner_drive_no_personality_inference_rule(self):
@@ -38,7 +38,7 @@ class TestCentralizedInstructions(unittest.TestCase):
         from models.personality import PersonalityConfig
         personality = PersonalityConfig(name="TestBot")
         text = _build_inner_drive_instructions_block(personality)
-        self.assertIn("用户的意图是什么", text)
+        self.assertIn("用户意图", text)
         self.assertIn("不要推断用户的人格、心理动机", text)
         self.assertIn("禁止出现在 reasoning 里", text)
         self.assertIn("不写心理分析", text)

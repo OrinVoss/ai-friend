@@ -5,6 +5,7 @@ from prompts.instructions import (
     AGENT3_EXPLORE_INSTRUCTIONS,
     AGENT3_PROACTIVE_INSTRUCTIONS,
     INNER_DRIVE_CHECKLIST,
+    INNER_DRIVE_COMPRESSED,
     INNER_DRIVE_DECISION_PRINCIPLES,
     INNER_DRIVE_INTRO,
     INNER_DRIVE_OUTPUT_FORMAT,
@@ -138,6 +139,7 @@ def _build_inner_drive_instructions_block(
     personality: PersonalityConfig,
     tools=None,
     rule_tools=None,
+    tool_call_history=None,  # controls followup_rules injection; None=always inject
 ) -> str:
     # Tool rules are derived from the live registry so prompt never hard-codes
     # tool names except in the central tools_description mapping (#294 P2-4).
@@ -146,22 +148,25 @@ def _build_inner_drive_instructions_block(
     rules_source = rule_tools if rule_tools is not None else tools
     tool_rules = format_tool_rules(rules_source)
     followup_rules = format_tool_followup_rules(rules_source)
-    return (
-        INNER_DRIVE_INTRO.format(name=personality.name)
-        + "\n\n"
-        + INNER_DRIVE_CHECKLIST.format(
-            followup_rules=followup_rules or "  · 刚用过某个工具，用户给出相关补充 → 针对它再操作"
+
+    # Conditional followup_rules block: inject only when tool_call_history
+    # is non-empty (tools were actually used recently). None=backward compat.
+    if tool_call_history is None or tool_call_history:
+        followup_block = (
+            "结合最近对话和工具历史判断：\n"
+            + (followup_rules or "  · 刚用过某个工具，用户给出相关补充 → 针对它再操作")
+            + "\n"
         )
-        + "\n\n"
-        + INNER_DRIVE_DECISION_PRINCIPLES
+    else:
+        followup_block = ""
+
+    return (
+        INNER_DRIVE_COMPRESSED.replace("{name}", personality.name)
+                              .replace("{followup_block}", followup_block)
         + "\n\n"
         + INNER_DRIVE_TOOL_RULES_HEADER
         + "\n"
         + (tool_rules if tool_rules else "  · （当前无可用的外部工具）")
-        + "\n\n"
-        + INNER_DRIVE_USER_PRIORITY_RULES
-        + "\n\n"
-        + INNER_DRIVE_OUTPUT_FORMAT
     )
 
 
@@ -257,14 +262,21 @@ def build_inner_drive_prompt(
             )
         )
 
-    blocks.append(
-        _cache(
+    # Inner-drive instructions + tool rules (from registry).
+    # When tool_call_history is provided, bypass cache (followup_rules is
+    # per-turn dynamic). When not provided, cache as static (backward compat).
+    if tool_call_history is not None:
+        instr_block = _build_inner_drive_instructions_block(
+            personality, tools=tools, rule_tools=rule_tools,
+            tool_call_history=tool_call_history)
+    else:
+        instr_block = _cache(
             prompt_cache, session_id, pfile, STATIC_INNER_DRIVE_INSTRUCTIONS,
             lambda: _build_inner_drive_instructions_block(
                 personality, tools=tools, rule_tools=rule_tools),
             ttl=None,
         )
-    )
+    blocks.append(instr_block)
 
     # Recent tool calls (helps Agent 1 interpret short follow-ups like song names)
     if tool_call_history:

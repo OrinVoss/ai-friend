@@ -28,5 +28,6 @@
   "web_access_token": "",
   "db_backup_enabled": true,
   "db_backup_keep": 5,
-  "consolidation_unified_call": true
+  "consolidation_unified_call": true,
+  "react_history_budget_chars": 16000
 }
