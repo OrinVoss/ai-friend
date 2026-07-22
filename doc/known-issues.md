@@ -5,6 +5,47 @@
 
 ---
 
+## 修复状态索引（2026-07-22 代码逐条验证 + 2026-07-22 修复实施）
+
+> 第三方逐行读码核对后的全量状态。下方正文条目保持原记录，未逐条改写。
+
+**✅ 已修复（含此前未标注的）**：
+
+| 条目 | 修复证据 |
+|------|----------|
+| #1 dispatcher 全局别名 | 全局映射已删除，别名下沉各工具 `ALIASES`（dispatcher.py 无 `_normalize_args`） |
+| #263 async_utils | 单例 executor + 超时取消传播（call_soon_threadsafe，async_utils.py:46-57） |
+| #244 Cookie | SameSite=Lax 已加；HttpOnly/Secure 不适用（JS 读取 + 本地 http，有注释） |
+| #233 WS Origin | hostname 精确匹配白名单（server.py:396），非 startswith |
+| #210 WS multi-tab race | schedule_remove 延迟销毁 + 连接归属判断（session.py:320-371） |
+| #164 记忆固化多次 LLM | L1 批次合并 `_consolidate_unified` 一次调用；L2/L3 走旧路径 |
+| #160 Prompt 全量重建 | prompt_cache.py 分层缓存；短输入跳过后已整体移除 |
+| #156 Session 复用/嵌套重试 | provider.py Session + 连接池 |
+| #5 MessageHandler 编排 | 状态机、封装、ToolExecutionResult |
+| #6 睡/醒持久化 | 已确认 |
+| #7/#8/#9 | schema 迁移与 session 过滤已落地 |
+| #295 ContextManager | should_compress() / 非均匀截断 / 增量摘要合并已落地；分层摘要仍推迟 |
+| #103 estimate_tokens 缓存 | lru_cache 已加；其余代码质量项见下方 |
+| #293 三层架构公共循环 | review()/assess()/re_decide() → _decision_loop 已抽取 |
+
+**⚠️ 部分修复 / 缓解**：
+
+| 条目 | 现状 |
+|------|------|
+| #294 Prompt 架构 | P1-3/P2-4/P2-5 已修；P3（模板引擎/版本管理/Token Budget）推迟 |
+| #162 异步架构 | 缓解（单例 executor、取消传播）；核心仍同步阻塞 |
+| #103 代码质量 | estimate_tokens 缓存已修；其余余项：asyncio API 统一、lazy import 可量级、SQLite 连接池（均低优） |
+| #2 日志乱码 | 文件日志已 UTF-8；控制台无显式编码设置，观察中 |
+
+**❌ 未修复（有意推迟）**：
+
+| 条目 | 推迟原因 |
+|------|----------|
+| #295 ContextManager 分层摘要 | 增量合并已覆盖 80% 价值；完整 Recent→Daily→Long-term 归 Layer 2 独立特性 |
+| #166 Provider 同步阻塞 | 改 httpx 异步属 Layer 5 立项；当前经 run_in_executor 卸载，不阻塞事件循环 |
+
+---
+
 ## 1. dispatcher 全局参数别名映射的潜在冲突
 
 ### 状态

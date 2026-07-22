@@ -18,7 +18,7 @@ from memory.consolidation import MemoryConsolidator
 from tools.traits import ToolRegistry
 from ui.cli import ConsoleInterface
 from config import Config
-from core.context_manager import ContextManager, estimate_tokens, COMPRESS_THRESHOLD
+from core.context_manager import ContextManager, estimate_tokens
 from core.sleep_manager import SleepManager
 from core.proactivity import ProactivityManager
 from core.cli_controller import CliController
@@ -192,6 +192,10 @@ class Agent:
     def compress_context(self, messages: list[dict]) -> None:
         """Trigger context compression when the token budget is exceeded."""
         self._context.compress(messages)
+
+    def should_compress(self, estimated_tokens: int) -> bool:
+        """T1: delegate to ContextManager's should_compress for unified threshold check."""
+        return self._context.should_compress(estimated_tokens)
 
     # ── Message entry points (delegate to MessageHandler) ──
 

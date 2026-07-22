@@ -8,6 +8,7 @@ Uses JSON Schema response_format instead of keyword/regex parsing. (#ID-001)
 """
 import logging
 import re
+import typing
 from dataclasses import dataclass, field
 
 from core.cognitive_state import CognitiveState
@@ -226,6 +227,62 @@ class InnerDriveAgent:
         # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实下条消息可见。
         self._cs_memo: tuple[str, object] | None = None  # (user_input, MemoryAnswer | None)
 
+    def _decision_loop(
+        self, messages: list[dict], *,
+        on_parse_failed: typing.Callable[[], InnerDriveResult],
+        source: str = "inner_drive",
+        max_tokens: int | None = None,
+    ) -> InnerDriveResult:
+        """T5: 公共决策循环——LLM 生成 + JSON 解析 + recall_query 子循环。
+
+        assess()/review()/re_decide() 各自的 prompt 构建、日志 tag、兜底文案
+        在此统一处理。Callers 提供 messages（已含 system+user）和 on_parse_failed
+        工厂（JSON 解析失败及 max iterations 耗尽时调用）。
+        """
+        from core.dispatcher import execute_tool_calls
+
+        max_tokens = max_tokens or self._max_tokens_assess
+
+        for _idx in range(self._max_iterations):
+            resp = self._provider.generate(
+                messages, stream=False, max_tokens=max_tokens,
+                response_format=INNER_DRIVE_SCHEMA, source=source,
+                temperature=0.3,
+            )
+            result = self._parse_json_decision(resp)
+            if result is None:
+                logger.warning(f"[inner_drive] {source}: JSON parse failed, fallback")
+                return on_parse_failed()
+
+            # recall_query → execute internal recall and loop
+            if result.recall_query:
+                logger.info(
+                    f"[inner_drive] {source}: internal recall: {result.recall_query[:60]}"
+                )
+                messages.append({"role": "assistant", "content": resp})
+                calls = [{"name": "recall",
+                          "arguments": {"query": result.recall_query}}]
+                exec_results = execute_tool_calls(self._full_registry, calls)
+                messages.append(
+                    {"role": "user",
+                     "content": self._format_internal_results(exec_results)}
+                )
+                continue
+
+            # No recall → final decision
+            logger.info(
+                f"[inner_drive] {source}: "
+                f"needs_tools={result.needs_external_tools} "
+                f"requests={len(result.tool_requests)} "
+                f"reason={result.reasoning[:80]}"
+            )
+            return result
+
+        logger.warning(
+            f"[inner_drive] {source}: max iterations, fallback"
+        )
+        return on_parse_failed()
+
     def assess(self, user_input: str,
                cognitive_state: CognitiveState | None = None) -> InnerDriveResult:
         """Run inner drive reasoning, return structured decision via JSON schema.
@@ -234,7 +291,6 @@ class InnerDriveAgent:
         中的 memory_summary / emotion_summary，实现每轮只检索一次。
         """
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import execute_tool_calls
 
         logger.info(f"[inner_drive] start len={len(user_input)}")
 
@@ -305,50 +361,23 @@ class InnerDriveAgent:
             {"role": "user", "content": f"用户输入：{user_input}\n\n请进行内驱推理，输出 JSON 决策。"},
         ]
 
-        for _idx in range(self._max_iterations):
-            resp = self._provider.generate(
-                messages, stream=False, max_tokens=self._max_tokens_assess,
-                response_format=INNER_DRIVE_SCHEMA, source="inner_drive",
-                temperature=0.3,  # 决策类任务低温（原默认 0.8 易格式抖动）
+        def _assess_fallback() -> InnerDriveResult:
+            return InnerDriveResult(
+                needs_external_tools=False,
+                reasoning="评估分析提前终止，默认不需要外部工具",
+                summary="",
+                context_summary=cs_agent3,
+                memory_confidence=memory_confidence,
             )
-            result = self._parse_json_decision(resp)
-            if result is None:
-                logger.warning("[inner_drive] JSON parse failed, defaulting to no tools")
-                return InnerDriveResult(
-                    needs_external_tools=False,
-                    reasoning="解析失败，默认不需要外部工具",
-                    summary="",
-                    context_summary=cs_agent3,
-                    memory_confidence=memory_confidence,
-                )
 
-            # If recall_query is set, execute internal recall and loop
-            if result.recall_query:
-                logger.info(f"[inner_drive] internal recall: {result.recall_query[:60]}")
-                messages.append({"role": "assistant", "content": resp})
-                calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
-                exec_results = execute_tool_calls(self._full_registry, calls)
-                result_text = self._format_internal_results(exec_results)
-                messages.append({"role": "user", "content": result_text})
-                continue
-
-            # No recall needed → final decision
-            logger.info(
-                f"[inner_drive] decision: needs_tools={result.needs_external_tools} "
-                f"requests={len(result.tool_requests)} reason={result.reasoning[:80]}"
-            )
-            result.context_summary = cs_agent3
-            result.memory_confidence = memory_confidence
-            return result
-
-        logger.warning("[inner_drive] max iterations, defaulting to no tools")
-        return InnerDriveResult(
-            needs_external_tools=False,
-            reasoning="达到最大迭代次数，默认不需要外部工具",
-            summary="",
-            context_summary=cs_agent3,
-            memory_confidence=memory_confidence,
+        result = self._decision_loop(
+            messages,
+            on_parse_failed=_assess_fallback,
+            source="inner_drive",
         )
+        result.context_summary = cs_agent3
+        result.memory_confidence = memory_confidence
+        return result
 
     def _surface_care_for(self, user_input: str) -> str:
         """响应路径的挂念浮现块（inner-drive-state.md 4.2）：相关度超过
@@ -635,7 +664,6 @@ class InnerDriveAgent:
             )
 
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import execute_tool_calls
 
         # M-04: 走 _context_summary_for，use_memory_agent 开关对 review 同样生效；
         # retriever 直接调用仅保留在 _context_summary_for 内部作回退。
@@ -673,46 +701,24 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] review round={round_num}/{max_rounds}")
-        resp = self._provider.generate(
-            messages, stream=False, max_tokens=self._max_tokens_review,
-            response_format=INNER_DRIVE_SCHEMA, source="review",
-            temperature=0.3,
-        )
-        result = self._parse_json_decision(resp)
-        if result is None:
+
+        def _review_fallback() -> InnerDriveResult:
             return InnerDriveResult(
                 needs_external_tools=False,
-                reasoning="解析失败，默认不需要更多工具",
+                reasoning="分析终止，默认不需要更多工具",
                 summary=tool_records_text[:200],
             )
 
-        # Handle recall within review if needed
-        for _ in range(self._max_iterations):
-            if not result.recall_query:
-                break
-            messages.append({"role": "assistant", "content": resp})
-            calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
-            exec_results = execute_tool_calls(self._full_registry, calls)
-            messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
-            resp = self._provider.generate(
-                messages, stream=False, max_tokens=self._max_tokens_review,
-                response_format=INNER_DRIVE_SCHEMA, source="review",
-            temperature=0.3,
-            )
-            result = self._parse_json_decision(resp)
-            if result is None:
-                break
-
-        logger.info(
-            f"[inner_drive] review: needs_tools={result.needs_external_tools} "
-            f"reason={result.reasoning[:80]}"
+        return self._decision_loop(
+            messages,
+            on_parse_failed=_review_fallback,
+            source="review",
+            max_tokens=self._max_tokens_review,
         )
-        return result
 
     def re_decide(self, user_input: str, failure_log: list[dict]) -> InnerDriveResult:
         """Re-decide after Agent 2 tool failures. Try alternative approaches."""
         from prompts.system import build_inner_drive_prompt
-        from core.dispatcher import execute_tool_calls
 
         # M-04: 同 review，记忆上下文走 _context_summary_for（尊重 use_memory_agent）
         cs = self._context_summary_for(user_input)
@@ -748,41 +754,20 @@ class InnerDriveAgent:
         ]
 
         logger.info(f"[inner_drive] re-decide after {len(failure_log)} failures")
-        resp = self._provider.generate(
-            messages, stream=False, max_tokens=self._max_tokens_review,
-            response_format=INNER_DRIVE_SCHEMA, source="re_decide",
-            temperature=0.3,
-        )
-        result = self._parse_json_decision(resp)
-        if result is None:
+
+        def _redecide_fallback() -> InnerDriveResult:
             return InnerDriveResult(
                 needs_external_tools=False,
-                reasoning="解析失败，默认放弃工具调用",
+                reasoning="分析终止，默认放弃工具调用",
                 summary="",
             )
 
-        # Handle recall within re-decide if needed
-        for _ in range(self._max_iterations):
-            if not result.recall_query:
-                break
-            messages.append({"role": "assistant", "content": resp})
-            calls = [{"name": "recall", "arguments": {"query": result.recall_query}}]
-            exec_results = execute_tool_calls(self._full_registry, calls)
-            messages.append({"role": "user", "content": self._format_internal_results(exec_results)})
-            resp = self._provider.generate(
-                messages, stream=False, max_tokens=self._max_tokens_review,
-                response_format=INNER_DRIVE_SCHEMA, source="re_decide",
-            temperature=0.3,
-            )
-            result = self._parse_json_decision(resp)
-            if result is None:
-                break
-
-        logger.info(
-            f"[inner_drive] re-decide: needs_tools={result.needs_external_tools} "
-            f"reason={result.reasoning[:80]}"
+        return self._decision_loop(
+            messages,
+            on_parse_failed=_redecide_fallback,
+            source="re_decide",
+            max_tokens=self._max_tokens_review,
         )
-        return result
 
     def assess_agent3_intent(
         self,

@@ -1,6 +1,7 @@
 """Context window management: token estimation + compression."""
 
 import logging
+from functools import lru_cache
 
 from memory.short_term import ConversationBuffer
 
@@ -24,7 +25,8 @@ def _get_tokenizer():
     return _TOKENIZER
 
 
-def estimate_tokens(text: str) -> int:
+def _estimate_tokens_impl(text: str) -> int:
+    """Actual token estimation logic (without empty guard)."""
     tok = _get_tokenizer()
     if tok:
         return len(tok.encode(text, disallowed_special=()))
@@ -34,6 +36,28 @@ def estimate_tokens(text: str) -> int:
     digits = sum(1 for c in text if c.isdigit())
     other = len(text) - cjk - ascii_chars - digits
     return max(1, int(cjk * 1.5 + ascii_chars / 4 + digits / 3 + other / 8))
+
+
+@lru_cache(maxsize=2048)
+def _estimate_tokens_cached(text: str) -> int:
+    """Cached token estimation. T2: LRU cache for short-to-medium texts."""
+    return _estimate_tokens_impl(text)
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate token count with LRU cache. T2: short texts cached, long texts bypass."""
+    if not text:
+        return 0
+    # 超长文本不缓存（避免单条大文本顶掉整个缓存）
+    if len(text) > 4000:
+        return _estimate_tokens_impl(text)
+    return _estimate_tokens_cached(text)
+
+
+# T3: 压缩排版常数
+RECENT_FULL_TURNS = 6        # 最近 6 条完整保留
+OLDER_SNIPPET = 120          # 更早的每条截断到 120 字符
+MAX_COMPRESS_INPUT = 12000   # 压缩输入总字符预算（原 8000 上调）
 
 
 class ContextManager:
@@ -54,6 +78,10 @@ class ContextManager:
     def estimated_tokens(self) -> int:
         return self._estimated_tokens_used
 
+    def should_compress(self, estimated_tokens: int) -> bool:
+        """T1: #295 — 由本模块统一判断是否需要压缩（此前阈值判断散在调用方）。"""
+        return estimated_tokens >= COMPRESS_THRESHOLD
+
     def reset_estimate(self, count: int) -> None:
         self._estimated_tokens_used = count
 
@@ -71,23 +99,38 @@ class ContextManager:
             self._compressing = False
 
     def _do_compress(self, messages: list[dict]) -> None:
+        """T3+T4: 最近 K 条完整保留+更早的短截断+增量摘要合并（此前均匀截断+全量覆盖）。"""
         from prompts.system import CONTEXT_COMPRESS_PROMPT
+
+        non_system = [m for m in messages if m["role"] != "system"]
+        if not non_system:
+            return
+
+        recent = non_system[-RECENT_FULL_TURNS:]
+        older = non_system[:-RECENT_FULL_TURNS] if len(non_system) > RECENT_FULL_TURNS else []
+
         parts = []
-        for m in messages:
-            if m["role"] == "system":
-                continue
-            content = m["content"]
-            if len(content) > 500:
-                content = content[:500] + "..."
+        for m in older:
+            content = m["content"][:OLDER_SNIPPET]
             parts.append(f"{'用户' if m['role'] == 'user' else '你'}: {content}")
+        for m in recent:
+            parts.append(f"{'用户' if m['role'] == 'user' else '你'}: {m['content']}")
         text = "\n".join(parts)
         if not text.strip():
             return
-        if len(text) > 8000:
-            text = text[-8000:]
+        if len(text) > MAX_COMPRESS_INPUT:
+            text = text[-MAX_COMPRESS_INPUT:]
+
+        # T4: 有旧摘要时增量合并，保留早期信息
+        if self._compressed_summary:
+            compress_input = (f"【已有历史摘要】\n{self._compressed_summary}"
+                              f"\n\n【新增对话】\n{text}")
+        else:
+            compress_input = text
+
         try:
             result = self._provider.generate(
-                [{"role": "user", "content": CONTEXT_COMPRESS_PROMPT.format(conversation=text)}],
+                [{"role": "user", "content": CONTEXT_COMPRESS_PROMPT.format(conversation=compress_input)}],
                 stream=False, source="context_compress",
             )
             if result.strip():

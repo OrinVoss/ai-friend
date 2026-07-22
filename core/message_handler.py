@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from core.cognitive_state import CognitiveState
-from core.context_manager import estimate_tokens, COMPRESS_THRESHOLD
+from core.context_manager import estimate_tokens
 from core.prompt_cache import PromptCache
 
 logger = logging.getLogger(__name__)
@@ -908,7 +908,7 @@ class MessageHandler:
                 continue
             role = "assistant" if t.role == "assistant" else "user"
             turn_tokens = estimate_tokens(t.content)
-            if running_total + turn_tokens > COMPRESS_THRESHOLD:
+            if agent.should_compress(running_total + turn_tokens):
                 overflow = True
                 break
             running_total += turn_tokens
@@ -919,7 +919,7 @@ class MessageHandler:
             messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {agent.get_compressed_summary()}"})
         if user_input:
             msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
-            if msg_tokens + estimate_tokens(user_input) > COMPRESS_THRESHOLD:
+            if agent.should_compress(msg_tokens + estimate_tokens(user_input)):
                 agent.compress_context(messages)
             messages.append({"role": "user", "content": user_input})
         return messages

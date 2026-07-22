@@ -29,6 +29,8 @@ class TestMessageHandler(unittest.TestCase):
         self.agent._context.compressed_summary = ""
         self.agent.compressed_summary = ""
         self.agent._context.compress = MagicMock()
+        self.agent._context.should_compress = MagicMock(return_value=False)
+        self.agent.should_compress = MagicMock(return_value=False)
         self.agent.short_term.get_all_reversed.return_value = []
         self.agent.short_term.format_for_prompt.return_value = ""
         self.agent.short_term.get_all.return_value = []
@@ -443,6 +445,7 @@ class TestR4DreamAndSleepFiltering(unittest.TestCase):
 
     def test_build_messages_skips_sleep_turns(self):
         agent = MagicMock()
+        agent.should_compress = MagicMock(return_value=False)
         t1 = MagicMock(role="user", content="你好", metadata={})
         t2 = MagicMock(role="assistant", content="zzzz...（小声梦话）",
                        metadata={"sleep": True})
@@ -533,6 +536,7 @@ class TestCurrentInputDedup(unittest.TestCase):
 
     def test_current_input_not_duplicated(self):
         agent = MagicMock()
+        agent.should_compress = MagicMock(return_value=False)
         t1 = MagicMock(role="user", content="你个马屁精哈哈哈", metadata={})
         t2 = MagicMock(role="assistant", content="嘿嘿", metadata={})
         agent.short_term.get_all_reversed.return_value = [t1, t2]  # 倒序：当前输入在最前
@@ -546,6 +550,7 @@ class TestCurrentInputDedup(unittest.TestCase):
     def test_older_same_text_turn_kept(self):
         # 用户连发两遍同样的话：旧的保留，只去当前这份
         agent = MagicMock()
+        agent.should_compress = MagicMock(return_value=False)
         t1 = MagicMock(role="user", content="好", metadata={})   # 当前
         t2 = MagicMock(role="assistant", content="嗯", metadata={})
         t3 = MagicMock(role="user", content="好", metadata={})     # 上一轮的"好"
@@ -558,6 +563,7 @@ class TestCurrentInputDedup(unittest.TestCase):
 
     def test_error_fallback_turns_skipped(self):
         agent = MagicMock()
+        agent.should_compress = MagicMock(return_value=False)
         t1 = MagicMock(role="user", content="hi", metadata={})
         t2 = MagicMock(role="assistant",
                        content="抱歉，我暂时无法处理，让我直接回复你吧。",
