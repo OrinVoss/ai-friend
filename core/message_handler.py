@@ -100,11 +100,11 @@ class MessageHandler:
 
     def __init__(self, agent):
         self._agent = agent
-        self._tool_agent = None  # lazy init
-        self._inner_drive = None  # lazy init
-        self._memory_agent = None  # lazy init (MA-001, use_memory_agent only)
-        self._internal_registry = None  # lazy init (H-01, cached)
         self._prompt_cache = PromptCache()
+        # God Object 拆分（2026-07-22）：懒加载装配迁至 core/agent_wiring.py，
+        # 内部实例经下方只读 property 暴露（_inner_drive/_tool_agent/_memory_agent）
+        from core.agent_wiring import AgentWiring
+        self._wiring = AgentWiring(agent, self._prompt_cache)
         self._state = MessageHandlerState.IDLE
         self._agent2_total_timeout = float(getattr(
             agent.config, "agent2_total_timeout_seconds", self.AGENT2_TOTAL_TIMEOUT))
@@ -113,6 +113,30 @@ class MessageHandler:
     @property
     def a(self):
         return self._agent
+
+    @property
+    def _inner_drive(self):
+        return self._wiring._inner_drive
+
+    @_inner_drive.setter
+    def _inner_drive(self, value):
+        self._wiring._inner_drive = value
+
+    @property
+    def _tool_agent(self):
+        return self._wiring._tool_agent
+
+    @_tool_agent.setter
+    def _tool_agent(self, value):
+        self._wiring._tool_agent = value
+
+    @property
+    def _memory_agent(self):
+        return self._wiring._memory_agent
+
+    @_memory_agent.setter
+    def _memory_agent(self, value):
+        self._wiring._memory_agent = value
 
     @property
     def current_state(self) -> MessageHandlerState:
@@ -170,77 +194,12 @@ class MessageHandler:
         self._prompt_cache.maybe_log_stats(logger, tag=tag)
 
     def _ensure_inner_drive(self):
-        if self._inner_drive is None:
-            from core.inner_drive import InnerDriveAgent
-            a = self.a
-            # #203: create isolated registry for Agent 1 (recall/remember only)
-            isolated = self._make_internal_registry()
-            cfg = a.config
-            # MA-001: inject MemoryAgent only when the gray switch is on
-            memory_agent = None
-            if getattr(cfg, "use_memory_agent", False):
-                memory_agent = self._ensure_memory_agent()
-                logger.info("[msg] inner drive: memory agent enabled (use_memory_agent)")
-            # Proactive think loop: persistent care list (per-session file).
-            # Prefer the shared instance from session_factory (also wired to
-            # the consolidator); fall back to creating one here.
-            inner_drive_state = getattr(a, "_inner_drive_state", None)
-            if inner_drive_state is None and getattr(cfg, "proactive_think_loop", True):
-                from core.inner_drive_state import InnerDriveState
-                inner_drive_state = InnerDriveState(
-                    session_id=getattr(a, "session_id", None) or "default",
-                    max_entries=getattr(cfg, "inner_drive_care_list_size", 20),
-                    embedding_engine=getattr(a.consolidator, "_embed", None),
-                    surface_top_k=getattr(cfg, "inner_drive_surface_top_k", 8),
-                    response_top_k=getattr(cfg, "inner_drive_surface_response_k", 3),
-                    decay_rate=getattr(cfg, "inner_drive_decay_rate", 0.9),
-                    similarity_threshold=getattr(
-                        cfg, "inner_drive_care_similarity_threshold", 0.7),
-                )
-            self._inner_drive = InnerDriveAgent(
-                provider=a.provider,
-                personality=a.personality,
-                ltm=a.ltm,
-                retriever=a.retriever,
-                short_term=a.short_term,
-                tool_registry=isolated,
-                tool_call_history=a.tool_call_history,
-                session_id=getattr(a, "session_id", None),
-                prompt_cache=self._prompt_cache,
-                prompt_cache_ttl=getattr(cfg, "prompt_cache_ttl_seconds", 60.0),
-                memory_agent=memory_agent,
-                # M-06: prompt 的工具规则/检查清单用全量 registry 生成，
-                # Agent 1 判断 needs_external_tools 需要看到外部工具
-                rule_tools_registry=a.tool_registry,
-                proactive_think_loop=getattr(cfg, "proactive_think_loop", True),
-                proactive_think_max_rounds=getattr(cfg, "proactive_think_max_rounds", 2),
-                inner_drive_state=inner_drive_state,
-            )
+        # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py
+        self._wiring.ensure_inner_drive()
 
     def _ensure_memory_agent(self):
-        """Lazily build the MemoryAgent for InnerDrive injection (MA-001)."""
-        if self._memory_agent is None:
-            from memory.memory_agent import MemoryAgent
-            from memory.lifecycle import MemoryLifecycleManager
-            a = self.a
-            embed = getattr(a.consolidator, "_embed", None)
-            lifecycle = MemoryLifecycleManager(
-                a.ltm, config=a.config, embedding_engine=embed)
-            # P2: 指代解析用的 LLM 与对话历史（缺一则内部回退规则路径）
-            def _clues_llm(prompt: str) -> str:
-                return a.provider.generate(
-                    [{"role": "user", "content": prompt}],
-                    stream=False, max_tokens=128, source="memory_clues")
-            self._memory_agent = MemoryAgent(
-                a.ltm, lifecycle, a.retriever, embedding_engine=embed,
-                relevance_floor=getattr(a.config, "memory_agent_relevance_floor", 0.35),
-                relevance_full=getattr(a.config, "memory_agent_relevance_full", 0.75),
-                coreference_threshold=getattr(a.config, "memory_agent_coreference_threshold", 0.78),  # R2
-                llm_fn=_clues_llm,
-                history_fn=lambda: a.short_term.format_for_prompt(max_tokens=800),
-                inner_drive_state=getattr(a, "_inner_drive_state", None),
-            )
-        return self._memory_agent
+        # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py
+        return self._wiring.ensure_memory_agent()
 
     def ensure_inner_drive(self):
         """Ensure inner drive is initialized and return it."""
@@ -248,78 +207,30 @@ class MessageHandler:
         return self._inner_drive
 
     def _match_active_care(self, topic: str, reasoning: str) -> dict | None:
-        """L4-6a: find the active inner-drive entry that the proactive topic
-        likely surfaced. Returns a lightweight dict or None."""
-        state = getattr(self.a, "_inner_drive_state", None)
-        if state is None:
-            return None
-        query = f"{topic} {reasoning}".strip()
-        try:
-            if query:
-                hits = state.surface_for_query(query)
-                if hits:
-                    return {"entry_id": hits[0].id, "timestamp": time.time()}
-        except Exception as e:
-            logger.debug(f"[msg] proactive care surface failed: {e}")
-        try:
-            for e in state.active_entries():
-                if e.content and (e.content in topic or e.content in reasoning):
-                    return {"entry_id": e.id, "timestamp": time.time()}
-        except Exception as e:
-            logger.debug(f"[msg] proactive care substring match failed: {e}")
-        return None
+        # God Object 拆分（2026-07-22）：实现已迁至 core/proactive_outcome.py
+        from core.proactive_outcome import match_active_care
+        return match_active_care(self.a, topic, reasoning)
 
     def _evaluate_proactive_outcome(self, user_input: str) -> None:
-        """L4-6a: score the user's reply to the last proactive message and
-        record the outcome on the matched care entry."""
-        state = getattr(self.a, "_inner_drive_state", None)
-        if state is None or self._last_proactive_care is None:
-            self._last_proactive_care = None
+        # God Object 拆分（2026-07-22）：实现已迁至 core/proactive_outcome.py
+        if self._last_proactive_care is None:
             return
-        entry_id = self._last_proactive_care.get("entry_id")
-        try:
-            sentiment, _, _ = self.a.consolidator.analyze_sentiment(user_input)
-            positive = sentiment > 0.1
-            state.record_outcome(entry_id, positive)
-            logger.info(f"[msg] proactive outcome recorded: entry={entry_id} positive={positive}")
-        except Exception as e:
-            logger.warning(f"[msg] proactive outcome evaluation failed: {e}")
+        from core.proactive_outcome import evaluate_proactive_outcome
+        evaluate_proactive_outcome(self.a, self._last_proactive_care, user_input)
         self._last_proactive_care = None
 
     def _ensure_tool_agent(self):
-        if self._tool_agent is None:
-            from core.tool_agent import ToolAgent
-            self._tool_agent = ToolAgent(
-                provider=self.a.provider,
-                tool_registry=self._make_external_registry(),
-            )
+        # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py
+        self._wiring.ensure_tool_agent()
 
-    def _make_internal_registry(self):
-        """Isolated registry (recall/remember only) for Agent 1 / Agent 3.
-
-        H-01: cached and reused — RecallTool/RememberTool 无可变内部状态，
-        重复新建没有收益。
-        """
-        if self._internal_registry is None:
-            from tools.traits import ToolRegistry
-            from tools.memory_tools import RecallTool, RememberTool
-            a = self.a
-            r = ToolRegistry()
-            if a.retriever is not None and a.ltm is not None:
-                r.register(RecallTool(retriever=a.retriever, ltm=a.ltm))
-                r.register(RememberTool(ltm=a.ltm))
-            self._internal_registry = r
-        return self._internal_registry
+    def _make_internal_registry(self, include_history_search: bool = False):
+        # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py；
+        # include_history_search 语义不变（仅 Agent 3 带 history_search）
+        return self._wiring.make_internal_registry(include_history_search)
 
     def _make_external_registry(self):
-        """Build a registry containing only external tools for Agent 2."""
-        from tools.traits import ToolRegistry, EXTERNAL_TOOL_NAMES
-        r = ToolRegistry()
-        for name in EXTERNAL_TOOL_NAMES:
-            tool = self.a.tool_registry.get(name)
-            if tool and not getattr(tool, "is_internal", False):
-                r.register(tool)
-        return r
+        # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py
+        return self._wiring.make_external_registry()
 
     def handle_message(self, user_input: str, on_token=None) -> str:
         from prompts.system import build_system_prompt
@@ -597,7 +508,7 @@ class MessageHandler:
         # H-01: registry 收窄为内部工具（recall/remember），与 prompt 声明一致，
         # 外部动作一律走 intent→Agent 2 管线
         return a._react_loop(messages, on_token, add_to_history=True,
-                            tool_registry=self._make_internal_registry(),
+                            tool_registry=self._make_internal_registry(include_history_search=True),
                             skip_post_process=True)
 
     def handle_explore(self, intent=None) -> str | None:
@@ -662,7 +573,7 @@ class MessageHandler:
         # H-05: 自由探索轮同样跳过情绪后处理（理由同 handle_proactive）
         # H-01: registry 固定收窄为内部工具（理由同 handle_proactive）
         result = a._react_loop(messages, on_token=None, add_to_history=True,
-                              tool_registry=self._make_internal_registry(),
+                              tool_registry=self._make_internal_registry(include_history_search=True),
                               skip_post_process=True)
         if result and len(result.strip()) > 30 and not result.startswith("搜索"):
             logger.info(f"[explore] shared: {len(result)} chars")
@@ -753,7 +664,7 @@ class MessageHandler:
         # H-01: 无论是否有 tool_records，Agent 3 的 registry 都固定为内部工具
         # （recall/remember），与 prompt 声明一致，不再回退到全量 registry
         return a._react_loop(messages, on_token, add_to_history=True,
-                            tool_registry=self._make_internal_registry())
+                            tool_registry=self._make_internal_registry(include_history_search=True))
 
     def _parse_agent3_output(self, text: str) -> dict:
         """Detect whether Agent 3 output is a JSON intent or plain text."""
@@ -876,53 +787,10 @@ class MessageHandler:
         ).with_elapsed(elapsed_ms)
 
     def _build_messages(self, sys_prompt: str, user_input: str | None) -> list[dict]:
-        agent = self._agent
-        messages = [{"role": "system", "content": sys_prompt}]
-        overflow = False
-        # MH-007: accumulate a running token total and stop as soon as the
-        # budget is exhausted.  Only messages that fit into the window are
-        # reversed; this avoids a full-history scan on every request.
-        running_total = 0
-        history_messages = []
-        is_first = True
-        for t in agent.short_term.get_all_reversed():
-            # 修复：当前输入在 handle_message 时已 add_turn 入历史，末尾还会
-            # 以"用户输入：..."形式再追加一次——跳过历史里的这份（即倒序首个
-            # 元素），避免同一句话在 prompt 中出现两次（模型会误以为用户在刷屏）
-            if is_first and user_input and t.role == "user" \
-                    and t.content.strip() and t.content.strip() in user_input:
-                is_first = False
-                continue
-            is_first = False
-            # #130: skip turns with stage directions / fake tool claims
-            if getattr(t, 'metadata', None) and t.metadata.get('is_tool_claim'):
-                continue
-            # R4: skip sleep turns (zzzz, 我去午睡了, etc.) — 同 short_term.format_for_prompt 的过滤逻辑
-            if getattr(t, 'metadata', None) and t.metadata.get('sleep'):
-                continue
-            # 修复：错误兜底文案（API 故障期的"抱歉，我暂时无法处理…"）不进
-            # prompt 历史——保留在 DB/界面记录，但不让模型误以为发生过系统错误
-            if getattr(t, 'metadata', None) and t.metadata.get('error_fallback'):
-                continue
-            if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
-                continue
-            role = "assistant" if t.role == "assistant" else "user"
-            turn_tokens = estimate_tokens(t.content)
-            if agent.should_compress(running_total + turn_tokens):
-                overflow = True
-                break
-            running_total += turn_tokens
-            history_messages.append({"role": role, "content": t.content})
-        # #168: O(k) slice assignment instead of O(k²) insert(1, ...)
-        messages[1:1] = reversed(history_messages)
-        if overflow and agent.get_compressed_summary():
-            messages.insert(1, {"role": "system", "content": f"[对话历史摘要] {agent.get_compressed_summary()}"})
-        if user_input:
-            msg_tokens = sum(estimate_tokens(m["content"][:500]) for m in messages if m["role"] != "system")
-            if agent.should_compress(msg_tokens + estimate_tokens(user_input)):
-                agent.compress_context(messages)
-            messages.append({"role": "user", "content": user_input})
-        return messages
+        # God Object 拆分（2026-07-22）：实现已迁至 core/message_builder.py，
+        # 这里保留薄委托维持既有调用方/测试兼容
+        from core.message_builder import build_messages
+        return build_messages(self._agent, sys_prompt, user_input)
 
 
 def track_failures(tracker, tool_result):

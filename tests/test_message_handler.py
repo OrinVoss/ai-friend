@@ -372,7 +372,8 @@ class TestMessageHandler(unittest.TestCase):
         self.assertIn("不要编造结果", exec_result.error_message)
 
     def test_internal_registry_isolation(self):
-        """Agent 1 internal registry must only contain fresh recall/remember instances."""
+        """Agent 1 internal registry must only contain fresh recall/remember instances.
+        （history_search 仅 Agent 3 注册表携带，见下一条测试）"""
         from tools.memory_tools import RecallTool, RememberTool
         registry = self.handler._make_internal_registry()
         specs = {s.name for s in registry.list_specs()}
@@ -384,6 +385,15 @@ class TestMessageHandler(unittest.TestCase):
         # Must be fresh instances, not borrowed from the main registry
         self.assertIsNot(recall, self.agent.tool_registry.get("recall"))
         self.assertIsNot(remember, self.agent.tool_registry.get("remember"))
+
+    def test_history_search_only_in_agent3_registry(self):
+        """T1 瘦身不被 T3 吃回：Agent 1 注册表无 history_search（省 ~660 chars schema），
+        Agent 3 注册表有（按需找回被裁剪的历史）。"""
+        agent1_specs = {s.name for s in self.handler._make_internal_registry().list_specs()}
+        agent3_specs = {s.name for s in self.handler._make_internal_registry(
+            include_history_search=True).list_specs()}
+        self.assertNotIn("history_search", agent1_specs)
+        self.assertIn("history_search", agent3_specs)
 
     def test_internal_registry_cached(self):
         """H-01: internal registry 缓存复用，不再每次新建。"""
@@ -404,7 +414,7 @@ class TestMessageHandler(unittest.TestCase):
         registry = kwargs.get("tool_registry")
         self.assertIsNotNone(registry)
         specs = {s.name for s in registry.list_specs()}
-        self.assertEqual(specs, {"recall", "remember"})
+        self.assertEqual(specs, {"recall", "remember", "history_search"})
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
     def test_run_agent3_with_tool_records_same_registry(self, _mock):
@@ -416,7 +426,7 @@ class TestMessageHandler(unittest.TestCase):
             "你好", drive_result, tool_result=None, tool_records="[工具结果]")
         _, kwargs = self.agent._react_loop.call_args
         specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
-        self.assertEqual(specs, {"recall", "remember"})
+        self.assertEqual(specs, {"recall", "remember", "history_search"})
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
     def test_handle_proactive_uses_internal_registry(self, _mock):
@@ -424,7 +434,7 @@ class TestMessageHandler(unittest.TestCase):
         self.handler.handle_proactive()
         _, kwargs = self.agent._react_loop.call_args
         specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
-        self.assertEqual(specs, {"recall", "remember"})
+        self.assertEqual(specs, {"recall", "remember", "history_search"})
         self.assertTrue(kwargs.get("skip_post_process"))
 
     @patch('prompts.system.build_system_prompt', return_value="mock prompt")
@@ -436,7 +446,7 @@ class TestMessageHandler(unittest.TestCase):
         self.handler.handle_explore()
         _, kwargs = self.agent._react_loop.call_args
         specs = {s.name for s in kwargs.get("tool_registry").list_specs()}
-        self.assertEqual(specs, {"recall", "remember"})
+        self.assertEqual(specs, {"recall", "remember", "history_search"})
         self.assertTrue(kwargs.get("skip_post_process"))
 
 
