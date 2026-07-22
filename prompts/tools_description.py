@@ -48,6 +48,11 @@ _TOOL_INTENT_ALIASES: dict[str, str] = {
     "read_file": "read_file",
 }
 
+# Reverse mapping (intent alias → canonical tool name), derived so the two
+# directions can never drift apart.  Agent 1 的 assess_agent3_intent 用它把
+# Agent 3 提议的 intent 翻译回工具名（原硬编码于 inner_drive.py）。
+INTENT_TO_TOOL: dict[str, str] = {v: k for k, v in _TOOL_INTENT_ALIASES.items()}
+
 
 def format_tool_rules(registry: ToolRegistry | None) -> str:
     """Return a markdown list of trigger rules for tools present in registry."""

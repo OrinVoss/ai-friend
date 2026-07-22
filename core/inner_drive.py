@@ -12,6 +12,7 @@ import typing
 from dataclasses import dataclass, field
 
 from core.cognitive_state import CognitiveState
+from core.memory_context_provider import MemoryContextProvider
 
 logger = logging.getLogger(__name__)
 
@@ -223,9 +224,9 @@ class InnerDriveAgent:
         self._think_loop = proactive_think_loop
         self._think_max_rounds = _positive_int(proactive_think_max_rounds, 2)  # F2: 默认 2 轮
         self._inner_drive_state = inner_drive_state
-        # R1: 同一条消息内 _memory_answer_for 的结果缓存，避免 assess/review/re_decide
-        # 重复调用 memory_agent.answer()。Agent 2 中途 remember 的事实下条消息可见。
-        self._cs_memo: tuple[str, object] | None = None  # (user_input, MemoryAnswer | None)
+        # R1: memory-context assembly 抽离到 MemoryContextProvider，同消息内
+        # answer/review/re_decide 复用同一 MemoryAnswer，避免重复调用。
+        self._memory_provider = MemoryContextProvider(self._retriever, self._memory_agent)
 
     def _decision_loop(
         self, messages: list[dict], *,
@@ -400,53 +401,21 @@ class InnerDriveAgent:
                 + lines)
 
     def _build_context_summary(self, mem_ctx) -> str:
-        """Format memory/relationship blocks for Agent 3 reuse."""
-        from prompts.system import _build_relationship_block, _build_memory_block
-        parts = [
-            _build_relationship_block(mem_ctx),
-            _build_memory_block(mem_ctx),
-        ]
-        return "\n\n".join(p for p in parts if p)
+        """Delegate to MemoryContextProvider: format memory/relationship blocks."""
+        return self._memory_provider.build_summary(mem_ctx)
 
     def _memory_answer_for(self, user_input: str):
-        """R1 memo：同一条消息内 memory_agent.answer() 只跑一次。
-        返回 MemoryAnswer 或 None（未启用/失败/空 query）。"""
-        if self._cs_memo and self._cs_memo[0] == user_input:
-            return self._cs_memo[1]
-        ma = None
-        if self._memory_agent is not None and (user_input or "").strip():
-            try:
-                from core.async_utils import run_async
-                ma = run_async(self._memory_agent.answer(user_input))
-            except Exception as e:
-                logger.warning(f"[inner_drive] memory agent failed, retriever fallback: {e}")
-                ma = None
-        self._cs_memo = (user_input, ma)
-        return ma
+        """Delegate to MemoryContextProvider: cached MemoryAnswer per message."""
+        return self._memory_provider.answer_for(user_input)
 
     def _context_summary_for(self, user_input: str) -> str:
-        """Agent 1 prompt 的记忆上下文（全文）。memo 缓存 MemoryAnswer，
-        Agent 3 的轻量渲染复用同一对象（L3-3）。"""
-        if not (user_input or "").strip():
-            # F3: 空 query 走 retriever 概览（现状逻辑保留）
-            return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
-        ma = self._memory_answer_for(user_input)
-        if ma is not None:
-            from memory.retrieval_pipeline import ContextBuilder
-            full = ContextBuilder().build("agent1", ma)
-            if full:
-                logger.debug(f"[inner_drive] context via memory agent "
-                             f"(confidence={ma.confidence})")
-                return full
-            logger.debug("[inner_drive] memory agent empty, retriever fallback")
-        return self._build_context_summary(self._retriever.retrieve_for_query(user_input))
+        """Delegate to MemoryContextProvider: full memory context for Agent 1."""
+        return self._memory_provider.summary_for(user_input)
 
     @staticmethod
     def _format_memory_answer(ma) -> str:
-        """Thin wrapper around ContextBuilder for backward compatibility.
-        Agent 1 receives the full memory context with confidence markers."""
-        from memory.retrieval_pipeline import ContextBuilder
-        return ContextBuilder().build("agent1", ma)
+        """Delegate to MemoryContextProvider: backward-compatible formatter."""
+        return MemoryContextProvider.format_memory_answer(ma)
 
     def assess_proactive(self, idle_duration: float,
                          recent_topics: list | None = None) -> ProactiveIntent:
@@ -803,14 +772,10 @@ class InnerDriveAgent:
         if self._prompt_cache is not None:
             self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_intent")
 
-        intent_to_tool = {
-            "play_music": "music_play",
-            "send_notify": "notify",
-            "search_web": "web_search",
-            "fetch_url": "web_fetch",
-            "read_file": "read_file",
-        }
-        suggested_tool = intent_to_tool.get(intent, "")
+        # intent→tool 映射单一出处在 prompts/tools_description.py（由
+        # _TOOL_INTENT_ALIASES 反向派生），不再在此硬编码
+        from prompts.tools_description import INTENT_TO_TOOL
+        suggested_tool = INTENT_TO_TOOL.get(intent, "")
 
         user_msg = (
             f"用户原始输入：{user_input}\n\n"
