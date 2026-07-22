@@ -161,7 +161,7 @@ SessionManager.get_or_create() → WebAgent
 
 ---
 
-### 1.5 自主行为循环（Web 后台协程）
+### 1.5 自主行为循环（RuntimeDriver 统一驱动）
 
 ```
 _proactive_loop (15s tick)
@@ -268,7 +268,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。Agent 1 决策时使用 `CognitiveState`（Phase 1+2）：输入去重过滤、error_fallback 跳过重复、决策温度 0.3。`MemoryPorter` 和 `CareList`（内驱状态池二期）参与主动沉思循环——独处时浮现挂念条目，对话时按语义相关浮现。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 
@@ -445,42 +445,45 @@ _send_segments(): 整条回复作为单个 segment 发送
     │         sadness → joy↓ anticipation↓     │
     │         resentment 放大压制、锁 joy 天花板│
     │     2c. 怨恨累积 (anger>0.6 → resentment↑)│
-    │     2d. decay() — 分速衰减                │
+    │     2d. decay() — 分速衰减 + 时间衰减     │
     │         surprise 3t, anger 15t, trust 25t │
     │         resentment 3%/turn 慢衰减          │
+    │         decay_elapsed 按真实时间衰减（A6）│
+    │         软边界限制（_valence_boundary_count）│
     │     2e. record_emotion_event()            │
     │         强情绪自动记录（为什么生气）       │
     │                                          │
     │  ③ 记忆合并检查                          │
     │     should_consolidate() → True?          │
     │       │                                  │
-    │       ├── ▶ LLM 抽取 facts (#127)         │
-    │       │    → FACT|cat|key|val|conf|imp|type │
-    │       │    → 只存 user_fact，跳过非用户事实│
-    │       │    → 单写 facts_v2（已上线）        │
-    │       │    → FactChecker 矛盾检测 (#6)     │
-    │       │      同 key 不同 value → 衰减旧事实│
-    │       │      语义相似 >0.65 → 矛盾处理   │
-    │       │    ※ Layer 1 (ML-001) 已正式上线:  │
-    │       │      整批文本→Observation,         │
-    │       │      fact→promote 为 FactV2        │
-    │       │                                  │
-    │       ├── ▶ LLM 总结体验                 │
-    │       │    → SUMMARY|温暖|分享宠物趣事   │
-    │       │    → insert experiences          │
-    │       │                                  │
-    │       ├── ▶ 生成反思                     │
-    │       │    → insert reflections          │
-    │       │                                  │
-    │       └── ▶ 更新关系指标                  │
-    │            familiarity += 0.02            │
-    │            if sentiment>0.3: trust +=    │
-    │                                          │
-    │  ④ 修剪超量记忆                          │
-    │     facts ≤ 200, experiences ≤ 100       │
-    │     reflections ≤ 50                     │
-    │                                          │
-    │  ⑤ 每 10 轮保存 personalities/{role_id}.json │
+    │       ├── ▶ 统一固化（consolidation_unified_call=on）│
+    │       │    事实提取+体验总结+L1 insight 合并为 1 次 LLM │
+    │       │    → Observation（整批对话文本，无新增 LLM）  │
+    │       │    → FACT|cat|key|val|conf|imp|type          │
+    │       │    → promote 为 FactV2（单写 facts_v2）      │
+    │       │    → FactChecker 矛盾检测 (#6)               │
+    │       │      同 key 不同 value → 直接矛盾            │
+    │       │      语义相似 >0.65 → LLM 复核，复述否决保留  │
+    │       │    → SUMMARY|温暖|分享宠物趣事 → experiences │
+    │       │    → L1 洞察（hypothesis/evidence/confidence）│
+    │       │       → insert insights_v2                  │
+    │       │                                              │
+    │       ├── ▶ L2 行为模式（每 3 次）/ L3 深度洞察（每 10 次）│
+    │       │    → 同样结构化 JSON → insights_v2           │
+    │       │                                              │
+    │       ├── ▶ 矛盾向上传播                             │
+    │       │    Fact 被推翻 → 引用它的 active Insight      │
+    │       │    → needs_more_evidence=1, confidence×0.5   │
+    │       │                                              │
+    │       └── ▶ 更新关系指标                              │
+    │            familiarity += 0.02                        │
+    │            if sentiment>0.3: trust +=                │
+    │                                                      │
+    │  ④ 修剪超量记忆                                      │
+    │     facts_v2 ≤ 200, experiences ≤ 100               │
+    │     insights_v2 ≤ 50                                 │
+    │                                                      │
+    │  ⑤ 每 10 轮保存 personalities/{role_id}.json          │
     └─────────────────────────────────────────┘
 ```
 
@@ -561,10 +564,10 @@ _send_segments(): 整条回复作为单个 segment 发送
 | 存储 | 位置 | 生命周期 | 内容 |
 |------|------|----------|------|
 | ConversationBuffer | 内存 deque | 进程级别 | 最近 500 轮 |
-| SQLite facts_v2 | data/ai_friend.db | 永久 | 用户事实（Layer 1，旧 user_facts 已归档为 user_facts_archive） |
+| SQLite facts_v2 | data/ai_friend.db | 永久 | 用户事实（Layer 1，旧 user_facts 归档表已随 schema v6 物理删除） |
 | SQLite experiences | data/ai_friend.db | 永久 | 共享体验 |
-| SQLite reflections | data/ai_friend.db | 永久 | 反思洞察 |
+| SQLite insights_v2 | data/ai_friend.db | 永久 | 洞察假设（二期替代 reflections） |
 | SQLite relationship_metrics | data/ai_friend.db | 永久 | 关系指标 |
 | SQLite conversation_turns | data/ai_friend.db | 永久 | 对话历史 |
-| SQLite observations / facts_v2 | data/ai_friend.db | 永久 | Layer 1 记忆生命周期（已正式上线 2026-07-18：单写 facts_v2） |
+| SQLite observations | data/ai_friend.db | 永久 | 原始观察（Layer 1 记忆生命周期） |
 | EmotionalState | 内存 + personalities/{role_id}.json | 进程 + 持久化 | 当前情绪 |

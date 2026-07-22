@@ -39,22 +39,27 @@ main.py / web_main.py
     │   ├── proactivity.py ────── 主动行为引擎（评分+话题+限速）
     │   ├── cli_controller.py ─── CLI 输入循环 + 命令层（ConversationEngine 前端）
     │   ├── personality.py ────── 情绪引擎（四层：输入→调制→怨恨→记忆）
+    │   ├── personality_manager.py ── 人格加载/保存/枚举（统一入口）
+    │   ├── personality_validator.py ── 人格校验器（A4）
     │   ├── provider.py ───────── LLMProvider 抽象基类 + DeepSeekProvider 实现（OpenAI 兼容，流式，response_format JSON mode）(#23)
     │   ├── monitor.py ────────── LLM API 调用监控（环形缓冲 200 条，开发调试用）
     │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
     │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
     │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
-    │   ├── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 工具调度
+    │   ├── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 别名下沉 + 工具调度
+    │   ├── cognitive_state.py ─── CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）
     │   └── inner_drive_state.py ─ 内驱状态池（二期：关注列表 / 沉思循环 / 响应线索）
     │
-    ├── memory/（7 模块）
+    ├── memory/（9 模块）
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
     │   ├── long_term.py ────── LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
     │   ├── embeddings.py ───── EmbeddingEngine（llama-server API, 1024 维）+ EmbeddingCache（LRU）
     │   ├── lifecycle.py ────── MemoryLifecycleManager：Observation→Fact 生命周期（observe/promote/verify/contradict/decay/gc）(ML-001)
-    │   ├── fact_checker.py ──── FactChecker：矛盾检测 + 置信度衰减 + 用户纠正 (#6)
+    │   ├── fact_checker.py ──── FactChecker：矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正 + 向上传播 (#6)
     │   ├── retrieval.py ────── 三层检索 + 混合评分（语义 0.6 + 关键词 0.4）+ LLM 重排序
-    │   └── consolidation.py ── 记忆合并（短→长转移 + 修剪 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2）
+    │   ├── retrieval_pipeline.py ── 多阶段检索管线（QueryClues/ContextBuilder/Agent Profile 渲染）
+    │   ├── memory_agent.py ──── Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池（确定性管道）
+    │   └── consolidation.py ── 记忆合并（统一固化 + 修剪 + FactChecker 集成 + 自动嵌入编码 + Observation/FactV2 双写）
     │
     ├── tools/
     │   ├── traits.py ──────── Tool 基类（含 to_json_schema()）+ ToolRegistry
@@ -65,7 +70,7 @@ main.py / web_main.py
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（410 用例，30 个测试文件）
+    ├── tests/ ───────────────── 单元测试（838+2 用例，60+ 个测试文件）
     │
     ├── storage/
     │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ 9 表 Schema + WAL 模式
@@ -210,6 +215,16 @@ def process_message(self, user_input, on_token=None):  # → MessageHandler.hand
                             tool_records=exec_result.records_text, final_response=True)
 ```
 
+### 2.3b Provider 重试与熔断
+
+Provider 层网络重试使用指数退避：2s / 4s / 8s，连续 3 次失败触发熔断（5 分钟内不再发起该模型调用）。截断语义分 4 种模式：
+- `"error"`：截断时抛异常
+- `"warning"`：截断时记 warning 并在响应中标记 truncated
+- `"silent"`：静默截断（默认）
+- `"retry"`：截断时自动重试（最多 1 次）
+
+per-call temperature：Agent 1 决策温度 0.3（CognitiveState 实施），Agent 2 固定 0.3，Agent 3 用 config.temperature（默认 0.8）。
+
 ### 2.4 动态 max_tokens
 
 ```python
@@ -332,6 +347,14 @@ sadness  anticipation  anger  disgust
 ### 3.5 情绪事件记忆
 
 强情绪触发时自动记录（trigger/emotion/intensity），最近 3 条注入 prompt。AI 现在"记得为什么生气"。
+
+### 3.5b 情绪衰减增强：时间衰减与软边界
+
+A6（2026-07-21）：情绪衰减新增时间维度——`decay_elapsed` 按真实经过时间（而非仅对话轮次）衰减。新增运行时字段：
+- `turns_without_anger`：连续无 anger 的轮数，anger 降低后可加速 trust 恢复
+- `last_decay_at`：上次衰减时间戳
+- `turn_seconds`：每轮估算时长（默认 300s，按实际间隔动态调整）
+- `_valence_boundary_count`：连续越界计数，达到阈值后记 warning（软边界机制，防止情绪失控）
 
 ### 3.6 情绪标签映射
 
@@ -644,6 +667,24 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 4. JSON 解析，参数别名归一化（search → query, text → content）
 5. 回退：尝试将整个响应作为单个 JSON 对象解析
 
+### 5.3b ToolResult v2 错误分类
+
+```python
+@dataclass
+class ToolResult:
+    success: bool
+    output: str
+    error_type: str = ""         # "timeout" / "validation" / "api" / "internal"
+    retryable: bool = True       # validation=False, timeout=True
+    elapsed_ms: float = 0.0
+```
+
+按错误类型的智能重试：validation 错误不重试（参数问题重试无意义），timeout/api 错误指数退避重试（1s/2s/4s）。
+
+### 5.3c per-tool 超时
+
+每个工具可声明 `timeout_seconds` 类属性（默认 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时标记 `error_type="timeout"`。
+
 ### 5.4 内置工具（CLI 10 个 / Web 9 个，三层分工）
 
 三层架构从根本上解决模型虚构工具调用内容的问题：
@@ -668,7 +709,15 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 
 #### 工具别名归一化
 
-KI-1（2026-07-21）：别名归一已下沉到各工具——每个工具在自己的 `ALIASES` 类属性中声明别名（如 `GrepTool.ALIASES = {"pattern": ("query", "search", ...)}`），dispatcher 在 `_execute_single` 中、参数校验前调用 `tool.normalize_args()`。dispatcher 不再有全局 `_normalize_args`，避免跨工具参数名冲突。
+KI-1（2026-07-21，根治）：全局 `_normalize_args` 已删除。每个工具在自己的 `ALIASES` 类属性中声明别名（如 `GrepTool.ALIASES = {"pattern": ("query", "search", ...)}`），dispatcher 在 `_execute_single` 中、参数校验前调用 `tool.normalize_args()`。冲突通道已永久关闭。
+
+#### 参数校验
+
+每个工具可实现 `_validate_args(args)` 方法，dispatcher 在执行前调用，校验失败返回 `ToolResult.fail(error_type="validation")`，不触发重试。
+
+#### 并行执行
+
+Agent 2 的多个工具请求可并行调度（`concurrent.futures.ThreadPoolExecutor`），减少多工具场景总耗时。
 
 #### 工具调用记录
 
@@ -1136,16 +1185,16 @@ verification_count: int
 ### 9.1 SQLite Schema
 
 ```sql
--- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=5）
+-- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=6）
 facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，Layer 1）
 experiences         共享体验（tags 存 JSON）
-insights_v2         假设性洞察（evidence_fact_ids 存 JSON，二期替代 reflections）
+insights_v2         假设性洞察（evidence_fact_ids 存 JSON，替代 reflections）
 relationship_metrics 关系指标（key-value，PK (session_id, dimension)）
 conversation_turns  完整对话历史
 relationship_snapshots 关系指标历史快照
 session_roles       session_id → role_id 映射
 observations        原始观察（Layer 1 记忆生命周期，ML-001）
-user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写，数据保留）
+-- 归档表（user_facts_archive / reflections_archive）已于 schema v6（2026-07-21）物理删除
 ```
 
 ### 9.2 WAL 模式
@@ -1214,6 +1263,7 @@ class Database:
   "consolidation_interval": 5,
   "proactive_min_idle": 180.0,
   "proactive_max_interval": 600.0,
+  "proactive_think_loop": true,
   "typing_speed": 0.005,
   "max_facts": 200,
   "max_experiences": 100,

@@ -121,6 +121,15 @@ class WeatherTool(Tool):
 
 不要依赖任何全局映射——每个工具只声明自己认得的名字，避免跨工具冲突（历史上全局别名曾把 notify 的 `title` 当成 music 的 `song` 吃掉）。
 
+### per-tool 超时
+
+每个工具可声明 `timeout_seconds` 类属性（默认 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时标记 `error_type="timeout"`：
+
+```python
+class WeatherTool(Tool):
+    timeout_seconds = 15  # 该工具最多执行 15 秒
+```
+
 ---
 
 ## ToolResult 规范
@@ -140,6 +149,7 @@ raise ValueError("unexpected")  # 自动包装为 ToolResult.fail
 
 - 返回 `ToolResult.fail` → ToolAttemptTracker 触发重试（最多 3 次/轮 × 3 轮）
 - 抛出异常 → dispatcher 捕获，转为 `ToolResult.fail`
+- ToolResult v2 新增错误分类：`error_type`（"timeout"/"validation"/"api"/"internal"）和 `retryable` 标记。validation 错误不重试（参数问题重试无意义），timeout/api 错误指数退避重试（1s/2s/4s）。
 - 全部重试失败 → 回报 Agent 1 重新决策
 
 ---

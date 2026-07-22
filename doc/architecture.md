@@ -96,23 +96,29 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     ├── core/proactivity.py      (主动行为引擎)
     ├── core/cli_controller.py   (CLI 输入循环)
     ├── core/message_handler.py  (消息入口 + 三层编排 + 重试循环)
-    ├── core/personality.py  (四层情绪引擎)
-    ├── core/provider.py     (LLM API 客户端)
-    ├── core/dispatcher.py   (tool_call 解析执行)
+    ├── core/personality.py      (四层情绪引擎)
+    ├── core/personality_manager.py (人格加载/保存/枚举)
+    ├── core/personality_validator.py (人格校验器)
+    ├── core/provider.py         (LLM API 客户端)
+    ├── core/dispatcher.py       (tool_call 解析执行)
+    ├── core/cognitive_state.py  (CognitiveState, 输入去重/error_fallback 跳过)
+    ├── core/inner_drive_state.py (内驱状态池/挂念清单)
     │
     ├── memory/
-    │   ├── short_term.py    (ConversationBuffer, 线程安全)
-    │   ├── long_term.py     (SQLite CRUD)
-    │   ├── embeddings.py    (EmbeddingEngine, Qwen3.5-0.8B, llama.cpp, LRU cache)
-    │   ├── retrieval.py     (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
-    │   ├── consolidation.py (记忆合并 + 分层洞察 L1/L2/L3 + 自动嵌入编码 + 双写 Observation/FactV2)
-    │   ├── fact_checker.py  (矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正)
-    │   └── lifecycle.py     (MemoryLifecycleManager: Observation→Fact→Insight 生命周期)
+    │   ├── short_term.py        (ConversationBuffer, 线程安全)
+    │   ├── long_term.py         (SQLite CRUD)
+    │   ├── embeddings.py        (EmbeddingEngine, Qwen3.5-0.8B, llama.cpp, LRU cache)
+    │   ├── retrieval.py         (三层检索 + 混合评分 语义 0.6 + 关键词 0.4)
+    │   ├── retrieval_pipeline.py (多阶段检索管线 + Agent Profile 渲染)
+    │   ├── consolidation.py     (记忆合并 + 统一固化 + 分层洞察 L1/L2/L3 + 自动嵌入编码 + 双写 Observation/FactV2)
+    │   ├── fact_checker.py      (矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正 + 向上传播)
+    │   ├── memory_agent.py      (Memory Agent: 向量召回 + 交叉验证 + 置信度回答)
+    │   └── lifecycle.py         (MemoryLifecycleManager: Observation→Fact→Insight 生命周期)
     │
     ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
     ├── storage/             (aiosqlite 异步, WAL, 版本化迁移；session_roles 记录 session→role 映射)
     ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
-    └── models/              (EmotionalState / Turn / UserFact / Observation / FactV2 等)
+    └── models/              (EmotionalState / Turn / UserFact / Observation / FactV2 / InsightV2 等)
 
 后处理（不变）:
     Emotion → Memory consolidation → Insight（2026-07-20 起，原 Reflection）
@@ -128,7 +134,7 @@ models / prompts                  （纯数据 / 模板层，被各层引用）
 - `core/agent.py` 是装配枢纽，直接依赖 15 个内部模块（全项目最多）。
 - 跨层例外：`storage/repository.py`、`memory/long_term.py` 等直接使用 `core/async_utils.py` 的 `run_async()`，`memory/consolidation.py` 使用 `core/personality.py`；被引用方不回依赖，故不成环。
 - 潜在环靠函数内 lazy import 打破：`agent ↔ cli_controller`、`short_term ↔ context_manager`、`prompts.system → core.prompt_cache`；`core/inner_drive.py` 顶层零内部 import（全部延迟到方法内）。
-- 双装配（已知问题）：`main.py`（CLI）与 `web/session.py`（Web）各自独立装配一遍全栈，无共享工厂。
+- 统一装配：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）。
 
 ---
 
@@ -221,11 +227,11 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 短期记忆：ConversationBuffer（deque, 线程安全，重启从 DB 恢复最近 30 轮）
 
-长期记忆共 9 张表，已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` / `reflections` 表已分别于 schema v4/v5 迁移数据并归档，归档表于 schema v6（2026-07-21，A8）物理删除（迁移前自动备份在 `data/backups/`）。Layer 6 已强制 `session_id = role_id`（`assemble_session` 与 `SessionManager.get_or_create` 不一致即抛错），因此这些表也按角色隔离，实现「一个角色一份记忆」。
+长期记忆共 9 张表（schema v6 删除归档表后实为 9 张），已按 `session_id` 隔离：`facts_v2`（经验证的事实，confidence/stability/freshness/importance 四维评分）、`experiences`、`insights_v2`（假设性洞察，hypothesis + evidence + confidence + expires_at）、`conversation_turns`、`relationship_metrics`、`relationship_snapshots`、`session_roles`（`session_id → role_id` 映射），以及记忆生命周期 Layer 1 的 `observations`（原始观察）。旧 `user_facts` / `reflections` 表已分别于 schema v4/v5 迁移并归档，归档表于 schema v6（2026-07-21，A8）物理删除（迁移前自动备份在 `data/backups/`）。Layer 6 已强制 `session_id = role_id`（`assemble_session` 与 `SessionManager.get_or_create` 不一致即抛错），因此这些表也按角色隔离，实现「一个角色一份记忆」。
 
-记忆生命周期（一期 Fact 上线 2026-07-18，二期 Insight 上线 2026-07-20）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（假设 + 证据链 + confidence + expires_at）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / create_insight / verify_insight / expire_insight / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2；分层 L1/L2/L3 生成结构化 Insight（LLM 输出 JSON：hypothesis/insight_type/evidence/confidence/needs_more_evidence，解析失败静默跳过），单写 insights_v2。读路径全部走 facts_v2 / insights_v2（repository 旧方法名适配，Reflection 返回形状不变：content=hypothesis、significance=confidence）；旧 `user_facts` / `reflections` 表数据已迁移并归档（schema v4 / v5）。
+记忆生命周期（一期 Fact 上线 2026-07-18，二期 Insight 上线 2026-07-20）：对话 → Observation（原始观察，低置信度）→ 验证/用户确认 → Fact（四维评分）→ Insight（假设 + 证据链 + confidence + expires_at）。由 `memory/lifecycle.py` 的 MemoryLifecycleManager 提供 observe / promote / verify / contradict / create_insight / verify_insight / expire_insight / decay / gc；MemoryConsolidator 每批合并先写入一条 Observation（整批对话文本，无额外 LLM 调用），提取的 fact 再 promote 为 FactV2；统一固化（`consolidation_unified_call`，默认 on）将事实提取+体验总结+L1 insight 合并为 1 次 LLM 调用；分层 L1/L2/L3 生成结构化 Insight（LLM 输出 JSON：hypothesis/insight_type/evidence/confidence/needs_more_evidence，解析失败静默跳过），单写 insights_v2。读路径全部走 facts_v2 / insights_v2（repository 旧方法名适配，Reflection 返回形状不变：content=hypothesis、significance=confidence）；旧 `user_facts` / `reflections` 表数据已迁移并归档（schema v4 / v5），归档表已于 schema v6 物理删除。
 
-矛盾检测与传播（2026-07-20）：FactChecker 检出的嵌入相似候选矛盾先经 LLM 复核（`verify_fn`，复述/近义否决则保留旧事实），同键不同值的直接判定不复核；Fact 被推翻时向上传播——引用它的 active Insight 标记 `needs_more_evidence` 且 confidence ×0.5。Memory Agent 证据池纳入 active Insight（待验证项显式标注），query 与指代锚点余弦达到 `memory_agent_coreference_threshold`（默认 0.78）时先由 LLM 改写为自足形式再检索（P2）。
+矛盾检测与传播（2026-07-20）：FactChecker 检出的嵌入相似候选矛盾先经 LLM 复核（`verify_fn`，复述/近义否决则保留旧事实），同键不同值的直接判定不复核；Fact 被推翻时向上传播——引用它的 active Insight 标记 `needs_more_evidence` 且 confidence ×0.5。Memory Agent 证据池纳入 active Insight（待验证项显式标注），query 与指代锚点余弦达到 `memory_agent_coreference_threshold`（默认 0.78）时先由 LLM 改写为自足形式再检索（P2）。Memory Agent 证据池纳入 active Insight（待验证项显式标注），query 与指代锚点余弦达到 `memory_agent_coreference_threshold`（默认 0.78）时先由 LLM 改写为自足形式再检索（P2）。
 
 ---
 
@@ -325,7 +331,11 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
   "temperature": 0.8,
   "web_host": "0.0.0.0",
   "web_port": 8000,
+  "web_access_token": "",
   "allowed_origins": [],
+  "consolidation_unified_call": true,
+  "use_memory_agent": false,
+  "proactive_think_loop": true,
   "conversation_examples": [
     {
       "user": "今天去外滩拍照了，日落的时候光影特别好",
@@ -358,34 +368,40 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（19 模块，三层架构）
-│   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策 + 主动沉思循环）
-│   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
-│   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
-│   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
-│   ├── context_manager.py   上下文窗口管理（token 估算 + 压缩 + 摘要）
-│   ├── prompt_cache.py      Prompt 分层缓存（静态/慢变/动态块复用, #160）
-│   ├── session_factory.py   CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
-│   ├── conversation_engine.py 统一对话引擎 + Frontend 事件接口（统一管线 P1）
-│   ├── personality.py       情绪引擎（四层）
-│   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
-│   ├── proactivity.py       主动行为（评分 + 频率限制）
-│   ├── cli_controller.py    CLI 输入循环 + 命令层（ConversationEngine 前端）
-│   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
-│   ├── monitor.py           LLM API 调用监控（环形缓冲，开发调试用）
-│   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）
-│   ├── logging_setup.py     日志配置（logs/YYYY-MM-DD.log + stderr）
-│   ├── async_utils.py       异步→同步桥接 run_async()（线程池安全）
-│   └── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）+ 执行 + 别名归一化
-├── memory/                  记忆系统（8 模块）
-│   ├── short_term.py        ConversationBuffer（deque, 线程安全）
-│   ├── long_term.py         LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
-│   ├── embeddings.py        本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache）
-│   ├── retrieval.py         三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
-│   ├── consolidation.py     记忆合并 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2
-│   ├── fact_checker.py      矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正
-│   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 向量锚点指代解析（确定性管道，P0~P2）
-│   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
+├── core/                    核心引擎（23 模块，三层架构）
+    │   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策 + 主动沉思循环）
+    │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
+    │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
+    │   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
+    │   ├── context_manager.py   上下文窗口管理（token 估算 + 压缩 + 摘要）
+    │   ├── prompt_cache.py      Prompt 分层缓存（静态/慢变/动态块复用, #160）
+    │   ├── session_factory.py   CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
+    │   ├── conversation_engine.py 统一对话引擎 + Frontend 事件接口（统一管线 P1）
+    │   ├── runtime_driver.py    共享时间驱动（睡眠/唤醒/主动搭话/探索，统一管线 P2）
+    │   ├── personality.py       情绪引擎（四层）
+    │   ├── personality_manager.py 人格局加载/保存/枚举（统一入口）
+    │   ├── personality_validator.py 人格校验器（A4，情绪状态校验）
+    │   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
+    │   ├── proactivity.py       主动行为（评分 + 频率限制）
+    │   ├── cli_controller.py    CLI 输入循环 + 命令层（ConversationEngine 前端）
+    │   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
+    │   ├── monitor.py           LLM API 调用监控（环形缓冲，开发调试用）
+    │   ├── embedding_server.py  本地嵌入服务生命周期（CLI/Web 共享）
+    │   ├── logging_setup.py     日志配置（logs/YYYY-MM-DD.log + stderr）
+    │   ├── async_utils.py       异步→同步桥接 run_async()（线程池安全）
+    │   ├── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）+ 执行 + 别名下沉
+    │   ├── cognitive_state.py   CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）
+    │   └── inner_drive_state.py 内驱状态池（挂念清单/沉思循环/响应线索）
+    ├── memory/                  记忆系统（9 模块）
+    │   ├── short_term.py        ConversationBuffer（deque, 线程安全）
+    │   ├── long_term.py         LongTermMemory（aiosqlite 异步 CRUD + 同步兼容包装）
+    │   ├── embeddings.py        本地嵌入语义搜索（Qwen3.5-0.8B, llama.cpp, 1024维, LRU cache）
+    │   ├── retrieval.py         三层检索 + 混合评分（语义 0.6 + 关键词 0.4 + 置信度权重 0.15）
+    │   ├── retrieval_pipeline.py 多阶段检索管线（QueryClues/ContextBuilder/Agent Profile 渲染）
+    │   ├── consolidation.py     记忆合并 + FactChecker 集成 + 自动嵌入编码 + 双写 Observation/FactV2 + unified consolidation
+    │   ├── fact_checker.py      矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正 + 向上传播
+    │   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 向量锚点指代解析（确定性管道，P0~P2）
+    │   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
 ├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）
 ├── prompts/                 提示词模板

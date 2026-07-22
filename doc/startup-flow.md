@@ -78,7 +78,8 @@ auto_start_embedding(logger)
 | 模型文件不存在 | 仅记录 info，**不阻塞启动** |
 
 就绪等待在后台守护线程进行（每秒轮询，最多 90 秒），不阻塞主启动流程；
-完成后日志输出 `[embed] server ready`。CLI 与 Web 入口共用 `core/embedding_server.py`。
+完成后日志输出 `[embed] server ready`，然后看门狗从 `_watch_then_guard` 接管生命周期（每 30 秒探活，3 次失败自动 kill+重启）。
+CLI 与 Web 入口共用 `core/embedding_server.py`。
 不可用时自动降级为纯关键词搜索，不影响对话。
 
 ### Step 4a: FastAPI 模块加载（静态）
@@ -322,7 +323,7 @@ get_or_create(sid, role_id)
 
 ---
 
-## 后台协程 — `_proactive_loop`
+## 后台协程 — `RuntimeDriver`
 
 WebSocket init 后，服务端创建一个后台协程（`web/server.py`）：
 
@@ -330,10 +331,10 @@ WebSocket init 后，服务端创建一个后台协程（`web/server.py`）：
 task = asyncio.create_task(_proactive_loop(websocket, session_id))
 ```
 
-它的生命周期绑定 session（标签页关闭 → WS 断开 → 协程取消）：
+它的生命周期绑定 session（标签页关闭 → WS 断开 → 协程取消）。实际运行的是 `RuntimeDriver` 统一驱动（替代原来的 `_proactive_loop`）：
 
 ```python
-# web/server.py
+# core/runtime_driver.py
 async def _proactive_loop(websocket, session_id):
     while True:
         1. 检查睡眠/唤醒 → 发消息 + 梦境

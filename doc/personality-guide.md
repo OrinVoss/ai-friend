@@ -229,6 +229,11 @@ CLI 每次启动时输出一句开场白（仅 CLI，Web 端不使用）。留�
 - 包含 valence / arousal 情绪坐标与 baseline / mood 双层慢变量（VAD 模型的 V、A 两维）
 - 包含 8 维 Plutchik 情绪（joy / trust / fear / surprise / sadness / anticipation / anger / disgust）+ 怨恨值 resentment
 - 包含情绪事件记忆（emotion_events，上限 20 条）、情绪历史 history 与破防计数 consecutive_negative
+- 新增运行时字段（A6/R4）：
+  - `turns_without_anger`：连续无 anger 的轮数
+  - `last_decay_at`：上次衰减时间戳
+  - `turn_seconds`：每轮估算时长（默认 300s）
+  - `_valence_boundary_count`：连续越界计数（软边界机制）
 
 手动修改会导致情绪状态突变或丢失上下文。如果要重置情绪，直接删除 `emotional_state` 键或将其设为 `{}`，系统会自动用 baseline 重建。
 

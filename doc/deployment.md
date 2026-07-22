@@ -107,8 +107,7 @@ curl http://localhost:8080/v1/embeddings \
 嵌入服务不可用时（health_check 失败），系统自动降级为纯关键词检索，不影响核心功能。
 
 ### 崩溃自动重启（M-18）
-
-由本应用拉起的 llama-server 受看门狗守护：每 30 秒探活一次，连续 3 次无响应则自动 kill + 重启（连续 3 次重启失败后放弃，保持关键词检索降级，重启应用可恢复）。注意"已在外部运行的 llama-server"不归看门狗管理。
+由本应用拉起的 llama-server 受看门狗守护：每 30 秒探活一次，连续 3 次无响应则自动 kill + 重启（连续 3 次重启失败后放弃，保持关键词检索降级，重启应用可恢复）。注意"已在外部运行的 llama-server"不归看门狗管理。就绪后看门狗从 `_watch_then_guard` 接手生命周期。
 
 ---
 
@@ -183,13 +182,7 @@ ai-friend.example.com {
 | `data/ai_friend.db-wal` / `.db-shm` | WAL 模式伴随文件 | 随主库一起处理 |
 | `personalities/*.json` | 角色定义 + 情绪状态 | 定期备份 |
 
-> 系统**没有内置自动备份机制**（P0-4 待办，方案见
-> `doc/refactor/systems/database.md`），需自行用脚本或计划任务完成。
-> 数据库运行在 WAL 模式（`PRAGMA journal_mode=WAL`，每 1000 页自动
-> checkpoint），最新写入可能暂存在 `.db-wal` 中——直接复制 `.db` 文件前
-> 应先做 checkpoint（见下文「数据库维护」）或在应用退出后复制
-> （应用关闭时会执行 `wal_checkpoint(TRUNCATE)`）。角色文件加载时
-> 会自动生成 `.bak` 副本，但这不能替代整体备份。
+> 数据库 schema v6（2026-07-21）含自动迁移与备份：检测到迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/`，保留最近 5 份。
 
 ### 备份脚本
 
@@ -272,6 +265,7 @@ New-NetFirewallRule -DisplayName "AI Friend" -Direction Inbound -Protocol TCP -L
 - [ ] 限制 `allowed_read_paths` 范围
 - [ ] 数据库文件备份策略
 - [ ] 单人使用无需多 session 安全加固
+- [ ] Web token 鉴权配置（`web_access_token`）：非 loopback 绑定且未设置时启动会打印醒目告警；反代下通过 Header 传递
 
 ### 已知限制
 

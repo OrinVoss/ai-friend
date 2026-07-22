@@ -414,7 +414,7 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 ### 3.9 `GET /api/monitor` — LLM 调用监控记录
 
-返回 `core/monitor.py` 内存环形缓冲中的 LLM API 调用记录（默认最多保留 200 条，按时间倒序），开发调试用。`monitor_enabled=false` 时不再记录新调用。
+返回 `core/monitor.py` 内存环形缓冲中的 LLM API 调用记录（默认最多保留 200 条，按时间倒序），每条含 `request_id` 全链路追踪标识、`truncated` 截断标记、`finish_reason`。开发调试用。`monitor_enabled=false` 时不再记录新调用。
 
 **Query Parameters**:
 
@@ -429,10 +429,14 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 | `timestamp` | string | 调用时间（`HH:MM:SS`） |
 | `model` | string | 使用的模型 |
 | `duration_ms` | float | 调用耗时（毫秒） |
-| `max_tokens` / `temperature` | int / float | 该次调用的生成参数 |
+| `max_tokens` | int | 该次调用的最大 token 数 |
 | `messages` | array | 完整请求 messages（含 system/user/assistant） |
 | `response` | string | 完整响应文本 |
 | `source` | string | 调用来源（`react` / `session` / `assess` / `tool_agent` / `dream` 等） |
+| `request_id` | string | 请求唯一 ID，全链路追踪 |
+| `truncated` | bool | 是否因 max_tokens 截断 |
+| `finish_reason` | string | API 返回的 finish_reason（stop/length/content_filter/null） |
+| `temperature` | float | 该次调用的温度参数 |
 
 ### 3.10 `GET /api/monitor/clear` — 清空监控缓冲
 
@@ -774,6 +778,7 @@ if origin and origin != "null":
 | `api_timeout` | `180` | API 请求超时（秒） |
 | `max_tokens` | `512` | 最大回复 token 数 |
 | `temperature` | `0.8` | 回复随机性（Agent 3） |
+| `web_access_token` | `""` | Web 访问 token，为空时不启用鉴权 |
 | `conversation_examples` | 见 `config.py` | 对话风格示例数组（#28） |
 
 环境变量覆盖（参考 `config.py`）：

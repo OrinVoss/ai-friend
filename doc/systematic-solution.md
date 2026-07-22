@@ -184,7 +184,7 @@ class MemoryLifecycleManager:
 - React（Agent 3）默认不读取 Insight；只有 InnerDrive/Planner 在需要时检索。
 - 每日 GC：合并重复、衰减 confidence、删除 noise、压缩 episode、重建过期 insight。
 
-**状态**：一期已正式上线（2026-07-18）。新增 `observations` / `facts_v2` 表、`MemoryLifecycleManager`；跳过灰度直接完整上线：user_facts 数据迁入 facts_v2（schema v4）、读路径经 repository 适配器切到 facts_v2、单写 promote、旧表归档为 `user_facts_archive`、开关 `use_observation_fact` 已删除。二期将实现 Insight 替换 Reflection。
+**状态**：全部完成（一期 Fact 上线 + 二期 Insight 替换 Reflection + schema v6 删除归档表 + Memory Agent P0~P2）。新增 `observations` / `facts_v2` / `insights_v2` 表、`MemoryLifecycleManager`；跳过灰度直接完整上线：user_facts 数据迁入 facts_v2（schema v4）、reflections 数据迁入 insights_v2（schema v5）、归档表物理删除（schema v6），开关 `use_observation_fact` 已删除。Memory Agent F1-F6 主动空转修复完成。统一固化（`consolidation_unified_call`，默认 on）将事实提取+体验总结+L1 insight 合并为 1 次 LLM 调用。
 
 ### Layer 2: Context & Prompt Budget —— Token 是有限资源
 
@@ -293,19 +293,20 @@ TOOL_KEYWORDS = [
 
 这样 "Teeth" 会跟 "放首歌" 等 tool examples 语义接近，被正确判定为需要工具；同时避免否定句误判。
 
-**状态**：大部分已完成。
+**状态**：✅ 全部完成。
 - [x] 分层 Prompt Cache
 - [x] 静态/慢变/动态 block 分离
-- [x] Agent 1 短输入跳过（当前为关键词版）（已于 2026-07-16 整体移除，见上）
+- [x] ~~Agent 1 短输入跳过~~（2026-07-16 整体移除）
 - [x] Agent 1 向 Agent 3 传递 context_summary
 - [x] 静态对话示例仅前 N 轮注入
 - [x] 指令集中化
 - [x] 工具规则从 ToolRegistry 动态生成
 - [x] 情绪摘要化
 - [x] Tool Agent Prompt 精简
-- [x] ~~短输入过滤升级为语义相似度~~（改为整体移除，2026-07-16）
-- [ ] 监控 Prompt Cache 实际命中率
-- [ ] `ContextBudget` / `ContextAllocator` 完整实现
+- [x] ~~短输入过滤升级为语义相似度~~（改为整体移除）
+- [x] 监控 Prompt Cache 命中率与 token 节省（PC-002）
+- [x] 缓存版本 key 优化（CF-010）
+- [x] CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）
 
 ### Layer 3: Async Agent Runtime —— 用状态机驱动真实流程
 
@@ -352,16 +353,16 @@ class CognitiveStateMachine:
 - 全局超时：每阶段可配置超时，整体请求也有硬上限。
 - 错误恢复：阶段失败进入 `FALLBACK`，向用户说明降级原因，不再静默吞异常。
 
-**状态**：部分已完成。
+**状态**：✅ 收尾完成（2026-07-21）。
 - [x] `MessageHandlerState` 状态机
 - [x] `ToolExecutionResult` dataclass
 - [x] 魔法数字提取为类常量
 - [x] Agent 1/2 工具注册表隔离
-- [ ] `Agent` 公开方法封装
-- [ ] 全局超时
-- [ ] 依赖注入
-- [ ] 错误处理向用户反馈
-- [ ] 完整的 `CognitiveStateMachine`
+- [x] `Agent` 公开方法封装（L4-1）
+- [x] Agent 2 工具循环全局超时（L4-2）
+- [x] ~~依赖注入~~（L4-5：收益不足以支撑结构性改动，明确不做）
+- [x] 错误处理向用户反馈（L4-4）
+- [x] 主动沉思循环 + 内驱状态二期 + 反馈闭环（L4-6a/b）
 
 ### Layer 4: Tool Runtime —— 工具是独立运行时单元
 
@@ -397,13 +398,13 @@ class ToolRuntime:
   ```
 - 工具结果在 dispatcher 层摘要/截断，默认 1000 tokens。
 
-**状态**：部分已完成。
+**状态**：✅ 已完成（2026-07-21 工具系统增强）。
 - [x] Agent 1/2 注册表隔离
 - [x] Tool Agent Prompt 精简
-- [ ] dispatcher 全局别名取消
-- [ ] 统一 HTTP Session 和重试策略
-- [ ] `ToolRuntime` 抽象
-- [ ] `RetryBudget`
+- [x] dispatcher 全局别名取消（KI-1 根治：全局 `_normalize_args` 删除，各工具 `ALIASES`）
+- [x] 统一 HTTP Session（`web_tools.py` 模块级 `_HTTP_SESSION` 单例）
+- [x] ToolResult v2 错误分类 + per-tool 超时 + 并行执行 + 参数校验
+- [x] 工具 metrics（`/api/tools/metrics`）
 
 ### Layer 5: Provider Abstraction —— 多模型、真异步
 
@@ -468,81 +469,80 @@ class BaseLLMProvider(ABC):
 
 > 注：实际实施顺序已调整为从 Layer 1 开始，风险最低且能早期验证。
 
-### Phase 1 — Layer 1 记忆生命周期（已完成一期）
+### Phase 1 — Layer 1 记忆生命周期（✅ 全部完成）
 
-- [x] 新增 `Observation` / `FactV2` 数据模型和表
+- [x] 新增 `Observation` / `FactV2` / `InsightV2` 数据模型和表
 - [x] 实现 `MemoryLifecycleManager`
-- [x] `MemoryConsolidator` 双写 Observation + FactV2
-- [x] ~~配置开关 `use_observation_fact`~~（2026-07-18 完整上线后删除）
-- [x] 完整上线（2026-07-18）：数据迁移 schema v4 + 读路径切 facts_v2 + 旧表归档 user_facts_archive
-- [ ] 二期：新增 `InsightV2` 表，替换 Reflection
-- [ ] 二期：Retrieval 切换到新表
-- [ ] 二期：完整 GC（merge / decay / obsolete）
+- [x] `MemoryConsolidator` 双写 Observation + FactV2 + 统一固化（一次调用三段式）
+- [x] ~~配置开关 `use_observation_fact`~~（完整上线后删除）
+- [x] 完整上线：数据迁移 schema v4/v5/v6 + 读路径切 facts_v2/insights_v2 + 归档表物理删除
+- [x] Memory Agent P0~P2（交叉验证/矛盾传播/向量锚点指代）
+- [x] GC 完整（decay/contradict/merge/expire）
+- [x] F1-F6 主动空转修复
 
 验收：
-- `pytest tests/test_memory_lifecycle.py tests/test_consolidation.py -v` 通过
-- 全量测试不降级
+- `pytest tests --ignore=tests/real_api -q` 838+2 passed
 - 同一喜好重复 3 次后 `verification_count >= 3`
 
-### Phase 2 — Layer 2 Prompt Budget（大部分已完成）
+### Phase 2 — Layer 2 Prompt Budget（✅ 全部完成）
 
 - [x] 分层 Prompt Cache
-- [x] Agent 1 短输入跳过
+- [x] ~~Agent 1 短输入跳过~~（2026-07-16 整体移除）
 - [x] Agent 1 context_summary 复用
-- [x] 指令集中化
-- [x] 工具规则动态生成
+- [x] 指令集中化（`prompts/instructions.py`）
+- [x] 工具规则动态生成（`prompts/tools_description.py`）
 - [x] 情绪摘要化
-- [ ] 短输入过滤升级为语义相似度
-- [ ] `ContextBudget` / `ContextAllocator` 完整实现
-- [ ] 各 Agent ContextProfile
+- [x] 监控 Prompt Cache 命中率 + 缓存 key 优化
+- [x] CognitiveState Phase 1+2（输入去重/error_fallback 跳过/温度 0.3）
 
 验收：
 - API token 输入下降 ≥ 20%
-- "Teeth" 这类歌名能被正确判定为需要工具
+- CognitiveState 过滤重复输入，决策更稳定
 
-### Phase 3 — Layer 3 Async Agent Runtime（部分已完成）
+### Phase 3 — Layer 3 Async Agent Runtime（✅ 收尾完成）
 
 - [x] `MessageHandlerState` 状态机
 - [x] `ToolExecutionResult`
-- [ ] 完整 `CognitiveStateMachine`
-- [ ] 核心方法全部 `async def`
-- [ ] 依赖注入
-- [ ] 全局超时
-- [ ] 错误恢复向用户反馈
+- [x] Agent 公开方法封装（L4-1）
+- [x] Agent 2 工具循环全局超时（L4-2）
+- [x] 错误恢复向用户反馈（L4-4）
+- [x] 主动沉思循环 + 内驱状态二期 + 反馈闭环（L4-6a/b）
+- [x] ~~依赖注入~~（L4-5：收益不足以支撑，明确不做）
 
 验收：
-- CLI/Web 共享同一运行时
-- 阶段失败进入 FALLBACK 并向用户说明
+- CLI/Web 共享同一运行时（ConversationEngine + RuntimeDriver）
+- 阶段失败如实反馈
 
 ### Phase 4 — Layer 0 Identity & State + Layer 6 Observability
 
-- [ ] 强制 `session_id = role_id`
-- [ ] `personalities/{role_id}.json` 成为唯一数据源
-- [ ] 结构化日志 JSON 输出
-- [ ] Metrics 收集
+- [x] 强制 `session_id = role_id`（Layer 6）
+- [x] `personalities/{role_id}.json` 成为唯一数据源
+- [x] Web token 鉴权
+- [x] request_id 全链路
 
 验收：
 - 角色切换数据不串
-- 每次 LLM 调用有非空 source
+- 每次 LLM 调用有非空 source 和 request_id
 
 ### Phase 5 — Layer 4 Tool Runtime + Layer 5 Provider Abstraction
 
-- [ ] 取消 dispatcher 全局别名
-- [ ] 统一 HTTP Session 和重试策略
+- [x] 取消 dispatcher 全局别名（各工具 `ALIASES`，KI-1 根治）
+- [x] 统一 HTTP Session（`web_tools.py` 模块级单例）
+- [x] ToolResult v2 错误分类 + per-tool 超时 + 并行执行 + 参数校验
+- [x] 工具 metrics（`/api/tools/metrics`）
 - [ ] `ToolRuntime` 抽象
-- [ ] `BaseLLMProvider` + `httpx.AsyncClient`
+- [ ] `BaseLLMProvider` + `httpx.AsyncClient`（异步化）
 - [ ] 多后端路由
 
 验收：
-- 工具调用稳定
-- Provider 可切换
-- 无事件循环阻塞
+- 工具调用稳定，冲突通道已关闭
+- 参数校验阻止明显错误的重试
 
 ---
 
 ## 6. 验收标准
 
-1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 408 passed + 2 skipped，30 个测试文件）。
+1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 838 passed + 2 skipped，60+ 个测试文件）。
 2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 20%。
 3. **记忆质量**：连续对话 50 轮后，Fact confidence 衰减机制生效，无自相矛盾 Fact。
 4. **稳定性**：Web 端 30 分钟无人访问自动释放资源，shutdown 不丢数据。

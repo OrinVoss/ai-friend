@@ -45,13 +45,13 @@
 | `memory_agent_relevance_floor` | float | `0.35` | Memory Agent 相关性下限：可测量证据 cosine 相似度低于此值时丢弃；recall/summarize 意图豁免 |
 | `memory_agent_relevance_full` | float | `0.75` | Memory Agent 置信度满分红线：最终置信度乘以 `min(top_sim/此值, 1.0)` |
 | `memory_agent_coreference_threshold` | float | `0.78` | 指代改写触发阈值：query 与指代锚点的最大余弦达到此值才调用 LLM 改写（R2，原 0.65 太松导致空转） |
-| `proactive_think_loop` | bool | `true` | 主动沉思循环开关：开启后主动路径走「想起 → 查证 → 决定」有界循环（默认 3 轮）；关闭退回单次决策 |
-| `proactive_think_max_rounds` | int | `2` | 沉思循环轮数硬上限（F2：默认 2 轮，沉默期首轮即 silent 无需第 3 轮） |
-| `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按「先非活跃、再低 priority、最后旧活跃」淘汰（二期起非 FIFO） |
+| `proactive_think_loop` | bool | `true` | 主动沉思循环开关：开启后主动路径走「想起 → 查证 → 决定」有界循环（默认 2 轮）；关闭退回单次决策 |
+| `proactive_think_max_rounds` | int | `2` | 沉思循环轮数硬上限 |
+| `inner_drive_care_list_size` | int | `20` | 挂念清单容量，超量按「先非活跃、再低 priority、最后旧活跃」淘汰 |
 | `inner_drive_surface_top_k` | int | `8` | 内驱状态二期：独处时每轮沉思浮现的挂念条数 |
 | `inner_drive_surface_response_k` | int | `3` | 内驱状态二期：对话时按语义相关浮现的挂念条数 |
 | `inner_drive_decay_rate` | float | `0.9` | 内驱状态二期：浮现未行动的 priority 衰减率，低于 0.2 自动归档 |
-| `inner_drive_care_similarity_threshold` | float | `0.7` | 内驱状态二期：语义浮现（surface_for_query）与对照解决（resolve_matching）的相似度阈值 |
+| `inner_drive_care_similarity_threshold` | float | `0.7` | 内驱状态二期：语义浮现与对照解决的相似度阈值 |
 | `db_backup_enabled` | bool | `true` | 数据库自动备份：检测到 schema 迁移将执行时，先 `VACUUM INTO` 快照到 `data/backups/` |
 | `db_backup_keep` | int | `5` | 备份滚动保留份数，超出时按最旧优先删除 |
 
@@ -78,14 +78,14 @@
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
 | `max_tool_iterations` | int | `5` | ReAct 循环最大工具调用轮次 |
-| `degrade_threshold` | int | `3` | 连续工具失败 N 次后降级（#255） |
-| `max_fake_actions` | int | `3` | 虚假动作纠正上限（#255） |
 | `agent2_total_timeout_seconds` | int | `120` | Agent 2 工具循环全局超时（秒），超期后降级为 Agent 3 直接回复（L4-2） |
 | `monitor_enabled` | bool | `true` | LLM 调用监控开关（Web `/monitor` 页），生产环境建议关闭以避免记录 prompt |
 | `allowed_read_paths` | array | `[".", "~/Documents", "~/Downloads"]` | 文件读取工具白名单目录 |
 | `conversation_examples` | array | 5 组默认示例 | 系统提示词中的对话风格示例 |
 | `prompt_cache_ttl_seconds` | int | `60` | 慢变提示词块（关系、长期记忆）缓存 TTL（秒），`0` 表示立即过期 |
 | `conversation_examples_max_turns` | int | `3` | 系统提示中对话示例仅在会话前 N 轮注入，`0` 表示始终不注入 |
+| `degrade_threshold` | int | `3` | 连续工具失败 N 次后降级（#255） |
+| `max_fake_actions` | int | `3` | 虚假动作纠正上限（#255） |
 
 `conversation_examples` 每项格式：
 
@@ -125,6 +125,7 @@
 | `AI_FRIEND_SHORT_TERM_CAPACITY` | `short_term_capacity` | `set AI_FRIEND_SHORT_TERM_CAPACITY=500` |
 | `AI_FRIEND_PROMPT_CACHE_TTL` | `prompt_cache_ttl_seconds` | `set AI_FRIEND_PROMPT_CACHE_TTL=60` |
 | `AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS` | `conversation_examples_max_turns` | `set AI_FRIEND_CONVERSATION_EXAMPLES_MAX_TURNS=3` |
+| `AI_FRIEND_PERSONALITY_FILE` | `personality_file` | `set AI_FRIEND_PERSONALITY_FILE=personalities/default.json` |
 
 优先级：**环境变量 > config.json > 代码默认值**
 
@@ -142,6 +143,8 @@
   "web_port": 8000,
   "short_term_capacity": 500,
   "consolidation_interval": 5,
+  "consolidation_unified_call": true,
+  "proactive_think_loop": true,
   "max_facts": 200,
   "max_experiences": 100,
   "max_reflections": 50,

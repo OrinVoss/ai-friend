@@ -1,6 +1,6 @@
 # 重构进度总览
 
-> 最后更新：2026-07-20
+> 最后更新：2026-07-22
 
 ## 整体架构六层方案
 
@@ -21,10 +21,14 @@ Layer 6: Personality / Session / 记忆绑定
 |-------|------|----------|----------|--------|
 | Layer 1 | Memory 生命周期（Observation → Fact → Insight） | ✅ 全部完成（一期 Fact + 二期 Insight + Memory Agent P0~P2，2026-07-20） | 完整（含 HMS 启发、Memory Agent 设计） | Kimi |
 | Layer 2 | Prompt 分层与静态化 | ✅ 全部完成（2026-07-21 收尾） | 完整 | Kimi |
-| Layer 3 | 多阶段 Retrieval | 主体完成（2026-07-21） | 设计 + 实现记录 | Kimi |
-| Layer 4 | Agent Runtime 解耦 | 收尾完成（L4-1~L4-4 + L4-6a/b，2026-07-21） | 完整 | Kimi |
+| Layer 3 | 多阶段 Retrieval | ✅ 主体完成（2026-07-21） | 完整 | Kimi |
+| Layer 4 | Agent Runtime 解耦 | ✅ 收尾完成（L4-1~L4-4 + L4-6a/b，2026-07-21） | 完整 | Kimi |
 | Layer 5 | Tool Agent 精简 + 工具系统增强 | ✅ 已完成（2026-07-21 工具系统增强） | 完整 | Kimi |
-| Layer 6 | Personality / Session / 记忆绑定 | 已实现 | 2026-07-21 | Kimi |
+| Layer 6 | Personality / Session / 记忆绑定 | ✅ 已实现 | 完整 | Kimi |
+| R1-R5 | 推理与 prompt 修复（CognitiveState Phase 1+2/输入去重/error_fallback 跳过/温度 0.3） | ✅ 已完成（2026-07-22） | 完整 | Kimi |
+| A1-A8 | Web token 鉴权/截断语义/request_id/gc 语义合并/情绪时间衰减/归档表 DROP | ✅ 已完成（2026-07-21~22） | 完整 | Kimi |
+| F1-F6 | 主动空转修复（silent 退避/空查询跳过/梦境标注/沉默疲劳/API 熔断） | ✅ 已完成（2026-07-20~22） | 完整 | Kimi |
+| L4-6a/b | 内驱状态反馈闭环/curiosity 条目写入 | ✅ 已完成（2026-07-21） | 完整 | Kimi |
 
 ---
 

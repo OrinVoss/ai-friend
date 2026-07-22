@@ -35,6 +35,7 @@
 === Block 6: 长期记忆 ===            # facts + experiences + reflections（慢变缓存）
 === Block 6a: 梦境 ===               # 最近的梦 / 刚睡醒提示（需要时）
 === Block 6b: 对话压缩摘要 ===       # compressed_summary（需要时）
+=== Block 6c: CognitiveState ===         # 输入去重标记 / error_fallback 跳过（需要时）
 === Block 7: 内部工具列表 ===        # ToolRegistry.format_for_prompt() 仅 recall/remember
 === Block 8: 工具调用记录 ===        # 当前会话最近 5 条工具调用
 === Block 9: 最近对话 ===            # 当前短期记忆
@@ -114,7 +115,7 @@
 
 该 prompt 同样按静态/慢变/动态分层缓存（身份/指令/工具为静态，关系/记忆为慢变，见第 1 节）。
 指令文本集中在 `prompts/instructions.py`，工具触发规则由 `prompts/tools_description.py` 按注册表生成。
-所有输入（含短闲聊）都走完整的 Agent 1 推理——原短输入跳过机制已于 2026-07-16 移除（API 成本低，关键词误判不值得省这一次调用）。
+所有输入（含短闲聊）都走完整的 Agent 1 推理——原短输入跳过机制已于 2026-07-16 移除（API 成本低，关键词误判不值得省这一次调用）。Agent 1 决策使用 CognitiveState（Phase 1+2）：输入去重过滤（避免重复输入重复推理）、error_fallback 跳过重复、决策 temperature=0.3 保持稳定。
 
 ### 决策输出格式
 
@@ -281,6 +282,39 @@ TAGS: <逗号分隔>
 | `{patterns}` | 最近 5 条 L2 模式假设 |
 | `{facts}` | 最近 20 条事实 |
 | `{experiences}` | 最近 20 条体验 |
+
+### 统一固化 — CONSOLIDATION_UNIFIED_PROMPT
+
+**位置**: `prompts/templates.py`
+
+统一固化调用（facts+experience+L1 insight 合并为一次 LLM）。
+
+| 变量 | 说明 |
+|------|------|
+| `{facts}` | 事实列表 |
+| `{experiences}` | 体验列表 |
+
+### 挂念线索提取 — CARE_CLUE_PROMPT
+
+**位置**: `prompts/templates.py`
+
+从对话中提取挂念条目。
+
+| 变量 | 说明 |
+|------|------|
+| `{conversation}` | 对话文本 |
+| `{current_care_list}` | 当前挂念清单 |
+
+### 矛盾复核 — CONTRADICTION_VERIFY_PROMPT
+
+**位置**: `prompts/templates.py`
+
+LLM 判断两个 fact 是否真正矛盾。
+
+| 变量 | 说明 |
+|------|------|
+| `{existing_fact}` | 已有事实 |
+| `{new_value}` | 新值 |
 
 ### 情感分析 — EMOTION_ANALYSIS_PROMPT
 

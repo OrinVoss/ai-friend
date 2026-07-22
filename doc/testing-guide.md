@@ -13,7 +13,7 @@
 python -m pytest tests --ignore=tests/real_api -q
 ```
 
-当前共 30 个测试文件、410 个用例（408 passed + 2 skipped）。
+当前共 60+ 个测试文件、838 个用例（838 passed + 2 skipped）。
 
 ### 按文件运行
 
@@ -85,6 +85,13 @@ tests/
 ├── test_provider_abc.py     # LLMProvider ABC 测试（#23）
 ├── test_rate_limit.py       # 速率限制测试（#24）
 ├── test_conversation_examples.py  # 对话示例可配置测试（#28）
+│
+├── test_cognitive_state.py  # CognitiveState 测试
+├── test_consolidation_unified.py  # 统一固化调用测试
+├── test_proactivity.py      # 主动行为沉思循环测试
+├── test_database_concurrency.py  # 数据库并发测试
+├── test_inner_drive_state.py  # 内驱状态池测试
+├── test_retrieval_pipeline.py  # 多阶段检索管线测试
 │
 ├── test_v02_issues.py       # v0.2 issue 回归测试
 │
