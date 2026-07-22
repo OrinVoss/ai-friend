@@ -12,7 +12,7 @@ import typing
 from dataclasses import dataclass, field
 
 from core.cognitive_state import CognitiveState
-from core.memory_context_provider import MemoryContextProvider
+from core.cognitive_state import MemoryContextProvider
 from prompts.tools_description import INTENT_TO_TOOL
 
 logger = logging.getLogger(__name__)

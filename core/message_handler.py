@@ -208,14 +208,14 @@ class MessageHandler:
 
     def _match_active_care(self, topic: str, reasoning: str) -> dict | None:
         # God Object 拆分（2026-07-22）：实现已迁至 core/proactive_outcome.py
-        from core.proactive_outcome import match_active_care
+        from core.proactivity import match_active_care
         return match_active_care(self.a, topic, reasoning)
 
     def _evaluate_proactive_outcome(self, user_input: str) -> None:
         # God Object 拆分（2026-07-22）：实现已迁至 core/proactive_outcome.py
         if self._last_proactive_care is None:
             return
-        from core.proactive_outcome import evaluate_proactive_outcome
+        from core.proactivity import evaluate_proactive_outcome
         evaluate_proactive_outcome(self.a, self._last_proactive_care, user_input)
         self._last_proactive_care = None
 
