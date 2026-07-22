@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from core.cognitive_state import CognitiveState
 from core.memory_context_provider import MemoryContextProvider
+from prompts.tools_description import INTENT_TO_TOOL
 
 logger = logging.getLogger(__name__)
 
@@ -774,7 +775,6 @@ class InnerDriveAgent:
 
         # intent→tool 映射单一出处在 prompts/tools_description.py（由
         # _TOOL_INTENT_ALIASES 反向派生），不再在此硬编码
-        from prompts.tools_description import INTENT_TO_TOOL
         suggested_tool = INTENT_TO_TOOL.get(intent, "")
 
         user_msg = (
