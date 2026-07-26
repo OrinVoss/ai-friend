@@ -348,10 +348,13 @@ def execute_tool_calls(
     return results
 
 
-def format_tool_results(results: list[dict], output_cap: int | None = None) -> str:
+def format_tool_results(results: list[dict], output_cap: int | None = None,
+                        append_iron_rule: bool = True) -> str:
     """Format tool execution results into prompt-friendly text.
 
     output_cap: overrides the module default _OUTPUT_CAP (Layer5-D1).
+    append_iron_rule: when False, omit the final iron-rule paragraph so callers
+        can concatenate multiple formatted groups and append the rule once.
     """
     cap = output_cap if output_cap is not None else _OUTPUT_CAP
     parts = []
@@ -377,11 +380,12 @@ def format_tool_results(results: list[dict], output_cap: int | None = None) -> s
             f"{error_hint}{output}\n"
             f"</tool_result>"
         )
-    parts.append(
-        "=== 铁律 ===\n"
-        "以上是工具返回的真实内容。你必须逐字如实汇报，不得编造、不得润色、不得添加原文没有的信息。\n"
-        "工具说没找到就说没找到，工具返回什么就说什么。你添加的每一个字都必须是工具确实返回了的。"
-    )
+    if append_iron_rule:
+        parts.append(
+            "=== 铁律 ===\n"
+            "以上是工具返回的真实内容。你必须逐字如实汇报，不得编造、不得润色、不得添加原文没有的信息。\n"
+            "工具说没找到就说没找到，工具返回什么就说什么。你添加的每一个字都必须是工具确实返回了的。"
+        )
     return "\n".join(parts)
 
 

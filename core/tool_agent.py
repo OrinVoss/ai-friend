@@ -14,6 +14,14 @@ from tools.traits import ToolRegistry, ERROR_TYPE_PARAM_ERROR
 logger = logging.getLogger(__name__)
 
 
+def _truncate_request(text: str, max_len: int = 80) -> str:
+    """Truncate a natural-language request for prompt attribution headers."""
+    text = (text or "").strip().replace("\n", " ")
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 1] + "…"
+
+
 @dataclass
 class ToolCallRecord:
     """A single tool execution record passed to Phase 2."""
@@ -24,6 +32,7 @@ class ToolCallRecord:
     elapsed_ms: float = 0.0
     error_type: str = ""
     retryable: bool = False
+    request: str = ""  # MH-002: which natural-language request produced this call
 
 
 @dataclass
@@ -95,6 +104,7 @@ class ToolAgent:
             {"role": "user", "content": f"用户输入：{user_input}"},
         ]
 
+        request_label = _truncate_request(user_input)
         for _idx in range(self._max_iterations):
             logger.debug(f"[tool_agent] iter={_idx+1}/{self._max_iterations}")
             resp = self._provider.generate(
@@ -120,6 +130,7 @@ class ToolAgent:
                     elapsed_ms=r.get("elapsed_ms", 0.0),
                     error_type=r.get("error_type", ""),
                     retryable=r.get("retryable", False),
+                    request=request_label,
                 )
                 result.records.append(record)
                 result.total_calls += 1
@@ -162,6 +173,7 @@ class ToolAgent:
             return result
 
         logger.info(f"[tool_agent] request len={len(tool_request)}")
+        request_label = _truncate_request(tool_request)
         sys_prompt = build_tool_agent_prompt(self._registry)
         json_schema = self._registry.to_json_schema()
         messages = [
@@ -213,6 +225,7 @@ class ToolAgent:
                     elapsed_ms=r.get("elapsed_ms", 0.0),
                     error_type=r.get("error_type", ""),
                     retryable=r.get("retryable", False),
+                    request=request_label,
                 )
                 round_records.append(record)
                 result.records.append(record)
@@ -286,13 +299,17 @@ class ToolAgent:
         """Format Phase 2 results as a user message for Agent 3.
 
         #175: reuse format_tool_results from dispatcher for consistent formatting.
+        MH-002: when records came from multiple natural-language requests,
+        group them with small headers so Agent 3 can tell which result belongs
+        to which request. Single-request output stays unchanged.
         """
         if not result.has_results:
             return ""
 
         from core.dispatcher import format_tool_results
-        records = [
-            {
+
+        def _to_dict(r: ToolCallRecord) -> dict:
+            return {
                 "name": r.name,
                 "success": r.success,
                 "output": r.output,
@@ -300,9 +317,25 @@ class ToolAgent:
                 "retryable": r.retryable,
                 "elapsed_ms": r.elapsed_ms,
             }
-            for r in result.records
-        ]
-        return format_tool_results(records, output_cap=self._output_cap)
+
+        requests = list(dict.fromkeys(r.request for r in result.records if r.request))
+        if len(requests) <= 1:
+            records = [_to_dict(r) for r in result.records]
+            return format_tool_results(records, output_cap=self._output_cap)
+
+        # Multi-request: group by request, one iron rule at the end.
+        parts = []
+        for req in requests:
+            group = [_to_dict(r) for r in result.records if r.request == req]
+            group_text = format_tool_results(group, output_cap=self._output_cap,
+                                             append_iron_rule=False)
+            parts.append(f"【请求：{req}】\n{group_text}")
+        parts.append(
+            "=== 铁律 ===\n"
+            "以上是工具返回的真实内容。你必须逐字如实汇报，不得编造、不得润色、不得添加原文没有的信息。\n"
+            "工具说没找到就说没找到，工具返回什么就说什么。你添加的每一个字都必须是工具确实返回了的。"
+        )
+        return "\n\n".join(parts)
 
 
 def _summarize_failure(results: list[dict]) -> dict | None:

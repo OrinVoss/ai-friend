@@ -120,6 +120,36 @@ class TestToolAgent(unittest.TestCase):
         formatted = self.agent.format_for_phase2(result)
         self.assertIn("失败", formatted)
 
+    def test_format_for_phase2_single_request_unchanged(self):
+        """MH-002: single request output keeps the old flat format."""
+        result = ToolAgentResult(total_calls=2, success_count=2)
+        result.records = [
+            ToolCallRecord(name="web_search", arguments={}, success=True,
+                           output="ok", request="搜索新闻"),
+            ToolCallRecord(name="web_fetch", arguments={}, success=True,
+                           output="page", request="搜索新闻"),
+        ]
+        formatted = self.agent.format_for_phase2(result)
+        self.assertNotIn("【请求", formatted)
+        self.assertIn("=== 铁律 ===", formatted)
+
+    def test_format_for_phase2_multi_request_groups(self):
+        """MH-002: multiple requests are grouped with headers."""
+        result = ToolAgentResult(total_calls=2, success_count=1)
+        result.records = [
+            ToolCallRecord(name="web_search", arguments={}, success=True,
+                           output="news results", request="搜索最近的 AI 新闻"),
+            ToolCallRecord(name="web_fetch", arguments={}, success=False,
+                           output="timeout", request="读取 https://example.com"),
+        ]
+        formatted = self.agent.format_for_phase2(result)
+        self.assertIn("【请求：搜索最近的 AI 新闻】", formatted)
+        self.assertIn("【请求：读取 https://example.com】", formatted)
+        self.assertIn("news results", formatted)
+        self.assertIn("timeout", formatted)
+        # Iron rule appears exactly once at the end
+        self.assertEqual(formatted.count("=== 铁律 ==="), 1)
+
     def test_non_retryable_error_gives_up_early(self):
         """A param_error from a tool should not waste retry budget."""
         self.provider.generate.return_value = (
