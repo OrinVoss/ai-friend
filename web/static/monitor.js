@@ -1,3 +1,14 @@
+// 与主界面共用主题：读取 localStorage 中手动选择的浅色/深色（未选择时由
+// theme.css 的 prefers-color-scheme 媒体查询自动跟随系统）。
+(function() {
+  try {
+    var t = localStorage.getItem('ai_friend_theme');
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch (e) {}
+})();
+
 let autoRefresh = false;
 let refreshTimer = null;
 let currentData = [];

@@ -1,0 +1,178 @@
+/* ============================================================
+ * theme.css — 共享设计令牌（浅色/深色双主题）
+ *
+ * 主题机制：
+ *   - 默认 :root 为浅色；
+ *   - <html data-theme="dark"> 强制深色，data-theme="light" 强制浅色；
+ *   - 未手动指定时通过 prefers-color-scheme 跟随系统。
+ * 所有组件颜色必须引用这里的变量，禁止硬编码色值。
+ * ============================================================ */
+
+:root {
+    /* Background layers */
+    --bg-body: #ffffff;
+    --bg-panel: #f5f6f8;
+    --bg-elevated: #ffffff;
+    --bg-bubble-ai: #f0f1f5;
+    --bg-code: #f0f1f5;
+    --bg-input: #ffffff;
+    --bg-header: rgba(245, 246, 248, 0.82);
+    --bg-overlay: rgba(0, 0, 0, 0.35);
+    --bg-hover: #e9eaee;
+
+    /* Text */
+    --text-primary: #16181d;
+    --text-secondary: #5f6470;
+    --text-muted: #9aa0ab;
+    --text-user: #ffffff;
+
+    /* Accent */
+    --accent-start: #3b82f6;
+    --accent-end: #6366f1;
+    --accent-link: #2563eb;
+    --accent-soft: rgba(59, 130, 246, 0.08);
+    --accent-glow: rgba(59, 130, 246, 0.14);
+
+    /* Status colors */
+    --color-online: #22c55e;
+    --color-disconnected: #ef4444;
+    --color-warning: #f59e0b;
+    --color-user-bubble: #3b82f6;
+
+    /* Borders */
+    --border-color: #e5e6ea;
+    --border-input: #d5d7dd;
+    --divider-color: #e5e6ea;
+    --white: #ffffff;
+
+    /* Shape & depth */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08);
+    --shadow-lg: 0 10px 40px rgba(16, 24, 40, 0.14);
+    --transition-fast: 0.15s ease;
+    --transition-med: 0.25s ease;
+
+    /* Layout */
+    --header-height: 64px;
+    --mobile-tabs-height: 56px;
+    --panel-width: 280px;
+
+    /* Monitor page */
+    --monitor-accent: #0969da;
+    --monitor-system-bg: #ddf4ff;
+    --monitor-system-text: #0969da;
+    --monitor-user-bg: #dafbe1;
+    --monitor-user-text: #1a7f37;
+    --monitor-assistant-bg: #fbefff;
+    --monitor-assistant-text: #7d1ebf;
+    --monitor-fast: #1a7f37;
+    --monitor-medium: #9a6700;
+    --monitor-slow: #cf222e;
+
+    color-scheme: light;
+}
+
+/* 深色变量（手动指定） */
+[data-theme="dark"] {
+    --bg-body: #0f1115;
+    --bg-panel: #16181d;
+    --bg-elevated: #1c1f26;
+    --bg-bubble-ai: #23262e;
+    --bg-code: #262a33;
+    --bg-input: #1c1f26;
+    --bg-header: rgba(22, 24, 29, 0.82);
+    --bg-overlay: rgba(0, 0, 0, 0.55);
+    --bg-hover: #262a33;
+
+    --text-primary: #e8eaee;
+    --text-secondary: #a3a9b5;
+    --text-muted: #6b7280;
+    --text-user: #ffffff;
+
+    --accent-start: #3b82f6;
+    --accent-end: #6366f1;
+    --accent-link: #60a5fa;
+    --accent-soft: rgba(96, 165, 250, 0.12);
+    --accent-glow: rgba(96, 165, 250, 0.2);
+
+    --color-online: #34d399;
+    --color-disconnected: #f87171;
+    --color-warning: #fbbf24;
+    --color-user-bubble: #3b82f6;
+
+    --border-color: #2a2e37;
+    --border-input: #333845;
+    --divider-color: #2a2e37;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+
+    --monitor-accent: #58a6ff;
+    --monitor-system-bg: rgba(88, 166, 255, 0.15);
+    --monitor-system-text: #58a6ff;
+    --monitor-user-bg: rgba(46, 160, 67, 0.18);
+    --monitor-user-text: #3fb950;
+    --monitor-assistant-bg: rgba(163, 113, 247, 0.15);
+    --monitor-assistant-text: #a371f7;
+    --monitor-fast: #3fb950;
+    --monitor-medium: #d29922;
+    --monitor-slow: #f85149;
+
+    color-scheme: dark;
+}
+
+/* 未手动指定主题时跟随系统深色 */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg-body: #0f1115;
+        --bg-panel: #16181d;
+        --bg-elevated: #1c1f26;
+        --bg-bubble-ai: #23262e;
+        --bg-code: #262a33;
+        --bg-input: #1c1f26;
+        --bg-header: rgba(22, 24, 29, 0.82);
+        --bg-overlay: rgba(0, 0, 0, 0.55);
+        --bg-hover: #262a33;
+
+        --text-primary: #e8eaee;
+        --text-secondary: #a3a9b5;
+        --text-muted: #6b7280;
+        --text-user: #ffffff;
+
+        --accent-start: #3b82f6;
+        --accent-end: #6366f1;
+        --accent-link: #60a5fa;
+        --accent-soft: rgba(96, 165, 250, 0.12);
+        --accent-glow: rgba(96, 165, 250, 0.2);
+
+        --color-online: #34d399;
+        --color-disconnected: #f87171;
+        --color-warning: #fbbf24;
+        --color-user-bubble: #3b82f6;
+
+        --border-color: #2a2e37;
+        --border-input: #333845;
+        --divider-color: #2a2e37;
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.35);
+        --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+
+        --monitor-accent: #58a6ff;
+        --monitor-system-bg: rgba(88, 166, 255, 0.15);
+        --monitor-system-text: #58a6ff;
+        --monitor-user-bg: rgba(46, 160, 67, 0.18);
+        --monitor-user-text: #3fb950;
+        --monitor-assistant-bg: rgba(163, 113, 247, 0.15);
+        --monitor-assistant-text: #a371f7;
+        --monitor-fast: #3fb950;
+        --monitor-medium: #d29922;
+        --monitor-slow: #f85149;
+
+        color-scheme: dark;
+    }
+}

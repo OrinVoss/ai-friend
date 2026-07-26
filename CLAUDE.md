@@ -34,7 +34,8 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
   web/session.py            SessionManager（24h TTL + 引用计数）+ WebAgent（封装 Agent 私有接口）
   web/schemas.py            Pydantic 请求/响应模型（ChatRequest / ChatResponse / ...）
   web/rate_limit.py         内存滑动窗口限流中间件
-  web/static/style.css      CSS 变量统一暗色主题颜色
+  web/static/theme.css     共享设计令牌（浅色/深色双主题 CSS 变量）
+  web/static/style.css     主界面样式（颜色一律引用 theme.css 变量）
 ```
 
 ## 关键命令
@@ -69,5 +70,5 @@ Web (web_main.py) ──▶ SessionManager ──▶ Agent.process_message()
 - Provider 必须继承 `LLMProvider(ABC)`，通过抽象接口注入 Agent
 - Web 层通过 `WebAgent` 公共接口与 Agent 交互，禁止直接访问 `agent._xxx`
 - REST API 入参/返回使用 `web/schemas.py` 中的 Pydantic 模型，自动获得 422 校验
-- CSS 颜色统一使用 `web/static/style.css` 中的 CSS 变量，禁止硬编码色值
+- CSS 颜色统一使用 `web/static/theme.css` 中的 CSS 变量，禁止硬编码色值
 - CORS 来源通过 `config.allowed_origins` 扩展；速率限制/CSP 安全头由 `web/server.py` 统一添加

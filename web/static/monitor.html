@@ -4,48 +4,49 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LLM 调用监控</title>
+<link rel="stylesheet" href="/static/theme.css?v=15">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', monospace; background: #f6f8fa; color: #1f2328; padding: 16px; padding-bottom: 40px; font-size: 13px; }
-  h1 { font-size: 16px; margin-bottom: 12px; color: #0969da; display: flex; align-items: center; gap: 12px; }
-  h1 small { font-size: 12px; color: #656d76; font-weight: normal; }
+  body { font-family: -apple-system, 'Segoe UI', monospace; background: var(--bg-panel); color: var(--text-primary); padding: 16px; padding-bottom: 40px; font-size: 13px; }
+  h1 { font-size: 16px; margin-bottom: 12px; color: var(--monitor-accent); display: flex; align-items: center; gap: 12px; }
+  h1 small { font-size: 12px; color: var(--text-secondary); font-weight: normal; }
   .controls { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-  .controls button { background: #ffffff; border: 1px solid #d1d9e0; color: #24292f; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  .controls button:hover { background: #f3f4f6; border-color: #b7bec5; }
-  .controls .count { color: #656d76; font-size: 12px; }
-  .card { border: 1px solid #d1d9e0; border-radius: 6px; margin-bottom: 6px; overflow: hidden; background: #ffffff; box-shadow: 0 1px 2px rgba(31,35,40,0.04); }
-  .card-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; user-select: none; background: #ffffff; }
-  .card-header:hover { background: #f6f8fa; }
-  .card-header .arrow { color: #656d76; transition: transform 0.15s; font-size: 10px; }
+  .controls button { background: var(--bg-elevated); border: 1px solid var(--border-input); color: var(--text-primary); padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .controls button:hover { background: var(--bg-hover); border-color: var(--text-muted); }
+  .controls .count { color: var(--text-secondary); font-size: 12px; }
+  .card { border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 6px; overflow: hidden; background: var(--bg-elevated); box-shadow: var(--shadow-sm); }
+  .card-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; user-select: none; background: var(--bg-elevated); }
+  .card-header:hover { background: var(--bg-hover); }
+  .card-header .arrow { color: var(--text-secondary); transition: transform 0.15s; font-size: 10px; }
   .card-header .arrow.open { transform: rotate(90deg); }
-  .card-header .time { color: #656d76; font-size: 11px; min-width: 60px; }
-  .card-header .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #ddf4ff; color: #0969da; }
-  .card-header .model { font-size: 10px; color: #656d76; }
+  .card-header .time { color: var(--text-secondary); font-size: 11px; min-width: 60px; }
+  .card-header .source { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: var(--monitor-system-bg); color: var(--monitor-system-text); }
+  .card-header .model { font-size: 10px; color: var(--text-secondary); }
   .card-header .duration { font-size: 11px; margin-left: auto; }
-  .card-header .meta-info { font-size: 10px; color: #656d76; text-align: right; }
-  .card-body { display: none; padding: 8px 10px; border-top: 1px solid #e6eaef; background: #ffffff; }
+  .card-header .meta-info { font-size: 10px; color: var(--text-secondary); text-align: right; }
+  .card-body { display: none; padding: 8px 10px; border-top: 1px solid var(--border-color); background: var(--bg-elevated); }
   .card-body.open { display: block; }
-  .card-body .msg { margin-bottom: 8px; border: 1px solid #e6eaef; border-radius: 4px; overflow: hidden; }
+  .card-body .msg { margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden; }
   .card-body .msg-header { padding: 3px 8px; font-size: 11px; font-weight: 600; }
-  .card-body .msg-header.system { background: #ddf4ff; color: #0969da; }
-  .card-body .msg-header.user { background: #dafbe1; color: #1a7f37; }
-  .card-body .msg-header.assistant { background: #fbefff; color: #7d1ebf; }
-  .card-body .msg-content { background: #f6f8fa; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: #1f2328; }
-  .card-body .resp { background: #f6f8fa; border: 1px solid #e6eaef; border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: #1f2328; }
+  .card-body .msg-header.system { background: var(--monitor-system-bg); color: var(--monitor-system-text); }
+  .card-body .msg-header.user { background: var(--monitor-user-bg); color: var(--monitor-user-text); }
+  .card-body .msg-header.assistant { background: var(--monitor-assistant-bg); color: var(--monitor-assistant-text); }
+  .card-body .msg-content { background: var(--bg-panel); padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: var(--text-primary); }
+  .card-body .resp { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: none; color: var(--text-primary); }
   .card-body .meta { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 11px; margin-bottom: 6px; }
-  .card-body .meta dt { color: #656d76; }
-  .card-body .meta dd { color: #1f2328; }
-  .fast { color: #1a7f37; }
-  .medium { color: #9a6700; }
-  .slow { color: #cf222e; }
-  .no-records { text-align: center; padding: 40px; color: #8c959f; font-size: 14px; }
-  .status-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #ffffff; border-top: 1px solid #d1d9e0; padding: 4px 16px; font-size: 11px; color: #656d76; display: flex; gap: 16px; }
+  .card-body .meta dt { color: var(--text-secondary); }
+  .card-body .meta dd { color: var(--text-primary); }
+  .fast { color: var(--monitor-fast); }
+  .medium { color: var(--monitor-medium); }
+  .slow { color: var(--monitor-slow); }
+  .no-records { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
+  .status-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg-elevated); border-top: 1px solid var(--border-color); padding: 4px 16px; font-size: 11px; color: var(--text-secondary); display: flex; gap: 16px; }
   .tab-bar { display: flex; gap: 0; margin-bottom: 12px; }
-  .tab-bar button { background: #ffffff; border: 1px solid #d1d9e0; border-right: none; color: #656d76; padding: 6px 16px; cursor: pointer; font-size: 12px; }
+  .tab-bar button { background: var(--bg-elevated); border: 1px solid var(--border-color); border-right: none; color: var(--text-secondary); padding: 6px 16px; cursor: pointer; font-size: 12px; }
   .tab-bar button:first-child { border-radius: 4px 0 0 4px; }
-  .tab-bar button:last-child { border-radius: 0 4px 4px 0; border-right: 1px solid #d1d9e0; }
-  .tab-bar button.active { background: #0969da; color: #fff; border-color: #0969da; }
-  .placeholder { color: #8c959f; font-style: italic; }
+  .tab-bar button:last-child { border-radius: 0 4px 4px 0; border-right: 1px solid var(--border-color); }
+  .tab-bar button.active { background: var(--monitor-accent); color: #fff; border-color: var(--monitor-accent); }
+  .placeholder { color: var(--text-muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -70,6 +71,6 @@
   <span id="auto-status"></span>
 </div>
 
-<script src="/static/monitor.js"></script>
+<script src="/static/monitor.js?v=15"></script>
 </body>
 </html>

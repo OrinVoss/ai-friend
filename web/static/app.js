@@ -6,6 +6,8 @@ let roleName = '';
 let isProcessing = false;
 let lastMessageTime = 0;
 let logsEnabled = true;
+let stickToBottom = true;
+let newMsgCount = 0;
 
 // A1: 可选 token 鉴权（web_access_token）——token 存 localStorage，
 // 401 时提示输入并重载
@@ -34,6 +36,52 @@ const maxReconnectDelay = 30000;
 let wsIntentionalClose = false;
 let reconnectTimer = null;
 
+/* ---------- 主题（浅色/深色，localStorage 持久化，缺省跟随系统） ---------- */
+var THEME_ICONS = {
+    sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>',
+    moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>'
+};
+
+function isDarkTheme() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t) return t === 'dark';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function updateThemeIcon() {
+    var btn = document.getElementById('theme-toggle-btn');
+    if (!btn) return;
+    // 深色下显示太阳（切回浅色），浅色下显示月亮
+    btn.innerHTML = isDarkTheme() ? THEME_ICONS.sun : THEME_ICONS.moon;
+}
+
+function toggleTheme() {
+    var next = isDarkTheme() ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('ai_friend_theme', next); } catch (e) {}
+    updateThemeIcon();
+}
+
+function initTheme() {
+    var saved = '';
+    try { saved = localStorage.getItem('ai_friend_theme') || ''; } catch (e) {}
+    if (saved === 'light' || saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', saved);
+    }
+    updateThemeIcon();
+    if (window.matchMedia) {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        var onChange = function() {
+            var manual = '';
+            try { manual = localStorage.getItem('ai_friend_theme') || ''; } catch (e) {}
+            if (!manual) updateThemeIcon();
+        };
+        if (mq.addEventListener) mq.addEventListener('change', onChange);
+        else if (mq.addListener) mq.addListener(onChange);
+    }
+}
+
+/* ---------- 时间 ---------- */
 function formatTime(ts) {
     var d = new Date(ts);
     var h = d.getHours();
@@ -89,6 +137,69 @@ function clearCookie(name) {
     document.cookie = name + '=; path=/; max-age=0; SameSite=Lax';
 }
 
+/* ---------- Markdown 渲染（流式与终态共用，失败回退纯文本） ---------- */
+function renderMarkdownInto(bubble, raw) {
+    if (typeof marked !== 'undefined') {
+        try {
+            bubble.innerHTML = marked.parse(raw);
+            return;
+        } catch (e) { /* fall through to plain text */ }
+    }
+    bubble.textContent = raw;
+}
+
+/* ---------- 智能滚动：贴底才跟随，上翻时显示"回到底部"按钮 ---------- */
+function isNearBottom() {
+    var c = document.getElementById('chat-messages');
+    if (!c) return true;
+    return c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+}
+
+// countAsNew: 未贴底时是否把这次内容计入"新消息"角标
+function maybeScroll(countAsNew) {
+    var c = document.getElementById('chat-messages');
+    if (!c) return;
+    if (stickToBottom) {
+        c.scrollTo({ top: c.scrollHeight, behavior: 'auto' });
+    } else if (countAsNew !== false) {
+        newMsgCount++;
+        updateScrollBottomBtn();
+    }
+}
+
+function scrollToBottom() {
+    var c = document.getElementById('chat-messages');
+    if (c) c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+    stickToBottom = true;
+    newMsgCount = 0;
+    updateScrollBottomBtn();
+}
+
+function updateScrollBottomBtn() {
+    var btn = document.getElementById('scroll-bottom-btn');
+    var cnt = document.getElementById('new-count');
+    if (!btn) return;
+    if (stickToBottom) {
+        btn.style.display = 'none';
+        return;
+    }
+    btn.style.display = 'flex';
+    if (cnt) {
+        if (newMsgCount > 0) {
+            cnt.style.display = 'inline';
+            cnt.textContent = newMsgCount > 99 ? '99+' : String(newMsgCount);
+        } else {
+            cnt.style.display = 'none';
+        }
+    }
+}
+
+/* ---------- 断线横幅 ---------- */
+function showOfflineBanner(show) {
+    var el = document.getElementById('offline-banner');
+    if (el) el.style.display = show ? 'flex' : 'none';
+}
+
 function connect() {
     if (reconnectTimer) {
         clearTimeout(reconnectTimer);
@@ -118,6 +229,7 @@ function connect() {
                 case 'init_ok':
                     sessionId = data.session_id;
                     setCookie('session_id', sessionId);
+                    showOfflineBanner(false);
                     showEmotion(data.emotion);
                     if (data.name) {
                         aiName = data.name;
@@ -126,37 +238,45 @@ function connect() {
                     loadHistory();
                     loadStatus();
                     break;
-                case 'segment':
+                case 'segment': {
                     hideTyping();
-                    var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
-                    if (lastBubble) {
-                        var raw = lastBubble.getAttribute('data-raw') || '';
-                        raw += data.content;
-                        lastBubble.setAttribute('data-raw', raw);
-                        lastBubble.textContent = raw;
-                    } else {
-                        createMessage('assistant', data.content);
-                        var nb = document.querySelector('.message.assistant:last-child .bubble');
-                        if (nb) nb.setAttribute('data-raw', data.content);
+                    // 只向"仍在流式中"（带 data-raw）的气泡追加；否则新开气泡
+                    var streaming = document.querySelectorAll('.message.assistant .bubble[data-raw]');
+                    var sb = streaming.length ? streaming[streaming.length - 1] : null;
+                    if (!sb) {
+                        var m = createMessage('assistant', '', false, Date.now());
+                        sb = m ? m.querySelector('.bubble') : null;
+                        if (sb) sb.setAttribute('data-raw', '');
                     }
-                    scrollToBottom();
+                    if (sb) {
+                        var raw = (sb.getAttribute('data-raw') || '') + data.content;
+                        sb.setAttribute('data-raw', raw);
+                        sb.classList.add('streaming');
+                        renderMarkdownInto(sb, raw);
+                    }
+                    maybeScroll();
                     break;
-                case 'done':
+                }
+                case 'done': {
                     isProcessing = false;
                     updateSendButton();
                     setStatus('connected');
                     hideTyping();
-                    if (typeof marked !== 'undefined') {
-                        var lastBubble = document.querySelector('.message.assistant:last-child .bubble');
-                        if (lastBubble) {
-                            var raw = lastBubble.getAttribute('data-raw') || lastBubble.textContent;
-                            lastBubble.innerHTML = marked.parse(raw);
-                            lastBubble.removeAttribute('data-raw');
-                        }
+                    var doneBubbles = document.querySelectorAll('.message.assistant .bubble[data-raw]');
+                    var lastBubble = doneBubbles.length
+                        ? doneBubbles[doneBubbles.length - 1]
+                        : document.querySelector('.message.assistant:last-child .bubble');
+                    if (lastBubble) {
+                        var finalRaw = lastBubble.getAttribute('data-raw') || lastBubble.textContent;
+                        renderMarkdownInto(lastBubble, finalRaw);
+                        lastBubble.removeAttribute('data-raw');
+                        lastBubble.classList.remove('streaming');
                     }
+                    maybeScroll(false);
                     if (data.emotion) showEmotion(data.emotion);
                     loadStatus();
                     break;
+                }
                 case 'error':
                     addSystemMessage(data.content || '出错了');
                     isProcessing = false;
@@ -176,6 +296,7 @@ function connect() {
         setStatus('disconnected');
         hideTyping();
         if (wsIntentionalClose) return;
+        showOfflineBanner(true);
         reconnectTimer = setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
@@ -219,9 +340,59 @@ function updateHeaderRole(name) {
     }
 }
 
+/* ---------- 空态与历史骨架屏 ---------- */
+function showEmptyState() {
+    var container = document.getElementById('chat-messages');
+    if (!container) return;
+    hideEmptyState();
+    var div = document.createElement('div');
+    div.className = 'empty-state';
+    div.id = 'empty-state';
+    var av = document.createElement('div');
+    av.className = 'avatar';
+    av.textContent = roleName || aiName;
+    var title = document.createElement('div');
+    title.className = 'empty-title';
+    title.textContent = '开始和 ' + (roleName || aiName) + ' 聊天吧';
+    var hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.textContent = '在下方输入消息，按 Enter 发送，Shift + Enter 换行。';
+    div.appendChild(av);
+    div.appendChild(title);
+    div.appendChild(hint);
+    container.appendChild(div);
+}
+
+function hideEmptyState() {
+    var el = document.getElementById('empty-state');
+    if (el) el.remove();
+}
+
+function showSkeleton() {
+    var container = document.getElementById('chat-messages');
+    if (!container || container.children.length) return;
+    var widths = [180, 240, 140, 200];
+    for (var i = 0; i < widths.length; i++) {
+        var msg = document.createElement('div');
+        msg.className = 'skeleton-msg' + (i % 2 ? ' user' : '');
+        msg.setAttribute('data-skeleton', '1');
+        var bub = document.createElement('div');
+        bub.className = 'skeleton-bubble';
+        bub.style.width = widths[i] + 'px';
+        bub.style.height = '38px';
+        msg.appendChild(bub);
+        container.appendChild(msg);
+    }
+}
+
+function clearSkeleton() {
+    document.querySelectorAll('[data-skeleton]').forEach(function(el) { el.remove(); });
+}
+
 function loadHistory() {
     var sid = getCookie('session_id');
     if (!sid) return;
+    showSkeleton();
     var controller = new AbortController();
     setTimeout(function() { controller.abort(); }, 15000);
     authFetch('/api/chat/history?session_id=' + encodeURIComponent(sid), { signal: controller.signal })
@@ -231,14 +402,24 @@ function loadHistory() {
             if (!container) return;
             container.innerHTML = '';
             var turns = data.turns || [];
+            if (!turns.length) {
+                showEmptyState();
+                return;
+            }
             for (var i = 0; i < turns.length; i++) {
                 var t = turns[i];
+                // 历史消息无时间戳数据，不显示时间，仅提供复制操作
                 createMessage(t.role === 'user' ? 'user' : 'assistant', t.content, false);
             }
-            if (turns.length) lastMessageTime = Date.now();
+            lastMessageTime = Date.now();
+            stickToBottom = true;
+            newMsgCount = 0;
             scrollToBottom();
         })
-        .catch(function(e) { console.error('[history] load failed:', e); });
+        .catch(function(e) {
+            console.error('[history] load failed:', e);
+            clearSkeleton();
+        });
 }
 
 function loadStatus() {
@@ -359,42 +540,91 @@ function showEmotion(emotion) {
     if (el) el.textContent = emotion || '';
 }
 
-function scrollToBottom() {
-    var c = document.getElementById('chat-messages');
-    if (c) c.scrollTop = c.scrollHeight;
-}
-
 function addSystemMessage(text) {
     var c = document.getElementById('chat-messages');
     if (!c) return;
+    hideEmptyState();
     var d = document.createElement('div');
     d.className = 'system-message';
     d.textContent = text;
     c.appendChild(d);
-    scrollToBottom();
+    maybeScroll();
 }
 
-function createMessage(role, content, autoScroll) {
+/* ---------- 消息操作条（时间戳 + 复制） ---------- */
+function createMsgActions(bubble, ts) {
+    var actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    if (ts) {
+        var time = document.createElement('span');
+        time.className = 'msg-time';
+        time.textContent = formatTime(ts);
+        actions.appendChild(time);
+    }
+    var btn = document.createElement('button');
+    btn.className = 'msg-action-btn';
+    btn.type = 'button';
+    btn.textContent = '复制';
+    btn.addEventListener('click', function() { copyBubbleText(bubble, btn); });
+    actions.appendChild(btn);
+    return actions;
+}
+
+function copyBubbleText(bubble, btn) {
+    var text = bubble.getAttribute('data-raw') || bubble.textContent;
+    function done() {
+        btn.classList.add('copied');
+        btn.textContent = '已复制';
+        setTimeout(function() {
+            btn.classList.remove('copied');
+            btn.textContent = '复制';
+        }, 1200);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function() { fallbackCopy(text); done(); });
+    } else {
+        fallbackCopy(text);
+        done();
+    }
+}
+
+function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+}
+
+function createMessage(role, content, autoScroll, ts) {
     autoScroll = autoScroll !== false;
     var container = document.getElementById('chat-messages');
     if (!container) return;
+    hideEmptyState();
     maybeInsertTimeMarker();
     var div = document.createElement('div');
     div.className = 'message ' + role;
     var av = document.createElement('div');
     av.className = 'avatar';
     av.textContent = role === 'user' ? '我' : aiName;
+    var col = document.createElement('div');
+    col.className = 'bubble-col';
     var bb = document.createElement('div');
     bb.className = 'bubble';
-    if (role === 'assistant' && typeof marked !== 'undefined') {
-        bb.innerHTML = marked.parse(content);
+    if (role === 'assistant' && content) {
+        renderMarkdownInto(bb, content);
     } else {
         bb.textContent = content;
     }
+    col.appendChild(bb);
+    col.appendChild(createMsgActions(bb, ts));
     div.appendChild(av);
-    div.appendChild(bb);
+    div.appendChild(col);
     container.appendChild(div);
-    if (autoScroll) scrollToBottom();
+    if (autoScroll) maybeScroll();
     return div;
 }
 
@@ -416,7 +646,7 @@ function sendMessage() {
     updateSendButton();
     setStatus('thinking');
     showTyping();
-    createMessage('user', text);
+    createMessage('user', text, true, Date.now());
 
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'message', content: text }));
@@ -433,7 +663,7 @@ function sendMessage() {
         .then(function(data) {
             hideTyping();
             var resp = data.response || '';
-            createMessage('assistant', resp);
+            createMessage('assistant', resp, true, Date.now());
             if (data.emotion) showEmotion(data.emotion);
             isProcessing = false; updateSendButton(); setStatus('connected');
             loadStatus();
@@ -534,10 +764,31 @@ function switchMobileTab(tab) {
 }
 
 function setupUI() {
+    var themeBtn = document.getElementById('theme-toggle-btn');
+    if (themeBtn) {
+        themeBtn.addEventListener('click', toggleTheme);
+    }
+
     var switchRoleBtn = document.getElementById('switch-role-btn');
     if (switchRoleBtn) {
         switchRoleBtn.addEventListener('click', function() {
             openRoleModal();
+        });
+    }
+
+    var chatEl = document.getElementById('chat-messages');
+    if (chatEl) {
+        chatEl.addEventListener('scroll', function() {
+            stickToBottom = isNearBottom();
+            if (stickToBottom) newMsgCount = 0;
+            updateScrollBottomBtn();
+        });
+    }
+
+    var scrollBtn = document.getElementById('scroll-bottom-btn');
+    if (scrollBtn) {
+        scrollBtn.addEventListener('click', function() {
+            scrollToBottom();
         });
     }
 
@@ -589,6 +840,7 @@ function setupUI() {
 }
 
 function initApp() {
+    initTheme();
     setupUI();
     connectLogs();
     if (!roleId) {
