@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from core.cognitive_state import CognitiveState
+from core.cognitive_state import render_memory_light
 from core.context_manager import estimate_tokens
 from core.prompt_cache import PromptCache
 
@@ -309,9 +310,9 @@ class MessageHandler:
                 summary="",
             )
 
-        # WS-25: Agent 3 消费评估后的 context_summary（含挂念浮现等后处理）。
-        state.memory_summary = drive_result.context_summary or state.memory_summary
-        state.memory_confidence = drive_result.memory_confidence or state.memory_confidence
+        # WS-25: Agent 3 消费 drive_result.context_summary（含挂念浮现等后处理）。
+        # CognitiveState 装配后不再修改；Agent 3 在 _run_agent3 内按需组合
+        # state.memory_summary / state.memory_answer / drive_result.context_summary。
         state.pending = {
             "needs_tools": drive_result.needs_external_tools,
             "summary": drive_result.summary,
@@ -599,25 +600,22 @@ class MessageHandler:
         a = self.a
         cfg = a.config
 
-        # WS-13: 记忆摘要优先从统一状态读取；Phase 1 其内容等同于
-        # drive_result.context_summary，仅数据源改变。
+        # WS-13: 记忆摘要优先从统一状态读取；CognitiveState 装配后不再修改。
+        # Agent 3 的轻量视图与 Agent 1 共用同一 MemoryAnswer，避免二次检索。
         memory_summary = ""
         if state is not None:
-            memory_summary = state.memory_summary
-            # 若保存了原始 MemoryAnswer，按 Agent 3 的轻量 profile 渲染。
-            if getattr(state, "memory_answer", None) is not None:
-                from memory.retrieval_pipeline import ContextBuilder
-                light = ContextBuilder().build("agent3", state.memory_answer)
-                if light:
-                    memory_summary = light
-        elif drive_result and getattr(drive_result, "context_summary", ""):
+            memory_summary = render_memory_light(
+                getattr(state, "memory_answer", None),
+                fallback=state.memory_summary,
+            )
+        if not memory_summary and drive_result and getattr(drive_result, "context_summary", ""):
             memory_summary = drive_result.context_summary
 
         # Still keep the memory context object around for downstream code.
+        # 若已有 memory_summary，build_system_prompt 的 SLOW 分支不会使用 mem_ctx，
+        # 因此无需再 retrieve_for_query；仅在无摘要时才检索兜底。
         if memory_summary:
             mem_ctx = a.current_memory_context
-            if mem_ctx is None:
-                mem_ctx = a.retriever.retrieve_for_query(user_input)
         else:
             mem_ctx = a.retriever.retrieve_for_query(user_input)
         a.current_memory_context = mem_ctx

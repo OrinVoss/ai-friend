@@ -197,6 +197,49 @@ class TestRunAgent3StateDataSource(unittest.TestCase):
         _, kwargs = mock_build.call_args
         self.assertEqual(kwargs.get("emotion_summary"), emotion_summary)
 
+    @patch("prompts.system.build_system_prompt")
+    def test_run_agent3_uses_light_render_from_memory_answer(self, mock_build):
+        """WS-27: Agent 3 优先从 state.memory_answer 渲染轻量视图。"""
+        from memory.retrieval_pipeline import MemoryEvidence
+        from memory.memory_agent import MemoryAnswer
+        mock_build.return_value = "mock prompt"
+        a = _make_agent()
+        handler = MessageHandler(a)
+        ma = MemoryAnswer(
+            answer="相关记忆", confidence=0.8,
+            evidences=[MemoryEvidence(
+                source_type="fact", source_id=1,
+                content="preference|最爱食物: 披萨",
+                confidence=0.9, timestamp="2026-07-26 10:00:00",
+            )],
+        )
+        state = CognitiveState(
+            personality_name="TestBot", emotion_summary={},
+            relationship={},
+            memory_summary="=== 关系 ===\n信任: 0.9",
+            memory_answer=ma,
+        )
+        handler._run_agent3("你好", None, tool_result=None, state=state)
+        _, kwargs = mock_build.call_args
+        summary = kwargs.get("memory_context_summary")
+        self.assertIn("最爱食物", summary)
+        # memory_summary should remain the raw snapshot, not be rewritten.
+        self.assertEqual(state.memory_summary, "=== 关系 ===\n信任: 0.9")
+
+    @patch("prompts.system.build_system_prompt")
+    def test_run_agent3_no_redundant_retrieval_when_summary_present(self, mock_build):
+        """WS-28: 已有 memory_summary 时 Agent 3 不再 retrieve_for_query。"""
+        mock_build.return_value = "mock prompt"
+        a = _make_agent()
+        handler = MessageHandler(a)
+        state = CognitiveState(
+            personality_name="TestBot", emotion_summary={},
+            relationship={},
+            memory_summary="=== 关系 ===\n信任: 0.9",
+        )
+        handler._run_agent3("你好", None, tool_result=None, state=state)
+        a.retriever.retrieve_for_query.assert_not_called()
+
 
 class TestPhase2RetrievalFront(unittest.TestCase):
     @patch("core.message_handler.MessageHandler._run_agent3")

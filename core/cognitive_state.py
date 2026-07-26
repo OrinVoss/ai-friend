@@ -11,6 +11,14 @@ _logger = logging.getLogger(__name__)
 
 @dataclass
 class CognitiveState:
+    """统一运行时状态（World State / Blackboard）。
+
+    每轮用户输入装配一次，Agent 1/2/3 与后处理消费同一份快照。
+    **装配后不再修改 memory_summary / memory_confidence / memory_answer：**
+    Agent 1 与 Agent 3 按需从同一 ``memory_answer`` 渲染不同 profile，
+    或读取 ``drive_result.context_summary`` 作为评估后摘要，避免同一字段
+    在不同阶段被改写后语义漂移。
+    """
     # WS-1: 身份（引用，不拷贝）
     personality_name: str
     # WS-2: 情绪：轮次开始的快照（dict，来自 EmotionalState.to_prompt_summary()）
@@ -95,3 +103,17 @@ class MemoryContextProvider:
         Agent 1 receives the full memory context with confidence markers."""
         from memory.retrieval_pipeline import ContextBuilder
         return ContextBuilder().build("agent1", ma)
+
+
+def render_memory_light(memory_answer, fallback: str = "") -> str:
+    """Render a MemoryAnswer with the Agent 3 light profile.
+
+    Returns ``fallback`` when ``memory_answer`` is None or the light profile
+    renders to an empty string. Used by Agent 1 and Agent 3 to share the same
+    lightweight memory view without duplicating fallback logic.
+    """
+    if memory_answer is None:
+        return fallback
+    from memory.retrieval_pipeline import ContextBuilder
+    light = ContextBuilder().build("agent3", memory_answer)
+    return light if light else fallback

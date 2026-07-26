@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from core.cognitive_state import CognitiveState
 from core.cognitive_state import MemoryContextProvider
+from core.cognitive_state import render_memory_light
 from prompts.tools_description import INTENT_TO_TOOL
 
 logger = logging.getLogger(__name__)
@@ -301,12 +302,7 @@ class InnerDriveAgent:
             cs_agent1 = cognitive_state.memory_summary
             memory_confidence = cognitive_state.memory_confidence
             ma = getattr(cognitive_state, "memory_answer", None)
-            if ma is not None:
-                from memory.retrieval_pipeline import ContextBuilder
-                light = ContextBuilder().build("agent3", ma)
-                cs_agent3 = light if light else cs_agent1
-            else:
-                cs_agent3 = cs_agent1
+            cs_agent3 = render_memory_light(ma, fallback=cs_agent1)
             # 二期 4.2：挂念浮现仍由 InnerDrive 处理（轻量向量操作，不增加 LLM 成本）
             care_block = self._surface_care_for(user_input)
             if care_block:
