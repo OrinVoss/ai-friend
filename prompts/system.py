@@ -745,6 +745,7 @@ def build_system_prompt(
     is_proactive: bool = False,
     compressed_summary: str = "",
     tools=None,
+    rule_tools=None,
     consecutive_negative: int = 0,
     tool_records: str = "",
     inner_drive_summary: str = "",
@@ -770,6 +771,10 @@ def build_system_prompt(
 
     WS-19: emotion_summary 为轮次开始冻结的情绪快照；缺省时回退到活对象，
     保持旧调用方兼容。
+
+    #301: tools 为 Agent 3 的执行 registry（内部工具），「可用工具」块与
+    执行严格一致；rule_tools（全量 registry）仅供输出规则块派生 intent
+    选项（M-06 同款模式），缺省回退 tools 保持旧调用方兼容。
     """
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
@@ -842,7 +847,8 @@ def build_system_prompt(
     if compressed_summary:
         blocks.append(f"=== 对话历史摘要 ===\n{compressed_summary}")
 
-    # Static-ish: Internal tools only (recall, remember)
+    # Static-ish: Internal tools only (recall/remember/history_search) —
+    # #301: 必须与 Agent 3 执行 registry 一致，调用方传内部 registry
     internal_tools_block = _build_internal_tools_block(tools)
     if internal_tools_block:
         blocks.append(internal_tools_block)
@@ -864,7 +870,8 @@ def build_system_prompt(
     # Dynamic: Instructions
     blocks.append(_build_instructions_block(now, is_proactive, explore_mode))
 
-    # Dynamic: Output rules
-    blocks.append(_build_output_rules_block(final_response, tools=tools))
+    # Dynamic: Output rules — intent 选项从 rule_tools（全量 registry）派生（#301）
+    blocks.append(_build_output_rules_block(
+        final_response, tools=rule_tools if rule_tools is not None else tools))
 
     return "\n\n".join(blocks)

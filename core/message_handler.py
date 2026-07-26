@@ -482,7 +482,8 @@ class MessageHandler:
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a.compressed_summary,
-            tools=a.tool_registry,
+            tools=self._make_internal_registry(include_history_search=True),
+            rule_tools=a.tool_registry,  # #301: intent 选项数据源
             is_proactive=True,
             consecutive_negative=a.consecutive_negative,
             inner_drive_summary=inner_drive_summary,
@@ -541,7 +542,8 @@ class MessageHandler:
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a.compressed_summary,
-            tools=a.tool_registry,
+            tools=self._make_internal_registry(include_history_search=True),
+            rule_tools=a.tool_registry,  # #301: intent 选项数据源
             is_proactive=True,
             consecutive_negative=a.consecutive_negative,
             explore_mode=True,
@@ -647,7 +649,8 @@ class MessageHandler:
             personality=a.personality.config, emotion=a.personality.emotion,
             memory_context=mem_ctx, conversation_history=conv_hist,
             compressed_summary=a.compressed_summary,
-            tools=a.tool_registry,
+            tools=self._make_internal_registry(include_history_search=True),
+            rule_tools=a.tool_registry,  # #301: intent 选项数据源
             consecutive_negative=a.consecutive_negative,
             tool_call_history=a.tool_call_history,
             inner_drive_summary=inner_drive_summary,
@@ -670,7 +673,8 @@ class MessageHandler:
         if tool_records:
             messages.insert(-1, {"role": "user", "content": tool_records})
         # H-01: 无论是否有 tool_records，Agent 3 的 registry 都固定为内部工具
-        # （recall/remember），与 prompt 声明一致，不再回退到全量 registry
+        # （recall/remember/history_search）；#301 起 prompt 侧 tools 也传同一
+        # 内部 registry，声明与执行真正一致，不再回退到全量 registry
         return a._react_loop(messages, on_token, add_to_history=True,
                             tool_registry=self._make_internal_registry(include_history_search=True))
 

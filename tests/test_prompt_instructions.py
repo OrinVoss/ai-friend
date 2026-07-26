@@ -452,3 +452,63 @@ class TestTimeQueryNoToolRule(unittest.TestCase):
         )
         self.assertIn("当前时间：", prompt)
         self.assertIn("永远不需要为此调用工具", prompt)
+
+
+class TestAgent3RuleTools(unittest.TestCase):
+    """#301: Agent 3 prompt 的「可用工具」块必须与执行 registry（内部工具）
+    严格一致；intent 选项仍从 rule_tools（全量 registry）派生。"""
+
+    def _make_registry(self, names):
+        registry = ToolRegistry()
+        for name in names:
+            tool = MagicMock()
+            tool.name.return_value = name
+            tool.description.return_value = f"Mock {name}"
+            tool.parameters_schema.return_value = {}
+            tool.spec.return_value = ToolSpec(name=name, description=f"Mock {name}", parameters={})
+            registry.register(tool)
+        return registry
+
+    def _build_prompt(self, tools, rule_tools):
+        from models.personality import PersonalityConfig, EmotionalState
+        from models.conversation import MemoryContext
+        personality = PersonalityConfig(name="Test", traits=[], speaking_style="",
+                                       backstory="", interests=[])
+        ctx = MemoryContext(facts=[], experiences=[], reflections=[],
+                            relationship={"trust": 0.5, "familiarity": 0.5})
+        return build_system_prompt(
+            personality=personality, emotion=EmotionalState(),
+            memory_context=ctx, conversation_history="",
+            tools=tools, rule_tools=rule_tools,
+        )
+
+    def _tools_block(self, prompt: str) -> str:
+        """截取「=== 可用工具 ===」块到下一个 === 标题之间的内容。"""
+        start = prompt.find("=== 可用工具 ===")
+        self.assertGreater(start, -1, "可用工具块缺失")
+        end = prompt.find("\n===", start + 1)
+        return prompt[start:end] if end > -1 else prompt[start:]
+
+    def test_tools_block_matches_internal_execution_registry(self):
+        internal = self._make_registry(["recall", "remember", "history_search"])
+        full = self._make_registry(
+            ["recall", "remember", "history_search",
+             "web_search", "web_fetch", "music_play", "read_file", "notify"])
+        prompt = self._build_prompt(internal, full)
+        block = self._tools_block(prompt)
+        # 工具块只声明执行侧可用的内部工具
+        self.assertIn("recall", block)
+        self.assertIn("remember", block)
+        self.assertIn("history_search", block)
+        for external in ("web_search", "web_fetch", "music_play", "read_file", "notify"):
+            self.assertNotIn(external, block)
+        # intent 选项仍从全量 registry 派生（Agent 3 → Agent 1 审批通道保留）
+        self.assertIn("play_music", prompt)
+        self.assertIn("search_web", prompt)
+        self.assertIn("fetch_url", prompt)
+
+    def test_rule_tools_defaults_to_tools(self):
+        """兼容旧行为：rule_tools=None 时 intent 选项回退以 tools 为数据源。"""
+        internal = self._make_registry(["recall", "remember"])
+        prompt = self._build_prompt(internal, None)
+        self.assertIn("（当前无可用的外部动作）", prompt)
