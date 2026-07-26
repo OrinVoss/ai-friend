@@ -144,20 +144,10 @@ def assemble_session(config: Config, db: Database, session_id: str,
     retriever = MemoryRetriever(ltm, llm_rerank_fn=llm_rerank_fn,
                                 embedding_engine=embed_engine)
     # 内驱状态（二期）：eager 创建，consolidator（对照解决/线索写入）与
-    # InnerDrive（沉思循环/响应路径浮现）共享同一实例
-    inner_drive_state = None
-    if getattr(config, "proactive_think_loop", True):
-        from core.inner_drive_state import InnerDriveState
-        inner_drive_state = InnerDriveState(
-            session_id=role_id,
-            max_entries=getattr(config, "inner_drive_care_list_size", 20),
-            embedding_engine=embed_engine,
-            surface_top_k=getattr(config, "inner_drive_surface_top_k", 8),
-            response_top_k=getattr(config, "inner_drive_surface_response_k", 3),
-            decay_rate=getattr(config, "inner_drive_decay_rate", 0.9),
-            similarity_threshold=getattr(config,
-                                         "inner_drive_care_similarity_threshold", 0.7),
-        )
+    # InnerDrive（沉思循环/响应路径浮现）共享同一实例；
+    # 创建逻辑统一在 create_inner_drive_state（单一创建点）
+    from core.inner_drive_state import create_inner_drive_state
+    inner_drive_state = create_inner_drive_state(config, role_id, embed_engine)
     consolidator = MemoryConsolidator(ltm, llm_generate,
                                       embedding_engine=embed_engine,
                                       config=config,

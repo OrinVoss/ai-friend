@@ -38,19 +38,15 @@ class AgentWiring:
                 logger.info("[msg] inner drive: memory agent enabled (use_memory_agent)")
             # Proactive think loop: persistent care list (per-session file).
             # Prefer the shared instance from session_factory (also wired to
-            # the consolidator); fall back to creating one here.
+            # the consolidator); fall back to creating one here（测试路径）——
+            # 创建逻辑同样走 create_inner_drive_state 单一创建点。
             inner_drive_state = getattr(a, "_inner_drive_state", None)
-            if inner_drive_state is None and getattr(cfg, "proactive_think_loop", True):
-                from core.inner_drive_state import InnerDriveState
-                inner_drive_state = InnerDriveState(
-                    session_id=getattr(a, "session_id", None) or "default",
-                    max_entries=getattr(cfg, "inner_drive_care_list_size", 20),
+            if inner_drive_state is None:
+                from core.inner_drive_state import create_inner_drive_state
+                inner_drive_state = create_inner_drive_state(
+                    cfg,
+                    getattr(a, "session_id", None) or "default",
                     embedding_engine=getattr(a.consolidator, "_embed", None),
-                    surface_top_k=getattr(cfg, "inner_drive_surface_top_k", 8),
-                    response_top_k=getattr(cfg, "inner_drive_surface_response_k", 3),
-                    decay_rate=getattr(cfg, "inner_drive_decay_rate", 0.9),
-                    similarity_threshold=getattr(
-                        cfg, "inner_drive_care_similarity_threshold", 0.7),
                 )
             self._inner_drive = InnerDriveAgent(
                 provider=a.provider,

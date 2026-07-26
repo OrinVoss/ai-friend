@@ -432,3 +432,25 @@ class InnerDriveState:
             )
         except Exception as e:
             logger.warning(f"[inner_drive_state] save failed: {e}")
+
+
+
+def create_inner_drive_state(config, session_id: str, embedding_engine=None):
+    """InnerDriveState 单一创建点（session_factory 与 agent_wiring 共用）。
+
+    消除两处重复的参数映射（原"初始化链断裂"：两处各自拼
+    inner_drive_* 配置）。proactive_think_loop 关闭时返回 None，
+    与调用方原行为一致。
+    """
+    if not getattr(config, "proactive_think_loop", True):
+        return None
+    return InnerDriveState(
+        session_id=session_id or "default",
+        max_entries=getattr(config, "inner_drive_care_list_size", 20),
+        embedding_engine=embedding_engine,
+        surface_top_k=getattr(config, "inner_drive_surface_top_k", 8),
+        response_top_k=getattr(config, "inner_drive_surface_response_k", 3),
+        decay_rate=getattr(config, "inner_drive_decay_rate", 0.9),
+        similarity_threshold=getattr(
+            config, "inner_drive_care_similarity_threshold", 0.7),
+    )
