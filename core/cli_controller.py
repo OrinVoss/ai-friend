@@ -7,7 +7,6 @@ P1-P3; the legacy inline ReAct state machine was removed in P3).
 """
 
 import logging
-import time
 
 from core.conversation_engine import ConversationEngine, Frontend
 
@@ -31,11 +30,15 @@ class CliController:
 
         A RuntimeDriver runs in a daemon thread, so the CLI also sleeps,
         dreams and reaches out proactively — same rhythm as the Web.
+        CLI-UI（2026-07-26）：输入改由 prompt_toolkit 接管（历史/补全/
+        状态栏），read_input 内部带 patch_stdout，后台主动消息不再
+        破坏输入行；旧的 0.1s 轮询 + 手写提示符已删除。
         """
         from core.agent import AgentState
         from core.runtime_driver import RuntimeDriver
         a = self.a
         if a.ui:
+            a.ui.status_fn = self._status_snapshot
             a.ui.start()
             a.ui.display_banner(a.personality.config.name)
         a.state = AgentState.BOOT
@@ -51,19 +54,15 @@ class CliController:
         except Exception as e:
             logger.warning(f"[cli] restore turn_count failed: {e}")
         driver.start_in_thread()
-        prompt_shown = False
         try:
             while a._running:
-                # Print the prompt once per wait — reprinting on every poll
-                # iteration floods the terminal (field report 2026-07-16).
-                if a.ui and not prompt_shown:
-                    print("\033[33m用户输入: \033[0m", end="", flush=True)
-                    prompt_shown = True
-                user_input = a.ui.reader.read_line() if a.ui else None
-                if user_input is None:
-                    time.sleep(0.1)
+                try:
+                    user_input = a.ui.read_input() if a.ui else None
+                except (EOFError, KeyboardInterrupt):
+                    break
+                if user_input is None or not user_input.strip():
                     continue
-                prompt_shown = False
+                user_input = user_input.strip()
                 if user_input.startswith("/"):
                     self._handle_command(user_input)
                     continue
@@ -73,13 +72,23 @@ class CliController:
                     logger.error(f"[cli] engine error: {e}", exc_info=True)
                     if a.ui:
                         a.ui.display.print_error(str(e))
+                if a.ui:
+                    a.ui.invalidate()  # 情绪/轮次已变，刷新 bottom_toolbar
                 if a.turn_count > 0 and a.turn_count % 10 == 0:
                     a.personality.save(a.config.personality_file)
-        except KeyboardInterrupt:
-            pass
         finally:
             driver.stop()
         self._on_shutdown()
+
+    def _status_snapshot(self) -> dict:
+        """bottom_toolbar 数据源：情绪 / 轮次 / 是否睡着。"""
+        a = self.a
+        e = a.personality.emotion
+        return {
+            "emotion": e.dominant_emotion,
+            "turn": a.turn_count,
+            "sleeping": bool(getattr(a, "_sleeping", False)),
+        }
 
     def _on_boot(self) -> None:
         from core.agent import AgentState
@@ -116,12 +125,13 @@ class CliController:
                 a.ui.display.print_system("记忆已保存")
         elif cmd == "/mood" and a.ui:
             e = a.personality.emotion
-            a.ui.display.print_mood(f"{e.dominant_emotion} (v={e.valence:.2f} a={e.arousal:.2f})")
+            a.ui.display.print_mood(e.dominant_emotion, e.valence, e.arousal)
         elif cmd == "/status" and a.ui:
+            from ui.display import panel, rel_bar
             rel = a.ltm.get_relationship()
-            a.ui.display.print_system(f"轮次: {a.turn_count} | 事实: {len(a.ltm.get_all_active_facts())}")
+            rows = [(f"轮次: {a.turn_count} │ 事实: {len(a.ltm.get_all_active_facts())}", "")]
             for k, v in rel.items():
-                a.ui.display.print_system(f"  {k}: {v:.2f}")
+                rows.append((f"{k:<12} {rel_bar(v)} {v:.2f}", ""))
             # #132: show relationship trend from snapshots
             history = a.ltm.get_relationship_history(days=7)
             if history:
@@ -132,7 +142,9 @@ class CliController:
                     if len(values) >= 2:
                         delta = values[-1] - values[0]
                         arrow = "↑" if delta > 0.01 else "↓" if delta < -0.01 else "→"
-                        a.ui.display.print_system(f"  {dim} 趋势(7d): {values[0]:.2f}→{values[-1]:.2f} {arrow}")
+                        rows.append((f"{dim} 趋势(7d): {values[0]:.2f}→{values[-1]:.2f} {arrow}",
+                                     "\033[2m"))
+            print(panel("状态", rows))
         elif cmd == "/forget":
             a.short_term.clear()
             if a.ui:
@@ -256,12 +268,19 @@ class _CliFrontend(Frontend):
 
     def on_sleep_reply(self, text: str) -> None:
         if self._ui:
-            self._ui.display.respond(text, prefix=self._name)
+            self._ui.display.respond(text, prefix=f"💤{self._name}")
 
     def on_proactive(self, text: str) -> None:
         if self._ui:
             print()  # break the input prompt line before the proactive bubble
+            self._ui.display.separator()
             self._ui.display.respond(text, prefix=self._name)
+            self._ui.display.separator()
+
+    def on_status(self, status: str) -> None:
+        """阶段状态提示（CLI-UI）：她在想…/她在翻工具箱…/她在写回复…"""
+        if self._ui:
+            self._ui.display.print_status(status)
 
     def on_error(self, error: str) -> None:
         if self._ui:

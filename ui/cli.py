@@ -1,74 +1,111 @@
-import sys
+"""CLI interface: prompt_toolkit-based input layer + display wiring.
+
+CLI-UI（2026-07-26）：输入由 prompt_toolkit 接管（历史/补全/粘贴多行/
+bottom_toolbar 状态栏），替代旧的 NonBlockingInputReader 轮询线程。
+后台主动消息经 patch_stdout 安全打印，不再打断输入行。
+"""
 import threading
-from queue import Queue, Empty
+from datetime import datetime
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.history import FileHistory
 
-class NonBlockingInputReader:
-    """Background daemon thread for non-blocking stdin reading."""
+from ui.display import mood_icon
 
-    def __init__(self):
-        self._queue: Queue[str] = Queue()
-        self._sentinel = threading.Event()
-        self._thread = threading.Thread(target=self._reader, daemon=True)
-        self._started = False
+SLASH_COMMANDS = ["/exit", "/quit", "/save", "/mood", "/status", "/forget", "/help"]
 
-    def start(self) -> None:
-        if self._started:
-            return
-        self._started = True
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._sentinel.set()
-
-    def read_line(self, timeout: float = 0) -> str | None:
-        """Non-blocking read. Returns None if no input available."""
-        try:
-            return self._queue.get_nowait()
-        except Empty:
-            return None
-
-    def _reader(self) -> None:
-        while not self._sentinel.is_set():
-            line = sys.stdin.readline()
-            if not line:
-                break
-            self._queue.put(line.rstrip("\n"))
+SLASH_HELP = [
+    ("/exit 或 /quit", "保存并退出"),
+    ("/save", "强制记忆合并"),
+    ("/mood", "查看当前心情"),
+    ("/status", "查看关系状态和统计"),
+    ("/forget", "清除短期记忆"),
+    ("/help", "显示此帮助"),
+]
 
 
 class ConsoleInterface:
-    def __init__(self, typing_speed: float = 0.02):
+    """Terminal frontend facade: owns the PromptSession and DisplayEngine.
+
+    status_fn: 由 cli_controller 注入，返回 {"emotion": str, "turn": int,
+    "sleeping": bool}，供 bottom_toolbar 实时渲染。
+    """
+
+    def __init__(self, typing_speed: float = 0.02, status_fn=None,
+                 history_file: str = "data/.cli_history"):
         self._typing_speed = typing_speed
-        self.reader = NonBlockingInputReader()
+        self.status_fn = status_fn or (lambda: {})
+        self._history_file = history_file
         self.display: "DisplayEngine | None" = None
+        self.session: "PromptSession | None" = None
 
     def start(self) -> None:
+        import sys
+        # 输出被重定向（管道/文件）时 Windows 回退 GBK，框线/emoji 会
+        # UnicodeEncodeError——仅非 tty 场景强制 UTF-8，真控制台不受影响
+        if not sys.stdout.isatty():
+            try:
+                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
         from ui.display import DisplayEngine
         self.display = DisplayEngine(typing_speed=self._typing_speed)
-        self.reader.start()
+        try:
+            self.session = PromptSession(
+                history=FileHistory(self._history_file),
+                completer=WordCompleter(SLASH_COMMANDS, sentence=True),
+                auto_suggest=AutoSuggestFromHistory(),
+                bottom_toolbar=self._toolbar,
+            )
+        except Exception:
+            # 非控制台环境（管道输入/CI/重定向）回退到普通 input()
+            self.session = None
 
     def stop(self) -> None:
-        self.reader.stop()
+        pass
+
+    def _toolbar(self) -> ANSI:
+        s = {}
+        try:
+            s = self.status_fn() or {}
+        except Exception:
+            pass
+        parts = []
+        emotion = s.get("emotion")
+        if emotion:
+            parts.append(f"{mood_icon(emotion)} {emotion}")
+        if s.get("turn") is not None:
+            parts.append(f"轮次 {s['turn']}")
+        if s.get("sleeping"):
+            parts.append("💤 睡眠中")
+        parts.append(datetime.now().strftime("%H:%M"))
+        return ANSI("\x1b[2m" + " │ ".join(parts) + "\x1b[0m")
+
+    def read_input(self) -> str:
+        """阻塞读取一行输入；patch_stdout=True 让后台主动消息安全插入。
+        非控制台环境（session 创建失败）回退普通 input()。"""
+        if self.session is None:
+            return input("你 ▸ ")
+        return self.session.prompt(
+            ANSI("\x1b[1;32m你 ▸\x1b[0m "), patch_stdout=True)
+
+    def invalidate(self) -> None:
+        """触发 bottom_toolbar 重绘（情绪/轮次变化后调用，可跨线程）。"""
+        try:
+            if self.session is not None and self.session.app is not None:
+                self.session.app.invalidate()
+        except Exception:
+            pass  # 提示符未激活时无 app，忽略
 
     @staticmethod
     def display_banner(name: str) -> None:
-        print(f"\033[1;36m{'=' * 50}\033[0m")
-        print(f"\033[1;36m   ✦ {name} ✦\033[0m")
-        print(f"\033[1;36m   你的 AI 朋友\033[0m")
-        print(f"\033[1;36m{'=' * 50}\033[0m")
-        print("输入 /help 查看命令，/exit 退出\n")
+        from ui.display import DisplayEngine
+        DisplayEngine.print_banner(name)
 
     @staticmethod
     def display_help() -> None:
-        commands = [
-            ("/exit 或 /quit", "保存并退出"),
-            ("/save", "强制记忆合并"),
-            ("/mood", "查看当前心情"),
-            ("/status", "查看关系状态和统计"),
-            ("/forget", "清除短期记忆"),
-            ("/help", "显示此帮助"),
-        ]
-        print("\n\033[1m内置命令：\033[0m")
-        for cmd, desc in commands:
-            print(f"  \033[33m{cmd:<20}\033[0m {desc}")
-        print()
+        from ui.display import DisplayEngine
+        DisplayEngine.print_help(SLASH_HELP)

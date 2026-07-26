@@ -143,10 +143,25 @@ class MessageHandler:
     def current_state(self) -> MessageHandlerState:
         return self._state
 
+    # CLI-UI: 阶段状态提示（Frontend.on_status），仅终端前端使用
+    _STATUS_HINTS = {
+        "ASSESSING": "她在想…",
+        "EXECUTING_TOOLS": "她在翻工具箱…",
+        "GENERATING_RESPONSE": "她在写回复…",
+    }
+
     def _transition(self, state: MessageHandlerState) -> None:
         if self._state != state:
             logger.debug(f"[msg] state: {self._state.name} -> {state.name}")
             self._state = state
+            cb = getattr(self, "_status_cb", None)
+            if cb is not None:
+                hint = self._STATUS_HINTS.get(state.name)
+                if hint:
+                    try:
+                        cb(hint)
+                    except Exception:
+                        pass  # 状态提示绝不影响主流程
 
     def _idle_seconds(self) -> float:
         """WS-9: 距上次用户活动的时间；无法计算时返回 0.0。"""
@@ -233,13 +248,16 @@ class MessageHandler:
         # God Object 拆分（2026-07-22）：实现已迁至 core/agent_wiring.py
         return self._wiring.make_external_registry()
 
-    def handle_message(self, user_input: str, on_token=None) -> str:
+    def handle_message(self, user_input: str, on_token=None, on_status=None) -> str:
         from prompts.system import build_system_prompt
         a = self.a
 
         # #256: guard against empty input
         if not user_input or not user_input.strip():
             return ""
+
+        # CLI-UI: 阶段状态回调（本轮有效，返回前清除，避免泄漏到主动消息路径）
+        self._status_cb = on_status
 
         # A3（2026-07-21）：CLI 路径的 request_id 设置点——Web 已由中间件
         # 设置，这里仅在未设置时生成。无需复位：后台 tick 在独立线程/任务
@@ -264,6 +282,7 @@ class MessageHandler:
             a.add_turn("assistant", sleep_reply, metadata={"sleep": True})
             a.increment_turn_count()
             logger.info(f"[msg] sleep reply persisted: turn={a.turn_count - 1}")
+            self._status_cb = None
             return sleep_reply
 
         logger.info(f"[msg] turn={a.turn_count} len={len(user_input)}")
@@ -333,6 +352,7 @@ class MessageHandler:
                 f"pending={state.pending}"
             )
             self._transition(MessageHandlerState.DONE)
+            self._status_cb = None
             return result
 
         # ── Agent 2: Multi-round tool execution ──
@@ -364,6 +384,7 @@ class MessageHandler:
             f"pending={state.pending}"
         )
         self._transition(MessageHandlerState.DONE)
+        self._status_cb = None
         return result
 
     def _run_agent2(self, user_input: str, drive_result) -> ToolExecutionResult:
@@ -467,6 +488,7 @@ class MessageHandler:
         from prompts.system import build_system_prompt
         a = self.a
         cfg = a.config
+        self._status_cb = None  # CLI-UI: 主动路径不发阶段提示
 
         if intent is not None and intent.topic_hint:
             topic = intent.topic_hint
@@ -518,6 +540,7 @@ class MessageHandler:
         from prompts.system import build_system_prompt
         a = self.a
         cfg = a.config
+        self._status_cb = None  # CLI-UI: 主动路径不发阶段提示
 
         if intent is not None and intent.topic_hint:
             topic = intent.topic_hint

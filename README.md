@@ -142,7 +142,7 @@ Emotion → Memory consolidation → Insight（后处理，不变）
 |------|-----|-----|
 | 启动 | `python main.py` | `python web_main.py` |
 | 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
-| 输入 | stdin 线程 | WebSocket |
+| 输入 | prompt_toolkit（历史/补全/底部状态栏） | WebSocket |
 | 输出 | 打字机效果 | 单条气泡（分段推送当前禁用、整段单段发送；前端流式 Markdown 渲染） |
 | 主题 | - | 浅色/深色双主题（跟随系统 + 手动切换），响应式 |
 
@@ -420,7 +420,7 @@ ai-friend/
 ├── storage/                    SQLite（aiosqlite 异步 + WAL + 版本化 Schema 迁移 + 软删除）
 ├── prompts/                    提示词模板（inner_drive / 破防/怨恨/梦境/工具记录注入）
 ├── models/                     数据模型（EmotionalState / EmotionEvent / Turn）
-├── ui/                         CLI 界面（ConsoleInterface + 打字机效果）
+├── ui/                         CLI 界面（prompt_toolkit 输入 + 打字机/面板渲染）
 └── web/                        Web 界面
     ├── server.py               FastAPI + WebSocket + Pydantic 校验 + CORS/速率限制/CSP
     ├── session.py              SessionManager + WebAgent（会话隔离 + Agent 私有接口封装）

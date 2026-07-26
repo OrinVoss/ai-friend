@@ -62,7 +62,8 @@ class ConversationEngine:
         a = self._agent
         try:
             was_sleeping = a._sleeping
-            result = a._messages.handle_message(user_input, on_token=fe.on_token)
+            result = a._messages.handle_message(
+                user_input, on_token=fe.on_token, on_status=fe.on_status)
         except Exception as e:
             logger.exception("[engine] handle_message failed")
             fe.on_error(str(e))

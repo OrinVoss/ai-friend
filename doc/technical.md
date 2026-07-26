@@ -90,8 +90,8 @@ main.py / web_main.py
     │   └── conversation.py ─ Turn + MemoryContext
     │
     ├── ui/
-    │   ├── cli.py ────────── 命令行界面 + 非阻塞输入线程
-    │   └── display.py ────── 打字机效果 + 彩色输出
+    │   ├── cli.py ────────── prompt_toolkit 输入（历史/补全/状态栏）
+    │   └── display.py ────── 打字机效果 + 面板/彩色输出
     │
     ├── web/
     │   ├── server.py ─────── FastAPI + WebSocket + RuntimeDriver 启动/生命周期

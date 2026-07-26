@@ -75,11 +75,11 @@
 
 | 阶段 | CLI | Web |
 |------|-----|-----|
-| 等待输入 | 守护线程读 stdin → Queue | WebSocket 协程等待 receive_text() |
+| 等待输入 | prompt_toolkit PromptSession（历史/补全/状态栏） | WebSocket 协程等待 receive_text() |
 | 处理消息 | engine.handle_message → MessageHandler 编排三层 → _react_loop() | process_message() → MessageHandler 编排三层 → _react_loop() |
-| 输出 | 打字机效果逐字打印 | 单条 segment 全量推送（分段代码已随 P3 删除，见第 4 节） |
+| 输出 | 打字机效果逐字打印 + 阶段状态提示（on_status） | 单条 segment 全量推送（分段代码已随 P3 删除，见第 4 节） |
 | 主动对话 | RuntimeDriver 守护线程 | RuntimeDriver asyncio task |
-| 空闲检测 | time.sleep(0.1) 轮询 | await asyncio.sleep(5/15) 协程睡眠 |
+| 空闲检测 | prompt_toolkit 阻塞读取（后台线程驱动主动行为） | await asyncio.sleep(5/15) 协程睡眠 |
 | 封装层 | 无（直接操作 Agent） | `WebAgent` 封装 `Agent` 私有接口（#45） |
 
 ### WebAgent 封装层（#45）

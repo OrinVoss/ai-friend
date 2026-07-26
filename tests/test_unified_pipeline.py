@@ -53,6 +53,15 @@ class TestConversationEngine(unittest.TestCase):
         self.assertEqual(kwargs["on_token"], fe.on_token)
         self.assertEqual(getattr(kwargs["on_token"], "__self__", None), fe)
 
+    def test_on_status_threaded_through(self):
+        """CLI-UI: engine 把 frontend 的 on_status 透传给管线。"""
+        a = _mock_agent()
+        fe = RecordingFrontend()
+        ConversationEngine(a).handle_message("你好", fe)
+        _, kwargs = a._messages.handle_message.call_args
+        self.assertEqual(kwargs["on_status"], fe.on_status)
+        self.assertEqual(getattr(kwargs["on_status"], "__self__", None), fe)
+
     def test_proactive_and_explore_events(self):
         fe = RecordingFrontend()
         engine = ConversationEngine(_mock_agent())
@@ -113,35 +122,79 @@ class TestCliFrontend(unittest.TestCase):
         ui = MagicMock()
         fe = _CliFrontend(ui, "小星")
         fe.on_sleep_reply("zzz...ZZZ...💤")
-        ui.display.respond.assert_called_once_with("zzz...ZZZ...💤", prefix="小星")
+        ui.display.respond.assert_called_once_with("zzz...ZZZ...💤", prefix="💤小星")
 
 
-class TestCliPrompt(unittest.TestCase):
-    def test_prompt_printed_once_per_wait(self):
-        """Field regression 2026-07-16: the input prompt must be printed once
-        per wait, not on every 0.1s poll iteration."""
-        from unittest.mock import patch
-        from core.cli_controller import CliController
+class TestCliPromptToolkitLoop(unittest.TestCase):
+    """CLI-UI（2026-07-26）：主循环改由 prompt_toolkit 读输入。"""
 
+    def _make_agent(self, ui):
         a = MagicMock()
         a.personality.config.name = "Luna"
         a.personality.config.first_run_greeting = ""
         a._running = True
         a.turn_count = 0
-        ui = MagicMock()
         a.ui = ui
-        # no input for 3 polls, then Ctrl-C to exit
-        ui.reader.read_line.side_effect = [None, None, None, KeyboardInterrupt]
-        ctrl = CliController(a)
-        with patch("core.runtime_driver.RuntimeDriver") as mock_driver, \
-                patch("builtins.print") as mock_print:
-            ctrl.run()
+        return a
 
-        prompt_calls = [c for c in mock_print.call_args_list
-                        if c.args and "用户输入" in str(c.args[0])]
-        self.assertEqual(len(prompt_calls), 1)
+    def test_run_loop_reads_via_read_input_and_exits_cleanly(self):
+        from unittest.mock import patch
+        from core.cli_controller import CliController
+        ui = MagicMock()
+        ui.read_input.side_effect = KeyboardInterrupt
+        ctrl = CliController(self._make_agent(ui))
+        with patch("core.runtime_driver.RuntimeDriver") as mock_driver:
+            ctrl.run()
+        ui.read_input.assert_called_once()
         mock_driver.return_value.start_in_thread.assert_called_once()
         mock_driver.return_value.stop.assert_called_once()
+
+    def test_slash_exit_stops_loop(self):
+        from unittest.mock import patch
+        from core.cli_controller import CliController
+        ui = MagicMock()
+        ui.read_input.side_effect = ["/exit", AssertionError("loop did not stop")]
+        a = self._make_agent(ui)
+        ctrl = CliController(a)
+        with patch("core.runtime_driver.RuntimeDriver"):
+            ctrl.run()
+        self.assertFalse(a._running)
+
+    def test_frontend_on_status_prints_dim_hint(self):
+        from core.cli_controller import _CliFrontend
+        ui = MagicMock()
+        fe = _CliFrontend(ui, "小星")
+        fe.on_status("她在翻工具箱…")
+        ui.display.print_status.assert_called_once_with("她在翻工具箱…")
+
+
+class TestStatusHints(unittest.TestCase):
+    """CLI-UI: MessageHandler._transition 按阶段发射中文提示。"""
+
+    def _handler(self):
+        from core.message_handler import MessageHandler, MessageHandlerState
+        mh = MessageHandler.__new__(MessageHandler)  # 只测 _transition，绕过装配
+        mh._state = MessageHandlerState.IDLE
+        return mh, MessageHandlerState
+
+    def test_hints_for_pipeline_phases(self):
+        mh, S = self._handler()
+        seen = []
+        mh._status_cb = seen.append
+        mh._transition(S.ASSESSING)
+        mh._transition(S.EXECUTING_TOOLS)
+        mh._transition(S.GENERATING_RESPONSE)
+        self.assertEqual(seen, ["她在想…", "她在翻工具箱…", "她在写回复…"])
+
+    def test_no_hint_for_done_and_no_cb(self):
+        mh, S = self._handler()
+        seen = []
+        mh._status_cb = seen.append
+        mh._transition(S.DONE)  # DONE 无提示
+        self.assertEqual(seen, [])
+        mh._status_cb = None  # 无回调时静默
+        mh._transition(S.ASSESSING)
+        self.assertEqual(seen, [])
 
 
 if __name__ == "__main__":

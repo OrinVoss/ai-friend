@@ -7,3 +7,4 @@ uvicorn==0.30.1
 # 会导致 WS 握手/帧处理损坏（浏览器 open 后秒断、python 客户端 404）。钉在 12.0。
 websockets==12.0
 numpy>=1.24.0
+prompt_toolkit==3.0.51
