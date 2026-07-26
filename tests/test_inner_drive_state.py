@@ -194,6 +194,38 @@ class TestSurfaceRules(unittest.TestCase):
         self.assertNotIn("B", contents)
         self.assertEqual(sorted(contents), ["C", "D"])
 
+    def test_eviction_lowest_priority_active(self):
+        """全活跃时 capacity 满应淘汰 priority 最低者（而非最旧者）。"""
+        s = self._state(max_entries=3)
+        s.apply_updates(add=[
+            {"content": "高优先级", "type": "care", "priority": 0.9},
+            {"content": "中优先级", "type": "care", "priority": 0.6},
+            {"content": "低优先级", "type": "care", "priority": 0.2},
+        ])
+        s.apply_updates(add=["新条目"])  # 超容量，应淘汰低优先级
+        contents = [e.content for e in s._entries]
+        self.assertNotIn("低优先级", contents)
+        self.assertIn("高优先级", contents)
+        self.assertIn("中优先级", contents)
+        self.assertIn("新条目", contents)
+
+    def test_eviction_tie_breaker_oldest_created(self):
+        """priority 相同时淘汰 created_at 最旧的活跃条目。"""
+        s = self._state(max_entries=2)
+        s.apply_updates(add=[
+            {"content": "旧同优先级", "type": "care", "priority": 0.5},
+        ])
+        # 手动把第一条的创建时间改早，模拟时间差
+        s._entries[0].created_at = (datetime.now() - timedelta(days=1)).isoformat()
+        s.apply_updates(add=[
+            {"content": "新同优先级", "type": "care", "priority": 0.5},
+        ])
+        s.apply_updates(add=["第三条"])  # 超容量，应淘汰最旧的
+        contents = [e.content for e in s._entries]
+        self.assertNotIn("旧同优先级", contents)
+        self.assertIn("新同优先级", contents)
+        self.assertIn("第三条", contents)
+
 
 class TestSemanticSurface(unittest.TestCase):
     """二期 4.2：surface_for_query 语义浮现 + consolidation 对照解决。"""
