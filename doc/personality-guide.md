@@ -56,8 +56,8 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 - `playfulness > 0.6` → arousal 波动幅度 ×0.7，并少量提升 joy
 - `warmth > 0.7` → 每次交互 trust 额外 +0.1
 - `thoughtfulness > 0.6` → anticipation 小幅 +0.05
-- `humor` → 负面情绪减轻，正面倾向增加
-- `sass` → anger 增长减缓，joy 增长轻度提升
+- `humor > 0.5` → sadness 影响减轻，valence 正面倾向增加
+- `sass > 0.5` → anger 增长减缓，轻微负面时 joy 轻度提升
 
 ### speaking_style — 说话风格
 
@@ -124,7 +124,7 @@ AI 的自称和用户对它的称呼。会出现在 system prompt 的开头、�
 
 - 每条包含 `user`（用户说的话）和 `replies`（AI 的若干种可能回复）。
 - 修改后重启生效，无需改动角色 JSON 文件。
-- 留空数组则系统 prompt 中不注入示例。
+- 留空数组则不注入具体示例（prompt 中仍保留一小段「对话示例」风格提示）。
 - 示例只在会话的前几轮注入 system prompt（`conversation_examples_max_turns`，默认 3 轮），之后不再重复占用 token（#160）。
 
 ### interests — 兴趣领域
@@ -155,7 +155,7 @@ AI 的"出厂情绪设置"：
 
 ### first_run_greeting — 启动欢迎语
 
-CLI 每次启动时输出一句开场白（仅 CLI，Web 端不使用）。留空则回退为默认的「你好呀！我是 {name}，很高兴认识你~」。
+CLI 每次启动时输出一句开场白（仅 CLI，Web 端不使用）。留空则回退为默认的「你好呀！我是{name}，很高兴认识你~」。
 
 ---
 

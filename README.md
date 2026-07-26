@@ -55,13 +55,13 @@
     └── facts_v2 / insights_v2  长期记忆主表（旧 user_facts / reflections 已迁移，归档表 schema v6 删除）
 ```
 
-记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ **Insight**（二期已上线 2026-07-20，假设 + 证据链 + 过期时间）。由 `MemoryLifecycleManager` 提供 observe / promote / verify / contradict / decay / gc / merge（语义近重复合并，A5）。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` / `reflections` 表数据已迁移（schema v4/v5），归档表已于 schema v6（2026-07-21）物理删除；双写开关 `use_observation_fact` 已随上线删除。
+记忆生命周期（一期，已正式上线 2026-07-18）：对话 → **Observation**（原始观察，低置信度）→ 验证/用户确认 → **Fact**（带四维评分的事实）→ **Insight**（二期已上线 2026-07-20，假设 + 证据链 + 过期时间）。由 `MemoryLifecycleManager` 提供 observe / promote_fact / verify_fact / contradict_fact / create_insight / decay / garbage_collect / merge_duplicates（语义近重复合并，A5）。单写 facts_v2，读路径全部走 facts_v2（repository 旧方法名适配），旧 `user_facts` / `reflections` 表数据已迁移（schema v4/v5），归档表已于 schema v6（2026-07-21）物理删除；双写开关 `use_observation_fact` 已随上线删除。
 
 三层检索：Hot Memory → Query-Guided（语义 0.6 + 关键词 0.4 混合评分 → LLM重排）→ On-Demand（recall 工具）
 
 语义搜索基于本地 Qwen3.5-0.8B-Q6_K.gguf（640MB, GPU CUDA, 1024维向量），通过 llama.cpp server 提供 /v1/embeddings API。嵌入服务器不可用时自动降级为纯关键词检索（日志可见），不影响正常使用。
 
-### 工具系统（9 个，三层分工）
+### 工具系统（10 个，三层分工）
 
 **Agent 1 — InnerDriveAgent（内部工具）**：recall / remember
 
@@ -69,9 +69,9 @@ Perceive → 检索记忆 → 识别知识缺口 → 决策。若无需外部工
 
 **Agent 2 — ToolAgent（7 个外部工具）**：web_fetch / web_search / read_file / glob / grep / music_play / notify
 
-接收 Agent 1 的自然语言请求，通过 JSON mode（response_format）结构化输出工具调用，三层解析（JSON 数组 / XML 正则 / 裸 JSON）。ToolAttemptTracker（每轮 3 次重试，最多 3 轮），失败后回报 Agent 1 重新决策。独立精简 prompt，temperature=0.3，无人格/情绪/记忆。
+接收 Agent 1 的自然语言请求，通过 JSON mode（response_format）结构化输出工具调用，三层解析（JSON 数组 / XML 正则 / 裸 JSON）。ToolAttemptTracker（每轮 3 次重试，最多 3 轮），失败后回报 Agent 1 重新决策。独立精简 prompt，未单独设温（沿用 config.temperature 默认 0.8），无人格/情绪/记忆。
 
-**Agent 3 — Roleplay Agent（内部工具）**：recall / remember
+**Agent 3 — Roleplay Agent（内部工具）**：recall / remember / history_search
 
 接收 inner_drive_summary + tool_results，仅内部工具可用。完整人格 + 情绪 + 记忆，temperature=0.8。
 
@@ -86,6 +86,7 @@ Perceive → 检索记忆 → 识别知识缺口 → 决策。若无需外部工
 | `notify` | Windows toast 桌面通知（不阻塞） | title, message, duration | PowerShell WinRT | Agent 2 |
 | `recall` | 回忆用户信息或共同经历 | query | SQLite | Agent 1, 3 |
 | `remember` | 记住用户重要信息 | category, key, value, importance | SQLite | Agent 1, 3 |
+| `history_search` | 搜索原始对话历史（关键词/语义/按轮次范围） | query, mode, turn_number | SQLite + 向量 | Agent 3 |
 
 Agent 2 通过 JSON mode 结构化输出（或 XML `<tool_call>` 标签回退）自主调用，结果作为 `<tool_result>` 注入 Agent 3 prompt。每次调用自动记录到 `_tool_call_history`（最多 20 条）。
 
@@ -117,7 +118,7 @@ Agent 3: Roleplay Agent (core/agent.py)◄┘
     │  _cross_modulate() → 情绪互相制约
     │  decay() → 分速衰减
     │  build_system_prompt(inner_drive_summary, tool_results) → LLM
-    │  可用工具: recall / remember（内部 SQLite 操作）
+    │  可用工具: recall / remember / history_search（内部 SQLite 操作）
     ▼
 AI 回复 = 人格底色 × 当前情绪 × Agent 1 决策 × Agent 2 工具结果 × 对话上下文
     │
@@ -142,8 +143,8 @@ Emotion → Memory consolidation → Insight（后处理，不变）
 | 启动 | `python main.py` | `python web_main.py` |
 | 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
 | 输入 | stdin 线程 | WebSocket |
-| 输出 | 打字机效果 | 单条气泡（分段推送已随统一管线 P3 移除） |
-| 主题 | - | 浅色主题，响应式 |
+| 输出 | 打字机效果 | 单条气泡（分段推送当前禁用、整段单段发送；前端流式 Markdown 渲染） |
+| 主题 | - | 浅色/深色双主题（跟随系统 + 手动切换），响应式 |
 
 ### 自主行为系统
 
@@ -300,7 +301,7 @@ python web_main.py
 - Provider 必须继承 `LLMProvider(ABC)`，禁止直接依赖具体实现
 - Web 层通过 `WebAgent` 公共接口与 Agent 交互，禁止直接访问 `agent._xxx`
 - REST API 入参/返回使用 `web/schemas.py` Pydantic 模型
-- CSS 颜色统一使用 `web/static/style.css` CSS 变量，禁止硬编码色值
+- CSS 颜色统一使用 `web/static/theme.css` CSS 变量，禁止硬编码色值
 
 ---
 
@@ -425,7 +426,7 @@ ai-friend/
     ├── session.py              SessionManager + WebAgent（会话隔离 + Agent 私有接口封装）
     ├── schemas.py              Pydantic 请求/响应模型（ChatRequest / ChatResponse / ...）
     ├── rate_limit.py           内存滑动窗口限流中间件
-    └── static/                 前端（HTML + CSS + JS，浅色响应式主题，CSS 变量统一颜色）
+    └── static/                 前端（HTML + CSS + JS，浅色/深色双主题，theme.css CSS 变量统一颜色）
 ```
 
 ---
@@ -457,7 +458,7 @@ EmotionalState (VAD + 8 Plutchik + resentment + emotion_events → dominant_emot
 ## 自主行为流程
 
 ```
-_proactive_loop (15s)
+RuntimeDriver (15s tick)
     │
     ├─ 睡眠时间? → 入睡/醒来 → 发消息 + 梦境
     ├─ 睡着? → skip
@@ -466,7 +467,7 @@ _proactive_loop (15s)
     │   └─ InnerDrive Agent 1 决策 (Stage 2 LLM推理)
     │       ├─ 聊天 (max 2/hr) → 主动搭话
     │       ├─ 探索 (max 1/hr) → 自由工具 → 有趣才分享
-    │       └─ 沉默 → 不操作（不消耗频率限制）
+    │       └─ 沉默 → 记录连续沉默，退避冷却（不消耗频率限制）
     └─ 未命中 → 等 15s
 ```
 

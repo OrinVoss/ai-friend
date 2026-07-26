@@ -16,7 +16,7 @@
 | #1 dispatcher 全局别名 | 全局映射已删除，别名下沉各工具 `ALIASES`（dispatcher.py 无 `_normalize_args`） |
 | #263 async_utils | 单例 executor + 超时取消传播（call_soon_threadsafe，async_utils.py:46-57） |
 | #244 Cookie | SameSite=Lax 已加；HttpOnly/Secure 不适用（JS 读取 + 本地 http，有注释） |
-| #233 WS Origin | hostname 精确匹配白名单（server.py:396），非 startswith |
+| #233 WS Origin | hostname 精确匹配白名单（server.py:396-397），非 startswith |
 | #210 WS multi-tab race | schedule_remove 延迟销毁 + 连接归属判断（session.py:320-371） |
 | #164 记忆固化多次 LLM | L1 批次合并 `_consolidate_unified` 一次调用；L2/L3 走旧路径 |
 | #160 Prompt 全量重建 | prompt_cache.py 分层缓存；短输入跳过后已整体移除 |
@@ -1236,7 +1236,7 @@ Provider 层 3 次重试 × `ToolAgent.run_with_request()` 最多 3 次 attempt 
 ### 状态
 
 - **已修复（2026-07-14）**：封装性、错误恢复、魔法数字、输入清洗、状态机抽象、`ToolExecutionResult`、工具注册表隔离均已完成。
-- **未修复**：请求级/阶段级超时控制仍待后续处理。
+- **已修复（2026-07-21，L4-2）**：Agent 2 工具循环全局超时已落地——`_agent2_total_timeout` 硬截止（`core/message_handler.py:378-388`），配置项 `agent2_total_timeout_seconds`（默认 120，`config.py:69`，见 `changes/2026-07-21-layer4-tail.md`）。
 - 不影响当前功能，但会降低可维护性和生产环境稳定性
 
 ### 整体架构
@@ -1375,7 +1375,7 @@ Agent 2 的重试循环没有全局超时，工具调用卡住会导致整个请
 
 未在本次修复的遗留项：
 
-- Agent 2 重试循环缺少请求级/阶段级超时。
+- Agent 2 重试循环缺少请求级/阶段级超时（已于 2026-07-21 L4-2 补齐，见 `changes/2026-07-21-layer4-tail.md`）。
 
 相关提交见 `changes/2026-07-14-fix-message-handler-review.md` 与 `changes/2026-07-14-fix-message-handler-remaining-review.md`。
 

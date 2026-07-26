@@ -59,10 +59,12 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 本地语义搜索依赖 llama.cpp 嵌入服务。
 
 **自动启动**：`main.py` 和 `web_main.py` 启动时都会调用
-`core/embedding_server.py` 的 `auto_start_embedding()`——若 8080 端口
-无服务且模型文件存在，自动拉起 `start_embedding_server.bat`（非阻塞，
-后台线程等待就绪，最长 90 秒），服务器输出写入
-`logs/embedding_server.log`。模型缺失或服务启动失败时自动降级，见下文。
+`core/embedding_server.py` 的 `auto_start_embedding()`——若
+`embedding_endpoint`（默认 `http://localhost:8080/v1/embeddings`，可用
+环境变量 `AI_FRIEND_EMBEDDING_ENDPOINT` 覆盖）无服务响应且模型文件存在，
+自动拉起 `start_embedding_server.bat`（非阻塞，后台线程等待就绪，
+最长 90 秒；bat 缺失时直接启动 llama-server，端口从 endpoint 派生，H-04），
+服务器输出写入 `logs/embedding_server.log`。模型缺失或服务启动失败时自动降级，见下文。
 
 ### 1. 下载模型
 
@@ -93,6 +95,9 @@ llama-server -m memory/Qwen3.5-0.8B-Q6_K.gguf \
   --embeddings --pooling mean --port 8080 \
   -ngl 99 --ctx-size 2048 --batch-size 512 --threads 4 --host 127.0.0.1
 ```
+
+> 注：bat 与上方命令固定 `--port 8080`；若 `embedding_endpoint`
+> 改为其他端口，需同步修改此处保持一致。
 
 ### 3. 验证
 

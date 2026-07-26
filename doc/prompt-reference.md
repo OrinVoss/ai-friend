@@ -35,9 +35,8 @@
 === Block 6: 长期记忆 ===            # facts + experiences + reflections（慢变缓存）
 === Block 6a: 梦境 ===               # 最近的梦 / 刚睡醒提示（需要时）
 === Block 6b: 对话压缩摘要 ===       # compressed_summary（需要时）
-=== Block 6c: CognitiveState ===         # 输入去重标记 / error_fallback 跳过（需要时）
-=== Block 7: 内部工具列表 ===        # ToolRegistry.format_for_prompt() 仅 recall/remember
-=== Block 8: 工具调用记录 ===        # 当前会话最近 5 条工具调用
+=== Block 7: 可用工具列表 ===        # 仅渲染内部 registry（recall/remember/history_search），与执行一致（#301）
+=== Block 8: 工具调用记录 ===        # 当前会话最近 3 条工具调用
 === Block 9: 最近对话 ===            # 当前短期记忆
 === Block 10: 破防状态指令 ===       # consecutive_negative 累计时注入（1/3/5 条三档）
 === Block 11: 行为指令 ===           # 普通 / proactive / explore 模式
@@ -64,18 +63,18 @@
 | Block 6 | `MemoryRetriever.retrieve_for_query()` | 三层检索结果（慢变缓存） |
 | Block 6a | `_build_dreams_block()` | 情绪事件中含"梦"的记录；idle > 10 分钟时给"刚睡醒"提示 |
 | Block 6b | `ContextManager.compress()` | 超出上下文阈值时生成 |
-| Block 7 | `ToolRegistry` | 仅 `recall`/`remember` 两个内部工具 |
-| Block 8 | `tool_call_history` | 当前会话最近 5 条调用记录 |
+| Block 7 | `tools`（内部 registry） | 仅 recall/remember/history_search，与 Agent 3 react loop 执行 registry 严格一致（#301）；外部动作走 Block 12 的 JSON intent |
+| Block 8 | `tool_call_history` | 当前会话最近 3 条调用记录 |
 | Block 9 | `ConversationBuffer` | 最近对话历史 |
 | Block 10 | `consecutive_negative` | 连续负面交互破防指令 |
 | Block 11 | `prompts/instructions.py` | 根据模式（普通/proactive/explore）注入不同指令 |
-| Block 12 | `prompts/instructions.py` | `final_response` 时为汇报规则；否则默认文本 + 可选 JSON intent |
+| Block 12 | `prompts/instructions.py` + `rule_tools`（全量 registry） | `final_response` 时为汇报规则；否则默认文本 + 可选 JSON intent（选项由 rule_tools 派生，#301） |
 
 ### 特殊注入
 
 - **情绪事件**：最近的 3 条未解决情绪事件
 - **梦境**：最近的梦境记录（情绪事件中 trigger 含"梦"的条目）
-- **工具调用记录**：最近 5 条工具调用历史
+- **工具调用记录**：最近 3 条工具调用历史
 - **怨恨状态**：resentment > 0.2 时注入，> 0.5 时升级为"记仇"强指令
 
 ---
@@ -115,7 +114,7 @@
 
 该 prompt 同样按静态/慢变/动态分层缓存（身份/指令/工具为静态，关系/记忆为慢变，见第 1 节）。
 指令文本集中在 `prompts/instructions.py`，工具触发规则由 `prompts/tools_description.py` 按注册表生成。
-所有输入（含短闲聊）都走完整的 Agent 1 推理——原短输入跳过机制已于 2026-07-16 移除（API 成本低，关键词误判不值得省这一次调用）。Agent 1 决策使用 CognitiveState（Phase 1+2）：输入去重过滤（避免重复输入重复推理）、error_fallback 跳过重复、决策 temperature=0.3 保持稳定。
+所有输入（含短闲聊）都走完整的 Agent 1 推理——原短输入跳过机制已于 2026-07-16 移除（API 成本低，关键词误判不值得省这一次调用）。每轮输入装配一份 CognitiveState（情绪快照 + 记忆摘要），Agent 1/3 复用同一份；Agent 1 决策 temperature=0.3 保持稳定。消息历史侧的当前输入去重、error_fallback / is_tool_claim / 舞台指示过滤由 `core/message_builder.py` 统一完成。
 
 ### 决策输出格式
 
@@ -302,8 +301,7 @@ TAGS: <逗号分隔>
 
 | 变量 | 说明 |
 |------|------|
-| `{conversation}` | 对话文本 |
-| `{current_care_list}` | 当前挂念清单 |
+| `{text}` | 对话文本（截断 3000 字） |
 
 ### 矛盾复核 — CONTRADICTION_VERIFY_PROMPT
 
@@ -313,8 +311,8 @@ LLM 判断两个 fact 是否真正矛盾。
 
 | 变量 | 说明 |
 |------|------|
-| `{existing_fact}` | 已有事实 |
-| `{new_value}` | 新值 |
+| `{old_key}` / `{old_value}` | 已有事实的关键词与值 |
+| `{new_key}` / `{new_value}` | 新事实的关键词与值 |
 
 ### 情感分析 — EMOTION_ANALYSIS_PROMPT
 

@@ -41,7 +41,7 @@
 │  temp=0.8, 完整人格 + 情绪 + 记忆              │
 │  接收 summary + context_summary + tool_results │
 │  (复用 Agent 1 记忆/关系摘要, 不重复检索)        │
-│  内部工具: recall / remember                    │
+│  内部工具: recall / remember / history_search  │
 │  ReAct 循环: THINK → ACT → THINK → ...        │
 └──────────────────┬───────────────────────────┘
                    │
@@ -126,13 +126,15 @@ SessionManager.get_or_create() → WebAgent
                             │
                  ┌──────────▼───────────────┐
                  │  主循环非阻塞出队         │
+                 │  read_line() 内部即        │
                  │  Queue.get_nowait()      │
-                 │  → 有输入 → PERCEIVE     │
-                 │  → 无输入 → 检查主动触发  │
-                 │     └ 空闲>180s?          │
-                 │       计算 proactivity   │
-                 │       随机命中 → THINK   │
-                 │       (跳过了 PERCEIVE)   │
+                 │  → 有输入 →              │
+                 │    engine.handle_message  │
+                 │    (即 PERCEIVE)          │
+                 │  → 无输入 →              │
+                 │    time.sleep(0.1) 轮询   │
+                 │  主动触发由 RuntimeDriver │
+                 │  守护线程负责(见 1.5 节)   │
                  └──────────────────────────┘
 ```
 
@@ -268,7 +270,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。Agent 1 决策时使用 `CognitiveState`（Phase 1+2）：输入去重过滤、error_fallback 跳过重复、决策温度 0.3。`MemoryPorter` 和 `CareList`（内驱状态池二期）参与主动沉思循环——独处时浮现挂念条目，对话时按语义相关浮现。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。Agent 1 决策时使用 `CognitiveState`（Phase 1+2）：输入去重过滤、error_fallback 跳过重复、决策温度 0.3。`InnerDriveState`（core/inner_drive_state.py，内驱状态池二期）参与主动沉思循环——独处时 `surface()` 浮现挂念条目，对话时 `surface_for_query()` 按语义相关浮现。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 
@@ -379,7 +381,7 @@ Agent 1 重新评估 → 调整策略或放弃外部工具
     └──────────────────────────────────────────┘
 ```
 
-**ReAct 多轮迭代（Agent 3，仅 recall/remember）**：
+**ReAct 多轮迭代（Agent 3，仅内部工具 recall/remember/history_search）**：
 
 ```
 THINK ─── 解析出 <tool_call> {"name": "recall", "arguments": {...}}
@@ -387,7 +389,7 @@ THINK ─── 解析出 <tool_call> {"name": "recall", "arguments": {...}}
     ▼
 ACT: execute_tool_calls(registry, calls)
     │  tools/memory_tools.py → ltm.store_fact(...)
-    │  → SQLite facts_v2（旧方法名适配，user_facts 已归档）
+    │  → SQLite facts_v2（旧方法名适配，user_facts 已随 schema v6 物理删除）
     ▼
 结果格式化为 <tool_result name="recall">
     │  \n找到 2 条：\n- 名字: 小陈\n- 摄影: 街拍\n
@@ -398,7 +400,9 @@ ACT: execute_tool_calls(registry, calls)
 无 tool_call → 结束迭代
 ```
 
-**Agent 3 意图回路（MessageHandler 路径）**：Agent 3 也可以不直接回复，而是输出 JSON 意图（如 play_music / search_web）→ Agent 1 `assess_agent3_intent` 审批 → 批准则 Agent 2 单轮执行 → Agent 3 生成最终回复（最多循环 2 次）；拒绝则返回过渡性回复。
+**Agent 3 意图回路（MessageHandler 路径）**：Agent 3 也可以不直接回复，而是输出 JSON 意图（`reply_to_user` / `intent` / `intent_description` / `intent_target` 四字段，intent 如 play_music / search_web）→ Agent 1 `assess_agent3_intent` 审批（结合用户原始输入与情绪判断，`INTENT_TO_TOOL` 给出建议工具映射）→ 批准则 Agent 2 单轮执行 → Agent 3 生成最终回复（最多循环 2 次）；拒绝则返回过渡性回复。
+
+工具声明与执行的一致性（#301，2026-07-26）：Agent 3 prompt 的「可用工具」块只渲染内部 registry（recall / remember / history_search，与 ReAct 执行 registry 严格一致）；外部动作不出现在工具块中，只能经上述 intent 回路发起——`build_system_prompt(tools=内部 registry, rule_tools=全量 registry)`，输出规则块的 intent 选项由 `rule_tools` 派生（Agent 1 侧 M-06 同款模式）。主动搭话（handle_proactive）与自由探索（handle_explore）路径同样按此传参。
 
 ---
 
@@ -426,7 +430,7 @@ _send_segments(): 整条回复作为单个 segment 发送
 前端 JS: 单气泡渲染; REST 模式同样全量返回 response
 ```
 
-保留代码：`_split_segments()`（6 级 fallback）与 `_calc_delay()`（情绪基础延时 0.7~2.5s × 长度系数 × 随机 0.8~1.3）仍在 web/server.py 中，但生产路径已无调用方（仅 tests/test_segmentation.py 引用），待分段恢复时重用。
+原保留代码 `_split_segments()`（6 级 fallback）与 `_calc_delay()`（情绪基础延时 0.7~2.5s × 长度系数 × 随机 0.8~1.3）已随统一管线 P3 收尾删除（2026-07-16，含唯一调用方 tests/test_segmentation.py）；分段推送若要恢复，可从 git 历史找回。
 
 ---
 
@@ -464,7 +468,7 @@ _send_segments(): 整条回复作为单个 segment 发送
     │       │    → FactChecker 矛盾检测 (#6)               │
     │       │      同 key 不同 value → 直接矛盾            │
     │       │      语义相似 >0.65 → LLM 复核，复述否决保留  │
-    │       │    → SUMMARY|温暖|分享宠物趣事 → experiences │
+    │       │    → SUMMARY:/TONE: 分块（分享宠物趣事·温暖）→ experiences │
     │       │    → L1 洞察（hypothesis/evidence/confidence）│
     │       │       → insert insights_v2                  │
     │       │                                              │
@@ -507,7 +511,7 @@ _send_segments(): 整条回复作为单个 segment 发送
 │  ① ConversationBuffer.add("user", 输入)                      │
 │  ② SQLite: INSERT conversation_turns                        │
 │  ③ MemoryRetriever.retrieve_for_query()                     │
-│     ├ 读 SQLite: user_facts + experiences + reflections      │
+│     ├ 读 SQLite: facts_v2 + experiences + insights_v2       │
 │     └ 读 SQLite: relationship_metrics                        │
 └──────────────────────────────────────────────────────────────┘
     │
@@ -537,7 +541,7 @@ _send_segments(): 整条回复作为单个 segment 发送
 │  ① 组装 system prompt（静态/慢变/动态分层, #160）               │
 │  ② 估算 token，动态塞对话到 80%                               │
 │  ③ POST DeepSeek API（max_tokens 随情绪调整）                  │
-│  ④ 解析响应，检查 <tool_call>（仅 recall/remember）              │
+│  ④ 解析响应，检查 <tool_call>（仅 recall/remember/history_search）  │
 │  ⑤ 有 tool_call → 执行 → 结果喂回 → 继续 THINK               │
 └──────────────────────────────────────────────────────────────┘
     │

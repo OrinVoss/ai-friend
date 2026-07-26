@@ -36,7 +36,6 @@ python web_main.py
 
 | 字段 | 说明 |
 |------|------|
-| `id` | 角色 ID（建议与文件名一致） |
 | `personality.name` | AI 名字 |
 | `personality.traits` | 性格特质及强度 (0~1) |
 | `personality.speaking_style` | 说话风格描述 |
@@ -68,11 +67,11 @@ python web_main.py
     │
     └── Web: python web_main.py → FastAPI + WebSocket
               │
-              ├── web/server.py  (HTTP + WS + proactive_loop + Pydantic + 滑动窗口限流)
+              ├── web/server.py  (HTTP + WS + Pydantic + 滑动窗口限流)
               ├── web/session.py (SessionManager + WebAgent：按角色加载 personality，session 隔离)
               ├── web/schemas.py (Pydantic 请求/响应模型)
               ├── web/rate_limit.py (内存滑动窗口限流)
-              ├── web/static/    (HTML + CSS 变量 + JS，浅色响应式)
+              ├── web/static/    (HTML + CSS 变量 + JS，浅色/深色双主题)
               └── personalities/ (角色定义目录，每个角色独立 JSON)
     │
     ▼
@@ -82,7 +81,7 @@ Agent 1: core/inner_drive.py  (InnerDriveAgent)
     │  若不需要外部工具 → 跳过 Agent 2 (闲聊优化)
     │  若需要 → 输出自然语言请求给 Agent 2
     ▼
-Agent 2: core/tool_agent.py  (ToolAgent, temp=0.3, 纯工具调用)
+Agent 2: core/tool_agent.py  (ToolAgent, 纯工具调用)
     │  7 个外部工具: web_fetch, web_search, read_file, glob, grep, music_play, notify
     │  ToolAttemptTracker: 3 retries/round, 3 rounds max
     │  失败 → 回报 Agent 1 重新决策
@@ -115,7 +114,7 @@ Agent 3: core/agent.py  (Roleplay Agent, temp=0.8, 人格驱动)
     │   ├── memory_agent.py      (Memory Agent: 向量召回 + 交叉验证 + 置信度回答)
     │   └── lifecycle.py         (MemoryLifecycleManager: Observation→Fact→Insight 生命周期)
     │
-    ├── tools/               (Agent 1,3: 2 内部 / Agent 2: 7 外部)
+    ├── tools/               (Agent 1: 2 内部 / Agent 3: 3 内部 / Agent 2: 7 外部)
     ├── storage/             (aiosqlite 异步, WAL, 版本化迁移；session_roles 记录 session→role 映射)
     ├── prompts/             (提示词模板, inner_drive / 破防/怨恨/梦境注入)
     └── models/              (EmotionalState / Turn / UserFact / Observation / FactV2 / InsightV2 等)
@@ -133,7 +132,7 @@ models / prompts                  （纯数据 / 模板层，被各层引用）
 
 - `core/agent.py` 是装配枢纽，直接依赖 15 个内部模块（全项目最多）。
 - 跨层例外：`storage/repository.py`、`memory/long_term.py` 等直接使用 `core/async_utils.py` 的 `run_async()`，`memory/consolidation.py` 使用 `core/personality.py`；被引用方不回依赖，故不成环。
-- 潜在环靠函数内 lazy import 打破：`agent ↔ cli_controller`、`short_term ↔ context_manager`、`prompts.system → core.prompt_cache`；`core/inner_drive.py` 顶层零内部 import（全部延迟到方法内）。
+- 潜在环靠函数内 lazy import 打破：`agent ↔ cli_controller`、`short_term ↔ context_manager`、`prompts.system → core.prompt_cache`。
 - 统一装配：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）。
 
 ---
@@ -235,7 +234,7 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 
 ---
 
-## 工具系统（9 个，三层分工）
+## 工具系统（10 个，三层分工）
 
 | Agent | 工具 | 功能 | 后端 |
 |------|------|------|------|
@@ -248,9 +247,10 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 | Agent 2 | notify | Windows toast 通知 | PowerShell WinRT |
 | Agent 1,3 | recall | 回忆用户信息 | SQLite |
 | Agent 1,3 | remember | 记住用户信息 | SQLite |
+| Agent 3 | history_search | 搜索原始对话历史（关键词/语义/按轮次） | SQLite + 向量 |
 
 Agent 1 (InnerDriveAgent) 自主推理决策，输出自然语言工具请求。
-Agent 2 (ToolAgent) 接收请求执行外部工具，ToolAttemptTracker 控制重试，temperature=0.3。
+Agent 2 (ToolAgent) 接收请求执行外部工具，ToolAttemptTracker 控制重试。
 Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部工具可用。
 
 ---
@@ -261,8 +261,8 @@ Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部�
 |------|-----|-----|
 | 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
 | 输入 | stdin 线程 | WebSocket |
-| 输出 | 打字机效果 | 分段独立气泡 + 情绪调速 |
-| 主动对话 | IDLE 轮询 | proactive_loop 协程 |
+| 输出 | 打字机效果 | 流式 Markdown 气泡（分段暂禁，单段发送） |
+| 主动对话 | RuntimeDriver 守护线程 | RuntimeDriver 协程（WS init 时启动） |
 | 会话 | 单用户 | SessionManager |
 
 ---
@@ -368,11 +368,13 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── changes/                 修改记录
 ├── doc/                     文档
 │
-├── core/                    核心引擎（23 模块，三层架构）
+├── core/                    核心引擎（25 模块，三层架构）
     │   ├── inner_drive.py       Agent 1 InnerDriveAgent（自主推理 + 记忆检索 + 缺口决策 + 主动沉思循环）
-    │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker, temp=0.3）
+    │   ├── tool_agent.py        Agent 2 ToolAgent（外部工具执行 + ToolAttemptTracker）
     │   ├── agent.py             Agent 3 Roleplay（人格驱动, temp=0.8）+ ReAct 循环
     │   ├── message_handler.py   消息入口（handle_message / proactive / explore 三层编排）
+    │   ├── agent_wiring.py      Agent/工具装配（ToolAgent / MemoryAgent / 工具注册表，自 message_handler 拆出）
+    │   ├── message_builder.py   Agent 3 消息构建（历史字符预算 + error_fallback 跳过，自 message_handler 拆出）
     │   ├── context_manager.py   上下文窗口管理（token 估算 + 压缩 + 摘要）
     │   ├── prompt_cache.py      Prompt 分层缓存（静态/慢变/动态块复用, #160）
     │   ├── session_factory.py   CLI/Web 共享会话装配（统一管线 P0，per-session Repository）
@@ -382,7 +384,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
     │   ├── personality_manager.py 人格局加载/保存/枚举（统一入口）
     │   ├── personality_validator.py 人格校验器（A4，情绪状态校验）
     │   ├── sleep_manager.py     睡眠系统（窗口判断 + 梦境生成 + 状态持久化）
-    │   ├── proactivity.py       主动行为（评分 + 频率限制）
+    │   ├── proactivity.py       主动行为（评分 + 频率限制 + 回馈归因，proactive_outcome 已并入）
     │   ├── cli_controller.py    CLI 输入循环 + 命令层（ConversationEngine 前端）
     │   ├── provider.py          LLMProvider ABC + DeepSeekProvider 实现（OpenAI 兼容，流式，JSON mode）
     │   ├── monitor.py           LLM API 调用监控（环形缓冲，开发调试用）
@@ -390,7 +392,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
     │   ├── logging_setup.py     日志配置（logs/YYYY-MM-DD.log + stderr）
     │   ├── async_utils.py       异步→同步桥接 run_async()（线程池安全）
     │   ├── dispatcher.py        tool_call 三层解析（JSON / XML / 裸 JSON）+ 执行 + 别名下沉
-    │   ├── cognitive_state.py   CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）
+    │   ├── cognitive_state.py   CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）+ MemoryContextProvider（已并入）
     │   └── inner_drive_state.py 内驱状态池（挂念清单/沉思循环/响应线索）
     ├── memory/                  记忆系统（9 模块）
     │   ├── short_term.py        ConversationBuffer（deque, 线程安全）
@@ -402,7 +404,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
     │   ├── fact_checker.py      矛盾检测 + LLM 复核 + 置信度衰减 + 用户纠正 + 向上传播
     │   ├── memory_agent.py      Memory Agent：向量召回 + 交叉验证 + 置信度回答 + Insight 证据池 + 向量锚点指代解析（确定性管道，P0~P2）
     │   └── lifecycle.py         MemoryLifecycleManager（Observation→Fact: observe/promote/verify/contradict/decay/gc）
-├── tools/                   Agent 1,3: 2 内部 / Agent 2: 7 外部
+├── tools/                   Agent 1: 2 内部 / Agent 3: 3 内部 / Agent 2: 7 外部
 ├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）
 ├── prompts/                 提示词模板
 ├── models/                  数据模型（EmotionalState / Turn / UserFact / Observation / FactV2）

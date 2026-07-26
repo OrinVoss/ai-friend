@@ -1,13 +1,13 @@
 # AI Friend 完整开发日志
 
-> **项目周期**：2026-05-28 → 2026-07-22（56 天）
-> **提交总数**：386 次
-> **测试增长**：0 → 842 passed
+> **项目周期**：2026-05-28 → 2026-07-26（59 天）
+> **提交总数**：394 次
+> **测试增长**：0 → 841 passed
 > **数据库 Schema**：v1 → v6
 > **架构演进**：单体 Agent → 两阶段 → 三层 Agent → 六层架构
 > **文档体系**：从零 → 15+ 份技术文档
 >
-> 本文结合全部 386 次提交记录与 changes/ 目录下所有修改记录文件写成，
+> 本文结合全部 394 次提交记录与 changes/ 目录下所有修改记录文件写成，
 > 覆盖每一次架构决策、每一轮 Bug 歼灭、每一个功能落地的完整背景与实施细节。
 
 ---
@@ -834,7 +834,7 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 **`305fd7d` — fix: ContextManager compression strategy + inner-drive decision loop dedup**
 
-当前最新的一次提交（第 386 次）：
+这次提交（第 386 次）：
 
 | 项 | 内容 |
 |:---:|:---|
@@ -849,11 +849,90 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 ---
 
+## 第十卷：重构收尾与前端双主题（7月22日—26日）
+
+### Token 预算三刀（T1-T3）
+
+**`9f7daf8` — feat: token budget T1-T3 — Agent1 instruction slimming, history char budget, history_search tool**
+
+变更记录（`2026-07-22-token-budget.md`，依据 `doc/fix-plan-2026-07-22-token-budget.md` 执行）：
+
+- **T1 — Agent 1 指令瘦身**：`prompts/instructions.py` 五段指令（~1429 chars，占 Agent 1 prompt 的 66%）压缩合并为 `INNER_DRIVE_COMPRESSED`（684 chars，-52%），硬规则一字保留；旧五段常量保留为遗留别名。
+- **T2 — Agent 3 历史字符预算**：`config.py` 新增 `react_history_budget_chars: int = 16000`，`_build_messages` 在 token 预算外按字符从最旧开始丢弃，不触发 compress_context。
+- **T3 — `history_search` 内部工具**：历史被预算裁剪后可按需回查原始对话——`HistorySearchTool`（keyword / semantic / batch 三模式）+ Repository 新增 `search_turns` / `get_turns_range`。
+
+复审追加修正：history_search 的 JSON Schema 会吃回 Agent 1 的瘦身成果，改为 `_make_internal_registry(include_history_search=False)`——Agent 1 注册表只含 recall/remember，Agent 3 三处调用点传 True。
+
+### MessageHandler God Object 拆分
+
+**`0277301` — refactor: split MessageHandler god object (990→838) into agent_wiring/message_builder/proactive_outcome**
+
+变更记录（`2026-07-22-message-handler-split.md`）：`core/message_handler.py` 长到 990 行、25+ 方法。纯机械搬移 + 薄委托，行为零变化：
+
+| 新模块 | 内容 |
+|:---|:---|
+| `core/agent_wiring.py` | `AgentWiring`：懒加载装配（InnerDrive/ToolAgent/MemoryAgent/两种 registry 及其缓存） |
+| `core/message_builder.py` | `build_messages()`：prompt 消息数组构建（过滤 + 字符与 token 双预算） |
+| `core/proactive_outcome.py` | `match_active_care()` / `evaluate_proactive_outcome()`（L4-6a 主动行为回馈归因） |
+| `core/message_handler.py` | 只剩编排（838 行）：三层流水线 + 状态机 + ToolExecutionResult + 输入清洗 |
+
+既有调用方与测试零改动——原私有方法全部保留为薄委托，`handler._inner_drive` 等改为读写 property 转发到 wiring。
+
+### InnerDrive 清理与 core 同域归并
+
+**`b9b6bb5` — refactor: InnerDrive cleanup — intent mapping single source + MemoryContextProvider extraction**
+
+变更记录（`2026-07-22-inner-drive-cleanup.md`）：
+1. intent→tool 魔法字符串归一：`inner_drive.py` 硬编码映射改由 `prompts/tools_description.py` 的 `_TOOL_INTENT_ALIASES` 派生反向映射 `INTENT_TO_TOOL`，正反向映射永不漂移
+2. 记忆检索+格式化逻辑（~50 行）抽离为 `MemoryContextProvider`，含同消息 R1 memo 缓存；`InnerDriveAgent` 保留薄委托（929 → 898 行）
+
+**`077593b` — refactor: move INTENT_TO_TOOL import to module level**
+
+`INTENT_TO_TOOL` 改为模块级导入（`core/inner_drive.py:16`）。
+
+**`23bba77` — refactor: merge same-domain core modules (proactive_outcome→proactivity, memory_context_provider→cognitive_state)**
+
+变更记录（`2026-07-22-core-module-merge.md`）：上一周拆分产生的两个同域小模块归并回所属域——`proactive_outcome.py`（50 行）并入 `proactivity.py`（同属"主动行为"域），`memory_context_provider.py`（68 行）并入 `cognitive_state.py`（同属"轮次状态"域）。core/ 模块数 26 → 24。
+
+### Agent 2 错误元数据化 + 可配置常量
+
+**`0b6e989` — refactor: agent2_error as system metadata + configurable dispatcher_output_cap/stream_max_bytes**
+
+变更记录（`2026-07-22-error-metadata-and-config-constants.md`）：
+
+1. **agent2_error 元数据化**：此前 Agent 2 超时/异常时错误文本被 prepend 到 `records_text`，以 `role="user"` 进入 prompt，模型可能把系统错误当成用户输入。修复后 `agent2_error` 作为独立参数传给 `_run_agent3`，以 `[系统状态] ...` 形式附加到 **system prompt** 末尾（`core/message_handler.py:665-666`）。
+2. **硬编码常量入 Config**：`config.py` 新增 `dispatcher_output_cap: int = 2000`（原 dispatcher `_OUTPUT_CAP`）与 `stream_max_bytes: int = 1_048_576`（原 provider `STREAM_MAX_BYTES`），ToolAgent / ReAct 循环 / DeepSeekProvider 均改读实例配置。
+
+### 前端界面升级：双主题 + 流式渲染 + 智能滚动
+
+**`cea8d4f` — feat(web): dual-theme UI upgrade with streaming markdown & smart scroll**
+
+变更记录（`2026-07-26-前端界面升级双主题.md`）——纯前端升级，零后端改动，仅复用现有 WS 与 REST API：
+
+- **双主题**：新增 `web/static/theme.css` 共享设计令牌（语义色板 + 监控页专用 `--monitor-*` 变量）；`<html data-theme>` 手动指定，未指定时经 `prefers-color-scheme` 跟随系统；手动选择存 `localStorage.ai_friend_theme`，主界面与监控页共用。`style.css` 全部颜色改为 `var(--*)`，无硬编码色值。
+- **流式渲染**：WS `segment` 到达即增量 `marked.parse` 渲染（失败回退纯文本），流式气泡带闪烁光标，`done` 终渲染。
+- **智能滚动**：贴底才自动跟随；用户上翻时显示"回到底部"悬浮按钮并累计未读角标。
+- **消息操作条**：悬停显示复制按钮；实时消息显示 `HH:MM` 时间戳（历史接口无时间字段，历史消息不显示）。
+- 其余：空态引导、历史加载骨架屏、WS 断线/重连横幅、header 主题切换按钮、静态资源版本 `?v=14` → `?v=15`。
+- **监控页统一**：`monitor.html` 引入 theme.css；因 CSP `script-src 'self'` 禁内联脚本，主题初始化放在 `monitor.js` 头部。
+
+### Embedding 端口冲突修复
+
+**`3ccb7d7` — docs(changes): record embedding port conflict fix (8080 occupied by Steam)**
+
+变更记录（`2026-07-26-修复embedding端口冲突.md`）：运行日志报 `llama-server exited early` 且 `/v1/embeddings` 404——`netstat` 确认 8080 被 `steamwebhelper.exe`（Steam）占用，语义检索退化为关键词模式。
+
+修复只动 `config.json`（不入库）：`embedding_endpoint` 改为 `http://localhost:18080/v1/embeddings`。依据 H-04 设计（`core/embedding_server.py`），llama-server 启动端口由 `_port_from_endpoint()` 从该 endpoint 派生，改一个键即同时生效；也可用环境变量 `AI_FRIEND_EMBEDDING_ENDPOINT` 覆盖（默认值 `http://localhost:8080/v1/embeddings`，见 `config.py:86`）。
+
+全量测试：841 passed + 2 skipped。
+
+---
+
 ## 最终章：项目总结
 
 ### 代码库全景
 
-**提交分布**：386 次提交，约 7 次/活跃日。单分支（main），从头到尾一条线。
+**提交分布**：394 次提交，约 7 次/活跃日。单分支（main），从头到尾一条线。
 
 **版本里程碑**：
 
@@ -876,6 +955,7 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 - 第 50 天：466
 - 第 54 天：635
 - 第 56 天：842
+- 第 59 天：841（+2 skipped，测试归并后总数略降）
 
 **数据库 Schema 演进**：v1（原始 SQLite）→ v2（observations/facts_v2）→ v3（UK-001）→ v4（facts_v2 上线）→ v5（insights_v2）→ v6（archive 清理）
 
@@ -893,14 +973,14 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 ### 经验与教训
 
 **做得好的**：
-1. **文档纪律**——386 次提交几乎每次都同步更新文档和 changes/ 记录。13+ 份文档分布在所有维度
+1. **文档纪律**——394 次提交几乎每次都同步更新文档和 changes/ 记录。13+ 份文档分布在所有维度
 2. **问题清单驱动**——178 个问题按优先级歼灭，不做随机修 Bug
 3. **从战术到战略的跃迁**——第 48 天从"修 Bug"切换到"系统性设计"，3 天设计 5 天落地
 4. **根因追击**——#299 从 WebSocket 连接失败一路深挖到 CORS、权限、记忆固化、API 兼容
-5. **测试随行**——每次 Bug 修复都附带回归测试，测试规模从 0 增长到 842
+5. **测试随行**——每次 Bug 修复都附带回归测试，测试规模从 0 增长到 841
 
 **可以更好的**：
-1. **单分支风险**——386 次提交全在 main 上，无功能分支隔离
+1. **单分支风险**——394 次提交全在 main 上，无功能分支隔离
 2. **嵌入服务器稳定性**——问题从 Day 14 出现，Day 55 看门狗才根治，41 天的间歇性故障
 3. **v0.5 计划规模失当**——"4 周完成"过于乐观，实际约 6 周才接近完成
 4. **前端系统性不足**——大部分时间前端远落后于后端，UI 开发碎片化
@@ -910,7 +990,7 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 ### 尾声
 
-386 次提交，56 天，从命令行下一段"你好"到拥有完整人格、情绪、记忆、工具、Web 界面、监控面板、Token 鉴权的 AI 系统。
+394 次提交，59 天，从命令行下一段"你好"到拥有完整人格、情绪、记忆、工具、Web 界面、监控面板、Token 鉴权的 AI 系统。
 
 项目从零开始，最终成长为：
 - **3 层 Agent 架构**（InnerDrive → ToolAgent → Roleplay）
@@ -925,8 +1005,8 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 ---
 
-*开发日志完 · 全文约 16,000 字*
+*开发日志完 · 全文约 18,000 字*
 
 *项目路径：D:\桌面\编程作品\AI朋友*
-*提交范围：b289667 → 305fd7d（共 386 次）*
+*提交范围：b289667 → 3ccb7d7（共 394 次）*
 *数据来源：全部 git log + changes/ 目录下所有修改记录文件*

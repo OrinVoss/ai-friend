@@ -16,7 +16,9 @@ Tool (base class)          tools/traits.py
   ├── parameters_schema() → dict    # JSON Schema
   ├── execute(args) → ToolResult    # 同步方法
   ├── spec() → ToolSpec
-  └── required_permissions: [str]   # 权限元数据，空列表 = 不限制（#183）
+  ├── required_permissions: [str]   # 权限元数据，空列表 = 不限制（#183）
+  ├── timeout_seconds: float = 30   # per-tool 超时（Layer5-T1）
+  └── is_internal: bool = False     # True 的内部工具不暴露给 Agent 2
 
 ToolRegistry                tools/traits.py
   ├── register(tool)
@@ -24,7 +26,7 @@ ToolRegistry                tools/traits.py
   ├── list_specs() → [ToolSpec]
   ├── format_for_prompt()  → str    # 注入 prompt
   ├── to_json_schema() → dict       # JSON mode 工具列表
-  └── check_permission(name, role)  # 已定义，但当前无调用方，权限层未生效
+  └── check_permission(name, user_role)  # dispatcher._execute_single 强制执行（Layer5-D3）
 
 ToolResult                  tools/traits.py
   ├── success: bool
@@ -38,8 +40,8 @@ ToolResult                  tools/traits.py
 | Agent | 可用工具 | 职责 |
 |-------|----------|------|
 | Agent 1 InnerDrive | `recall`, `remember` | 自主推理、检索记忆、决策是否需要外部工具 |
-| Agent 2 ToolAgent | 全部 8 个外部工具 | 纯工具执行，temperature=0.3，无人格/情绪/记忆 |
-| Agent 3 Roleplay | `recall`, `remember` | 人格驱动回复，仅内部内存操作 |
+| Agent 2 ToolAgent | 全部 8 个外部工具 | 纯工具执行，无人格/情绪/记忆（未单独设温，沿用 config.temperature 默认 0.8） |
+| Agent 3 Roleplay | `recall`, `remember`, `history_search` | 人格驱动回复，仅内部内存操作 |
 
 **核心原则**：Agent 3 的 system prompt 中不出现外部工具指令，从根源上消除模型虚构外部工具调用。
 
@@ -89,25 +91,21 @@ class WeatherTool(Tool):
 
 ### 第 2 步：注册到 ToolRegistry
 
-需要在**入口/封装层**把新工具挂到对应的 `ToolRegistry`，再交给 Agent：
+需要在**统一装配点** `core/session_factory.py` 的 `assemble_session()` 把新工具挂到 `ToolRegistry`（CLI 与 Web 共用此入口）：
 
 ```python
-# Web 模式 — web/session.py WebAgent.__init__
-registry = ToolRegistry()
-registry.register(WeatherTool())  # 和其他工具并列注册
+# core/session_factory.py assemble_session()
+tool_registry = ToolRegistry()
+tool_registry.register(RecallTool(retriever, ltm))
+tool_registry.register(RememberTool(ltm))
 ...
-self.agent = Agent(...)
-self.agent._tool_registry = registry  # 全量工具箱，由 MessageHandler 按内/外拆分
-
-# CLI 模式 — main.py
-registry = ToolRegistry()
-registry.register(WeatherTool())
+tool_registry.register(WeatherTool())  # 和其他工具并列注册
 ...
 agent = Agent(...)
-agent._tool_registry = registry
+agent._tool_registry = tool_registry  # 全量工具箱，由 AgentWiring 按内/外拆分
 ```
 
-注意：入口注册的是**全量**工具箱，`MessageHandler` 会自动拆分——Agent 1 / Agent 3 使用独立注册的 `recall` / `remember` 内部工具；Agent 2 按 `tools/traits.py` 的 `EXTERNAL_TOOL_NAMES` 名单从全量注册表过滤出外部工具。因此新工具如果是**外部工具**（调用 API、读文件等），还必须把 `name()` 加进 `EXTERNAL_TOOL_NAMES`，否则 Agent 2 看不到它。Web 端通过 `WebAgent` 封装后统一赋值给 `Agent._tool_registry`（#45）；目前 Web 端未注册 `FileTreeTool`，其余与 CLI 一致。
+注意：入口注册的是**全量**工具箱，`core/agent_wiring.py` 的 `AgentWiring` 会自动拆分——Agent 1 / Agent 3 使用独立注册的内部工具（Agent 1：`recall` / `remember`；Agent 3 另加 `history_search`）；Agent 2 按 `tools/traits.py` 的 `EXTERNAL_TOOL_NAMES` 名单从全量注册表过滤出外部工具（并跳过 `is_internal=True` 的工具）。因此新工具如果是**外部工具**（调用 API、读文件等），还必须把 `name()` 加进 `EXTERNAL_TOOL_NAMES`，否则 Agent 2 看不到它。`FileTreeTool` 由 `include_file_tree` 参数控制：CLI（`main.py`）传 `True`，Web 端用默认 `False` 不注册，其余工具两端一致。
 
 ### 第 3 步（可选）：加参数别名
 
@@ -123,7 +121,7 @@ class WeatherTool(Tool):
 
 ### per-tool 超时
 
-每个工具可声明 `timeout_seconds` 类属性（默认 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时标记 `error_type="timeout"`：
+每个工具可声明 `timeout_seconds` 类属性（默认 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时返回 `error_type="network_error"`、`retryable=True`：
 
 ```python
 class WeatherTool(Tool):
@@ -149,7 +147,7 @@ raise ValueError("unexpected")  # 自动包装为 ToolResult.fail
 
 - 返回 `ToolResult.fail` → ToolAttemptTracker 触发重试（最多 3 次/轮 × 3 轮）
 - 抛出异常 → dispatcher 捕获，转为 `ToolResult.fail`
-- ToolResult v2 新增错误分类：`error_type`（"timeout"/"validation"/"api"/"internal"）和 `retryable` 标记。validation 错误不重试（参数问题重试无意义），timeout/api 错误指数退避重试（1s/2s/4s）。
+- ToolResult v2 新增错误分类：`error_type`（"param_error"/"not_found"/"network_error"/"permission_denied"/"rate_limited"/"internal"）和 `retryable` 标记。`retryable=False` 的错误（如 param_error，参数问题重试无意义）提前放弃；`retryable=True` 的错误（如超时映射的 network_error）指数退避重试（1s/2s/4s）。
 - 全部重试失败 → 回报 Agent 1 重新决策
 
 ---
@@ -218,7 +216,7 @@ Agent 1 InnerDrive
     └── 需要 → 输出自然语言请求
         │
         ▼
-    Agent 2 ToolAgent (temp=0.3)
+    Agent 2 ToolAgent
         │ 接收自然语言请求
         │ 三层解析：JSON 数组 → XML <tool_call> 正则 → 裸 JSON 兜底
         │ ToolAttemptTracker: 3 次重试/轮 × 3 轮
@@ -237,4 +235,4 @@ Agent 1 InnerDrive
 1. **Agent 3 不会看到你的工具** — 外部工具只对 Agent 2 可见
 2. **参数尽量少** — `response_format="json_object"` 模式下参数越多越容易出错
 3. **不要依赖 LLM 侧状态** — ToolAgent 每次调用 prompt 独立，无对话历史
-4. **返回值控制在 2000 字符内** — 超出会截断（`#192`）
+4. **返回值控制在 2000 字符内** — 超出会截断（`#192`；默认值，可用配置键 `dispatcher_output_cap` 覆盖）

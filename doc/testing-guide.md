@@ -13,7 +13,7 @@
 python -m pytest tests --ignore=tests/real_api -q
 ```
 
-当前共 60+ 个测试文件、838 个用例（838 passed + 2 skipped）。
+当前共 60+ 个测试文件、841 个用例（841 passed + 2 skipped）。
 
 ### 按文件运行
 
@@ -75,7 +75,6 @@ tests/
 ├── test_context_manager.py  # 上下文管理测试
 ├── test_sleep_manager.py    # 睡眠管理测试
 ├── test_fact_checker.py     # FactChecker 测试
-├── test_segmentation.py     # 分段推送测试
 ├── test_web_agent.py        # WebAgent 测试
 ├── test_session_manager.py  # Web 会话/角色绑定测试
 ├── test_file_tools.py       # 文件工具测试
@@ -243,7 +242,7 @@ with pytest.raises(ValidationError):
 
 **对话示例可配置（#28）**：验证 `build_system_prompt` 传入不同 `conversation_examples` 后 prompt 包含对应示例文本。
 
-**记忆生命周期（Layer 1 一期）**：验证 `MemoryLifecycleManager` 的 observe/promote/contradict 等状态流转，repo 层用 `AsyncMock` 模拟（tests/test_memory_lifecycle.py）。
+**记忆生命周期（Layer 1 一期）**：验证 `MemoryLifecycleManager` 的 observe/promote_fact/contradict_fact 等状态流转，repo 层用 `AsyncMock` 模拟（tests/test_memory_lifecycle.py）。
 
 **Prompt 分层缓存（#160）**：验证 `PromptCache.get_or_build` 静态块不重复构建、慢变块 TTL 过期后重建（tests/test_prompt_cache.py）。
 

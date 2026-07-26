@@ -10,24 +10,23 @@
 ```
 python web_main.py
        │
-       ├── 1. load_config() ── config.json + 环境变量 → Config dataclass
-       ├── 2. setup_logging() ── logs/YYYY-MM-DD.log
-       ├── 3. auto_start_embedding() ── llama.cpp 嵌入服务
+       ├── 1. setup_logging("INFO") → load_config()（随 web.server 导入触发）
+       │      → setup_logging(config.log_level) ── logs/YYYY-MM-DD.log
+       ├── 2. auto_start_embedding() ── llama.cpp 嵌入服务
        │
-       └── 4. uvicorn.run("web.server:app")
+       └── 3. uvicorn.run("web.server:app")
                 │
-                ├── 4a. FastAPI 模块加载（静态）
-                │   ├── 中间件链（CORS → RateLimit）
-                │   ├── 安全头中间件
+                ├── 3a. FastAPI 模块加载（静态）
+                │   ├── 中间件链（鉴权 → 安全头 → CORS → RateLimit）
                 │   ├── 路由表注册（/api/*、/ws、/static/*）
                 │   └── SessionManager、RateLimiter 实例化
                 │
-                ├── 4b. lifespan() 异步启动
+                ├── 3b. lifespan() 异步启动
                 │   ├── 日志重初始化
                 │   ├── session_manager.open() 打开数据库（自动迁移 schema）
                 │   └── 后台 session 清理协程（5min 间隔）
                 │
-                └── 4c. Uvicorn 监听 0.0.0.0:8000 ── 等待请求
+                └── 3c. Uvicorn 监听 0.0.0.0:8000 ── 等待请求
 ```
 
 ---
@@ -37,8 +36,8 @@ python web_main.py
 ### Step 1: 配置加载 — `config.py`
 
 ```python
-# web_main.py:16
-config = load_config()
+# web_main.py:19 — 导入即触发 web.server 模块级唯一的 load_config()（全进程单例，L-10/L-12）
+from web.server import config
 ```
 
 `Config` dataclass 从三个来源合并：
@@ -56,7 +55,8 @@ config = load_config()
 ### Step 2: 日志初始化 — `core/logging_setup.py`
 
 ```python
-# web_main.py:17
+# web_main.py:16 先以 INFO 初始化（避免丢失 load_config 的启动日志，M-19）
+# web_main.py:20 配置就绪后按 log_level 重设
 setup_logging(config.log_level)
 ```
 
@@ -67,14 +67,14 @@ setup_logging(config.log_level)
 ### Step 3: 嵌入服务启动 — `core/embedding_server.py`
 
 ```python
-# web_main.py:19
-auto_start_embedding(logger)
+# web_main.py:23（H-04：传入配置的 endpoint，启动端口与连接端口一致）
+auto_start_embedding(logger, config.embedding_endpoint)
 ```
 
 | 条件 | 行为 |
 |------|------|
-| `http://localhost:8080/v1/embeddings` 已有响应 | 跳过（跳转） |
-| `memory/Qwen3.5-0.8B-Q6_K.gguf` 模型文件存在 | 先清理残留 llama-server 进程，再优先运行 `start_embedding_server.bat`；不存在则 `subprocess.Popen` 直接启动 `memory/llama-bin/llama-server.exe` |
+| `embedding_endpoint`（默认 `http://localhost:8080/v1/embeddings`，可用环境变量 `AI_FRIEND_EMBEDDING_ENDPOINT` 覆盖）已有响应 | 跳过 |
+| `memory/Qwen3.5-0.8B-Q6_K.gguf` 模型文件存在 | 先清理残留 llama-server 进程，再优先运行 `start_embedding_server.bat`；不存在则 `subprocess.Popen` 直接启动 `memory/llama-bin/llama-server.exe`（端口从 endpoint 派生，解析失败兜底 8080） |
 | 模型文件不存在 | 仅记录 info，**不阻塞启动** |
 
 就绪等待在后台守护线程进行（每秒轮询，最多 90 秒），不阻塞主启动流程；
@@ -82,7 +82,7 @@ auto_start_embedding(logger)
 CLI 与 Web 入口共用 `core/embedding_server.py`。
 不可用时自动降级为纯关键词搜索，不影响对话。
 
-### Step 4a: FastAPI 模块加载（静态）
+### Step 3a: FastAPI 模块加载（静态）
 
 uvicorn 导入 `web.server:app` 时触发模块级代码：
 
@@ -103,13 +103,16 @@ _ws_allowed_hosts = {"localhost", "127.0.0.1"} # 从 config 追加 Origin
 请求进入
     │
     ▼
-[0] _add_security_headers        ← 添 CSP/X-Frame-Options 头（响应路径）
+[0] _token_auth                  ← /api/* token 校验（未配置 web_access_token 时直通）
     │
     ▼
-[1] CORSMiddleware               ← 检查/设置 CORS 头
+[1] _add_security_headers        ← 添 CSP/X-Frame-Options 头（响应路径）
     │
     ▼
-[2] RateLimitMiddleware          ← 滑动窗口限流
+[2] CORSMiddleware               ← 检查/设置 CORS 头
+    │
+    ▼
+[3] RateLimitMiddleware          ← 滑动窗口限流
     │
     ▼
 路由分发（/ → FileResponse, /api/* → JSON, /ws → WebSocket）
@@ -128,15 +131,16 @@ _ws_allowed_hosts = {"localhost", "127.0.0.1"} # 从 config 追加 Origin
 | `/api/sessions` | GET | `sessions_api()` | 列出某角色已有的 session |
 | `/api/monitor` | GET | `monitor_api()` | LLM 调用监控记录（JSON） |
 | `/api/monitor/clear` | GET | `monitor_clear()` | 清空监控缓冲 |
+| `/api/tools/metrics` | GET | `tools_metrics_api()` | 各工具成功率/延迟/重试指标 |
 | `/monitor` | GET | `monitor_page()` | 监控页面 |
-| `/favicon.ico` | GET | `favicon()` | 204，静默浏览器 404 |
+| `/favicon.ico` | GET/HEAD | `favicon()` | 204，静默浏览器 404 |
 | `/ws` | WebSocket | `websocket_endpoint()` | 主聊天接口 |
-| `/static/*` | — | StaticFiles | 静态资源（app.js, style.css） |
+| `/static/*` | — | StaticFiles | 静态资源（app.js, style.css, theme.css） |
 
-### Step 4b: lifespan() 异步启动
+### Step 3b: lifespan() 异步启动
 
 ```python
-# web/server.py:56-81
+# web/server.py:60-86
 @asynccontextmanager
 async def lifespan(app):
 ```
@@ -146,8 +150,8 @@ async def lifespan(app):
 1. **日志重初始化** — uvicorn 可能重置了 root handler，重新 setup
 2. **`await session_manager.open()`**
    - 打开 SQLite 数据库（`data/ai_friend.db`，WAL 模式）
-   - 自动迁移表结构（schema v2，共 9 张表，含 Layer 1 记忆新增的
-     `observations` / `facts_v2`；列级 ALTER 有白名单校验）
+   - 自动迁移表结构（schema v6，共 9 张表，含 Layer 1 记忆新增的
+     `observations` / `facts_v2` / `insights_v2`；列级 ALTER 有白名单校验）
    - 创建索引
    - 构建共享的 `DeepSeekProvider`（HTTP 连接池复用）
    - 构建共享的 `EmbeddingEngine`（本地嵌入服务客户端）
@@ -156,7 +160,7 @@ async def lifespan(app):
 
 `yield` 后服务开始接受请求。
 
-### Step 4c: Uvicorn 监听
+### Step 3c: Uvicorn 监听
 
 ```
 INFO:     Uvicorn running on http://0.0.0.0:8000
@@ -182,7 +186,7 @@ HTTP GET /
 ### 6. WebSocket 连接
 
 ```javascript
-// app.js:78
+// app.js:213
 ws = new WebSocket(proto + '//' + location.host + '/ws');
 ```
 
@@ -232,9 +236,9 @@ CLIENT → 发送 init JSON        SERVER
                               │              ├── load personality JSON
                               │              ├── 创建 LTM / short_term
                               │              ├── 从 DB 恢复最近 30 轮
-                              │              └── 创建 InnerDriveAgent + ToolAgent
+                              │              └── InnerDriveAgent + ToolAgent（惰性，首次用到时创建）
                               │
-                              ├── 启动 _proactive_loop 后台协程
+                              ├── 启动 RuntimeDriver 后台协程
                               │   （每 15 秒检查空闲/睡眠/主动）
                               │
                               └── 发送 init_ok（含 session_id, role_id, emotion, name）
@@ -295,7 +299,7 @@ get_or_create(sid, role_id)
       │   └── DeepSeekProvider(endpoint, api_key) — HTTP 连接池复用
       │
       ├── (d) EmbeddingEngine（共享实例）
-      │   └── 通过 localhost:8080 做语义搜索
+      │   └── 通过 embedding_endpoint（默认 localhost:8080）做语义搜索
       │
       ├── (e) ToolRegistry 注册 9 个工具
       │   ├── Agent 1,3: recall, remember（内部工具）
@@ -328,24 +332,26 @@ get_or_create(sid, role_id)
 WebSocket init 后，服务端创建一个后台协程（`web/server.py`）：
 
 ```python
-task = asyncio.create_task(_proactive_loop(websocket, session_id))
+# web/server.py:450
+task = asyncio.create_task(driver.run())
 ```
 
 它的生命周期绑定 session（标签页关闭 → WS 断开 → 协程取消）。实际运行的是 `RuntimeDriver` 统一驱动（替代原来的 `_proactive_loop`）：
 
 ```python
 # core/runtime_driver.py
-async def _proactive_loop(websocket, session_id):
-    while True:
-        1. 检查睡眠/唤醒 → 发消息 + 梦境
-        2. 睡着？→ sleep 30s
-        3. idle < 30s 或冷却中？→ sleep 5s
-        4. ProactivityManager 评分（idle 低于情绪阈值时得 0 分）→ 命中？
-        5. InnerDrive Agent 1 决策：
-           ├─ chat（≤ 2/hr）→ process_proactive()
-           ├─ explore（≤ 1/hr）→ process_explore()
-           └─ silent → 不操作
-        6. sleep 15s → 回到 1
+class RuntimeDriver:
+    async def run(self):
+        while True:
+            1. 检查睡眠/唤醒 → 发消息 + 梦境
+            2. 睡着？→ sleep 30s
+            3. idle < 30s 或冷却中？→ sleep 5s
+            4. ProactivityManager 评分（idle 低于情绪阈值时得 0 分）→ 命中？
+            5. InnerDrive Agent 1 决策：
+               ├─ chat（≤ 2/hr）→ process_proactive()
+               ├─ explore（≤ 1/hr）→ process_explore()
+               └─ silent → 记录连续沉默，退避冷却（F1）
+            6. sleep 15s → 回到 1
 ```
 
 ---

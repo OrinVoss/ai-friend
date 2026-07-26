@@ -69,7 +69,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `embedding_endpoint` | string | `"http://localhost:8080/v1/embeddings"` | llama-server API 地址 |
+| `embedding_endpoint` | string | `"http://localhost:8080/v1/embeddings"` | llama-server API 地址；llama-server 启动端口从该地址派生（H-04），可用环境变量 `AI_FRIEND_EMBEDDING_ENDPOINT` 覆盖 |
 | `embedding_dim` | int | `1024` | 嵌入向量维度 |
 | `embedding_cache_size` | int | `1000` | 嵌入 LRU 缓存容量 |
 
@@ -89,6 +89,7 @@
 | `conversation_examples_max_turns` | int | `3` | 系统提示中对话示例仅在会话前 N 轮注入，`0` 表示始终不注入 |
 | `degrade_threshold` | int | `3` | 连续工具失败 N 次后降级（#255） |
 | `max_fake_actions` | int | `3` | 虚假动作纠正上限（#255） |
+| `emotion_turn_seconds` | int | `300` | 情绪按真实时间衰减：「一轮」对应的真实秒数（A6） |
 
 `conversation_examples` 每项格式：
 
@@ -208,12 +209,12 @@
 
 | 特质 | 效果 |
 |------|------|
-| `playfulness` | 提高调皮程度，减缓 arousal 衰减 |
+| `playfulness` | 提高调皮程度（joy +0.05），降低 arousal 输入增量（da × 0.7） |
 | `warmth` | 提高亲和力，增强 trust 增长 |
 | `humor` | 减轻 sadness，增加正面倾向 |
 | `empathy` | 放大情绪输入（dv × 1.5） |
 | `sass` | 减少 anger，轻度负面激发 joy |
-| `thoughtfulness` | 增加反思深度 |
+| `thoughtfulness` | 小幅提升 anticipation（期待感 +0.05） |
 | `curiosity` | 增强探索欲 |
 
 ### 示例

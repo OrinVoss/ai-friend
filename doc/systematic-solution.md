@@ -93,11 +93,11 @@ class RoleSession:
 
 - `SessionManager` 不再允许 `一个角色多个 session`。
 - 所有 SQLite 表已经按 `session_id` 隔离，只需保证 `session_id = role_id`。
-  - 已知例外（2026-07-16 发现，待修）：`user_facts` 唯一约束 `UNIQUE(category, fact_key)` 不含 `session_id`，跨 session 同 key 会互相覆盖；`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` 仍无 session 校验；`experiences.embedding` 写入后从未读回（经历的语义检索是死路径）。
+  - 已知例外（2026-07-16 发现，均已修复）：`user_facts` 唯一约束已迁移为 `UNIQUE(session_id, category, fact_key)`（schema v3，且 v4 起 user_facts 整体归档、数据迁入 facts_v2，新库不再建该表）；`update_fact_confidence` / `update_fact_score` / `increment_fact_recall` 已适配为 facts_v2 的 session 限定按 id 写入；`experiences.embedding` 已由语义检索读回（`memory/retrieval.py::_search_experiences_semantic`）。
 - `personality.json` 旧文件废弃；`personalities/{role_id}.json` 成为唯一人格+情绪数据源。
 - 解决：角色切换混乱、睡眠状态错配、关系指标历史空白、多 session 竞态。
 
-**状态**：未开始。计划与 Layer 6（Personality/Session/记忆绑定）合并实施。
+**状态**：✅ 已实现（2026-07-21，与 Layer 6 角色绑定一并完成）：`session_id = role_id` 强制校验（`web/session.py`、`main.py`），`personalities/{role_id}.json` 为唯一人格+情绪数据源。
 
 ### Layer 1: Memory Lifecycle —— 记忆有出生、验证、衰减、死亡
 
@@ -396,7 +396,7 @@ class ToolRuntime:
       max_llm_attempts: int = 3     # ToolAgent 内部重试
       max_network_retries: int = 3  # Provider 网络重试
   ```
-- 工具结果在 dispatcher 层摘要/截断，默认 1000 tokens。
+- 工具结果在 dispatcher 层摘要/截断，默认 2000 字符（配置键 `dispatcher_output_cap` 可调）。
 
 **状态**：✅ 已完成（2026-07-21 工具系统增强）。
 - [x] Agent 1/2 注册表隔离
@@ -424,7 +424,7 @@ class BaseLLMProvider(ABC):
 
 ### Layer 6: Observability —— 每个请求可追溯
 
-- 所有 LLM 调用记录 `source`（assess / review / tool_agent / react / proactive / dream）。
+- 所有 LLM 调用记录 `source`（assess_intent / review / tool_agent / react / proactive / dream 等）。
 - 结构化日志统一 JSON 输出，解决 Windows 中文乱码。
 - Metrics：`agent_time`, `tool_calls`, `token_in/out`, `memory_hits`, `error_rate`。
 - 监控面板保持现有功能，但改为可配置开关，生产环境可关闭完整 prompt 保存。
@@ -542,7 +542,7 @@ class BaseLLMProvider(ABC):
 
 ## 6. 验收标准
 
-1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 838 passed + 2 skipped，60+ 个测试文件）。
+1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 841 passed + 2 skipped，60+ 个测试文件）。
 2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 20%。
 3. **记忆质量**：连续对话 50 轮后，Fact confidence 衰减机制生效，无自相矛盾 Fact。
 4. **稳定性**：Web 端 30 分钟无人访问自动释放资源，shutdown 不丢数据。
@@ -565,10 +565,12 @@ class BaseLLMProvider(ABC):
 当前实际推进顺序：
 
 1. ~~**Layer 1 验证**：开启 `use_observation_fact=true` 运行一段时间，验证 `facts_v2` 数据质量~~（2026-07-18 已直接完整上线，改为线上观察 facts_v2 数据质量）
-2. **Layer 2 短输入过滤优化**：实现语义相似度版 `_should_skip_llm`
-3. **Layer 1 二期**：Insight 替换 Reflection
-4. **Layer 3 完整状态机**：`CognitiveStateMachine` + 依赖注入 + 全局超时
-5. **Layer 0**：强制 `session_id = role_id`
+2. ~~**Layer 2 短输入过滤优化**：实现语义相似度版 `_should_skip_llm`~~（2026-07-16 `_should_skip_llm` 整体移除，语义相似度方案不再实施）
+3. ~~**Layer 1 二期**：Insight 替换 Reflection~~（已完成：insights_v2 上线，schema v5/v6 迁移并删除归档表）
+4. ~~**Layer 3 完整状态机**：`CognitiveStateMachine` + 依赖注入 + 全局超时~~（2026-07-21 收尾完成：`MessageHandlerState` 状态机 + Agent 2 全局超时；`CognitiveStateMachine` 与依赖注入经评估明确不做，见 Phase 3）
+5. ~~**Layer 0**：强制 `session_id = role_id`~~（2026-07-21 已完成）
+
+剩余待办：`ToolRuntime` 抽象、Provider 异步化（`httpx.AsyncClient`）与多后端路由，见 Phase 5 未勾选项。
 
 ---
 

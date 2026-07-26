@@ -25,11 +25,13 @@ main.py / web_main.py
     │
     ├── config.py ─────────── 配置加载（config.json + Config dataclass + 环境变量）
     │
-    ├── core/（19 模块）
+    ├── core/（25 模块）
     │   ├── inner_drive.py ────── Agent 1 InnerDriveAgent：自主推理 + 记忆检索 + 缺口决策
     │   ├── tool_agent.py ─────── Agent 2 ToolAgent：外部工具执行 + ToolAttemptTracker + response_format JSON mode
     │   ├── agent.py ──────────── Agent 3 Roleplay：人格驱动 + ReAct 循环, temp=0.8
     │   ├── message_handler.py ── 消息入口（handle_message / proactive / explore 三层编排）
+    │   ├── agent_wiring.py ─── 三 Agent 协作者懒装配（InnerDrive/ToolAgent/MemoryAgent，God Object 拆分）
+    │   ├── message_builder.py ─ prompt 消息数组构建（历史过滤 + 字符/token 预算，God Object 拆分）
     │   ├── conversation_engine.py ── 统一对话引擎 + Frontend 事件接口（unified-pipeline P1）
     │   ├── runtime_driver.py ─── 共享时间驱动：睡眠/唤醒/主动搭话/探索（unified-pipeline P2）
     │   ├── session_factory.py ── CLI/Web 共享会话装配（统一管线 P0）
@@ -70,10 +72,10 @@ main.py / web_main.py
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（838+2 用例，60+ 个测试文件）
+    ├── tests/ ───────────────── 单元测试（851 用例，60 个测试文件）
     │
     ├── storage/
-    │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ 9 表 Schema + WAL 模式
+    │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ 8 表 Schema + WAL 模式
     │   └── repository.py ─── 异步数据访问层（CRUD + 修剪 + session 隔离）
     │
     ├── prompts/
@@ -130,7 +132,7 @@ Web 模式： web_main.py → uvicorn
 
 ### 1.3 设计原则
 
-- **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行, temp=0.3，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
+- **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
 - **单向依赖**：core → memory → storage，core → tools，层间无循环依赖（个别内部环靠 lazy import 维持）
 - **统一装配**：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）
 - **接口隔离**：provider 抽象 LLM 调用，storage 抽象持久化，各层可独立替换
@@ -217,13 +219,11 @@ def process_message(self, user_input, on_token=None):  # → MessageHandler.hand
 
 ### 2.3b Provider 重试与熔断
 
-Provider 层网络重试使用指数退避：2s / 4s / 8s，连续 3 次失败触发熔断（5 分钟内不再发起该模型调用）。截断语义分 4 种模式：
-- `"error"`：截断时抛异常
-- `"warning"`：截断时记 warning 并在响应中标记 truncated
-- `"silent"`：静默截断（默认）
-- `"retry"`：截断时自动重试（最多 1 次）
+Provider 层网络重试使用指数退避：2s / 4s / 8s（上限 15s），连续 3 次完全失败触发熔断（60 秒内跳过该模型调用，成功即重置）。截断显式化（A2），判定来源：finish_reason=length / 流超时 / 超 `stream_max_bytes` / 缺 [DONE]：
+- `response_format` 调用截断 → 抛 `TruncatedResponseError`，半截 JSON 按可重试错误走上述退避重试
+- 纯文本聊天路径截断 → 记 warning 并返回半截内容（半截回复好于报错），meta/monitor 标记 `truncated` 及 `truncation_reason`
 
-per-call temperature：Agent 1 决策温度 0.3（CognitiveState 实施），Agent 2 固定 0.3，Agent 3 用 config.temperature（默认 0.8）。
+per-call temperature：Agent 1 决策温度 0.3（inner_drive 按调用覆盖），Agent 2 未覆盖温度（跟随 provider 默认，即 config.temperature），Agent 3 用 config.temperature（默认 0.8）。
 
 ### 2.4 动态 max_tokens
 
@@ -413,7 +413,7 @@ prompt 注入：
     │ deque, maxlen=500, 内存
     │ 每轮对话直接追加
     ▼
-长期记忆（SQLite 9 张表）
+长期记忆（SQLite 8 张表）
     ├── facts_v2            经验证的事实（confidence/stability/freshness/importance）
     ├── experiences         共享体验（情感色调 + 重要性）
     ├── insights_v2         假设性洞察（hypothesis + evidence + confidence，二期替换 reflections）
@@ -421,8 +421,9 @@ prompt 注入：
     ├── relationship_metrics 关系指标（按 session 隔离）
     ├── relationship_snapshots 关系指标历史快照
     ├── session_roles       session_id → role_id 映射
-    ├── observations        原始观察（记忆生命周期 Layer 1）
-    └── user_facts_archive  旧 user_facts 归档（schema v4 后代码不再读写）
+    └── observations        原始观察（记忆生命周期 Layer 1）
+
+    （user_facts_archive / reflections_archive 两张归档表已于 schema v6 物理删除，见 9.1）
 ```
 
 ### 4.2 三层检索
@@ -537,7 +538,8 @@ GC（每 5 次 consolidation 执行一次）：
 触发：每次请求动态计算，超出时自动执行
 
 压缩过程：
-  1. 收集所有非 system 消息（每条截断 500 字，整体保留最后 8000 字）
+  1. 收集所有非 system 消息（最近 6 条完整保留，更早的每条截断 120 字，整体预算 12000 字；
+     已有旧摘要时走增量合并，保留早期信息）
   2. LLM 生成对话摘要（2000-2500 字，第三人称）
   3. 摘要注入 system prompt（compressed_summary 区块）
   4. 清空 ConversationBuffer
@@ -664,7 +666,7 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 1. 剥离 `<think>...</think>` 块
 2. 尝试解析为含 `calls` 数组的 JSON 对象（JSON mode 输出）
 3. 正则提取 `<tool_call>...</tool_call>`
-4. JSON 解析，参数别名归一化（search → query, text → content）
+4. JSON 解析，提取 name/arguments（参数别名归一化已下沉到各工具的 `ALIASES`，见 5.4）
 5. 回退：尝试将整个响应作为单个 JSON 对象解析
 
 ### 5.3b ToolResult v2 错误分类
@@ -674,22 +676,23 @@ Provider 传入 `response_format={"type": "json_object"}` 启用 JSON mode，LLM
 class ToolResult:
     success: bool
     output: str
-    error_type: str = ""         # "timeout" / "validation" / "api" / "internal"
-    retryable: bool = True       # validation=False, timeout=True
+    error_type: str = ""         # param_error / not_found / network_error /
+                                 # permission_denied / rate_limited / internal
+    retryable: bool = False      # 可重试错误（如 network_error）由工具置 True
     elapsed_ms: float = 0.0
 ```
 
-按错误类型的智能重试：validation 错误不重试（参数问题重试无意义），timeout/api 错误指数退避重试（1s/2s/4s）。
+按错误类型的智能重试：param_error 等不可重试错误立即放弃（参数问题重试无意义）；`retryable=True` 的失败（如 network_error、超时）指数退避重试（1s/2s/4s）。
 
 ### 5.3c per-tool 超时
 
-每个工具可声明 `timeout_seconds` 类属性（默认 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时标记 `error_type="timeout"`。
+每个工具可声明 `timeout_seconds` 类属性（默认 30s，越界值回退 30s），dispatcher 在 `_execute_single` 中强制限制执行时间，超时标记 `error_type="network_error"` 且 `retryable=True`。
 
 ### 5.4 内置工具（CLI 10 个 / Web 9 个，三层分工）
 
 三层架构从根本上解决模型虚构工具调用内容的问题：
 - **Agent 1 (InnerDriveAgent)**：自主推理决策，内部使用 recall/remember。识别知识缺口，输出自然语言工具请求给 Agent 2。
-- **Agent 2 (ToolAgent)**：temperature=0.3，独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。共定义 8 个外部工具，其中 `file_tree` 仅在 CLI 注册（`session_factory.py` 的 `include_file_tree=True`），Web 端注册 7 个外部工具。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
+- **Agent 2 (ToolAgent)**：独立精简 prompt，纯工具执行。无人格、无情绪、无记忆。共定义 8 个外部工具，其中 `file_tree` 仅在 CLI 注册（`session_factory.py` 的 `include_file_tree=True`），Web 端注册 7 个外部工具。ToolAttemptTracker：3 retries/round，3 rounds max（9 总尝试）。失败后回报 Agent 1 重新决策。
 - **Agent 3 (Roleplay Agent)**：temperature=0.8，完整人格。接收 inner_drive_summary + tool_results。仅 recall/remember 两个内部工具（均为本地 SQLite 操作）。外部工具指令已完全移出 prompt。
 
 > 注册数量：`session_factory.py` 中 CLI 注册 10 个工具（8 外部 + 2 内部），Web 注册 9 个工具（7 外部 + 2 内部，无 `file_tree`）。
@@ -829,11 +832,11 @@ RuntimeDriver.run() (15s tick)
 | `ConversationEngine.handle_explore()` | core/conversation_engine.py | 自由探索执行入口 |
 | `ConversationEngine.get_sleep_state()` | core/conversation_engine.py | async；返回 (should_sleep, message_or_None) |
 | `ConversationEngine.generate_dream()` | core/conversation_engine.py | async；LLM 生成梦境 |
-| `InnerDriveAgent.perceive_and_decide()` | core/inner_drive.py | Agent 1 自主推理：检索记忆 → 识别缺口 → 决策 → 输出自然语言请求或跳过 |
+| `InnerDriveAgent.assess()` | core/inner_drive.py | Agent 1 自主推理：检索记忆 → 识别缺口 → 决策 → 输出自然语言请求或跳过 |
 | `build_inner_drive_prompt()` | prompts/system.py | Agent 1 system prompt：当前时间 + 身份 + 记忆 + 工具列表 |
 | `ToolAgent.run_with_request()` | core/tool_agent.py | Agent 2 接收自然语言请求，执行外部工具，ToolAttemptTracker 重试 |
 | `ToolAgent.run_with_requests()` | core/tool_agent.py | MH-001: 批量执行多个 ToolRequest，合并结果给 Agent 3 |
-| `ToolAgent._build_prompt()` | core/tool_agent.py | Agent 2 精简 prompt（无情绪/记忆/工具记录） |
+| `build_tool_agent_prompt()` | prompts/system.py | Agent 2 精简 prompt（无情绪/记忆/工具记录） |
 | `ToolAttemptTracker` | core/tool_agent.py | 3 retries/round × 3 rounds max = 9 总尝试，失败回报 Agent 1 |
 | `_get_sleep_state()` | core/agent.py | async；返回 (should_sleep, message_or_None)，SL-002 锁保护 |
 | `_generate_dream()` | core/agent.py | async；LLM 生成 1-2 句碎片化梦境，SL-010 非阻塞 |
@@ -963,7 +966,7 @@ Agent 1 检索后通过 `drive_result.context_summary` 把记忆/关系摘要直
 客户端 → 服务端:
   {"type": "init", "session_id": "xxx"}        # 初始化会话
   {"type": "message", "content": "你好"}       # 发送消息
-  {"type": "ping"}                              # 心跳（30s 间隔）
+  {"type": "ping"}                              # 心跳（25s 间隔）
 
 服务端 → 客户端:
   {"type": "init_ok", "session_id": "xxx", "emotion": "engaged"}
@@ -979,43 +982,15 @@ Agent 1 检索后通过 `drive_result.context_summary` 把记忆/关系摘要直
 response = agent.process_message(content)
     │
     ▼
-_split_segments()
-    │  6 级 fallback：
-    │    ① 标点分割（。！？.!?\n，含引号括号尾随）
-    │    ② 逗号拆分（，,；;，40 字以上长段）
-    │    ③ 空格分割
-    │    ④ 语气词分割（啊吗呢了吧么呀哦嘛哇）
-    │    ⑤ 自然停顿（然后/但是/所以… + 了/过/到）
-    │    ⑥ 18 字符硬切（兜底）
-    │  合并 <4 字符的碎片
+_send_segments()（web/server.py）
+    │  注：分段切句逻辑暂时停用（代码 TODO：待 markdown 流式
+    │  稳定后恢复），当前整条回复作为单个 segment 发送
     ▼
-["你好呀！", "今天怎么样？", "我这边天气不错。"]
-    │
+await ws.send({"type": "segment", "content": response})
+    │  前端渲染为气泡（marked 增量 markdown 渲染 + 流式光标）
     ▼
-for i, seg in enumerate(segments):
-    if i > 0:
-        await asyncio.sleep(_calc_delay(emotion, len(seg)))
-    await ws.send({"type": "segment", "content": seg})
-    │  前端每个 segment 创建独立气泡
-    ▼
-await ws.send({"type": "done", ...})
+await ws.send({"type": "done", "content": ..., "emotion": ..., "turn": ...})
 ```
-
-延迟计算：
-
-```
-delay = base[emotion] × (1 + seg_len/80) × random(0.8, 1.3)
-```
-
-| 情绪 | 基础延时 | 典型 20 字段约 |
-|------|----------|---------------|
-| excited / surprised | 0.7~0.8s | ~1.0~1.3s |
-| joyful / anticipating | 0.9s | ~1.2~1.6s |
-| engaged | 1.3s | ~1.6~2.3s |
-| content | 1.5s | ~1.9~2.6s |
-| neutral | 1.7s | ~2.1~3.0s |
-| melancholy | 2.2s | ~2.7~3.9s |
-| sad | 2.5s | ~3.1~4.4s |
 
 ### 7.4 自主行为循环
 
@@ -1185,7 +1160,7 @@ verification_count: int
 ### 9.1 SQLite Schema
 
 ```sql
--- 9 张业务表（另有 schema_version 元表记录迁移版本，当前 version=6）
+-- 8 张业务表（另有 schema_version 元表记录迁移版本，当前 version=6）
 facts_v2            经验证的事实（UNIQUE(session_id, category, fact_key)，Layer 1）
 experiences         共享体验（tags 存 JSON）
 insights_v2         假设性洞察（evidence_fact_ids 存 JSON，替代 reflections）
@@ -1278,6 +1253,8 @@ class Database:
   "embedding_cache_size": 1000,
   "prompt_cache_ttl_seconds": 60,
   "conversation_examples_max_turns": 3,
+  "dispatcher_output_cap": 2000,
+  "stream_max_bytes": 1048576,
   "allowed_origins": []
 }
 ```

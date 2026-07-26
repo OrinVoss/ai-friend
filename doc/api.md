@@ -36,6 +36,7 @@
 | `/api/logs` | GET | 实时服务日志（SSE） |
 | `/api/monitor` | GET | LLM 调用监控记录（JSON） |
 | `/api/monitor/clear` | GET | 清空监控缓冲 |
+| `/api/tools/metrics` | GET | 工具调用指标（成功率/延迟/重试） |
 | `/monitor` | GET | 监控页面 (monitor.html) |
 | `/static/*` | GET | 静态资源（CSS/JS） |
 
@@ -65,7 +66,7 @@ wss://<生产域名>/ws
   │     "session_id":"xxx",         │
   │     "role_id":"小星"}           │
   │                               ├── get_or_create(session_id, role_id)
-  │                               ├── create_task(_proactive_loop)
+  │                               ├── create_task(driver.run())  ← RuntimeDriver
   │                               ├── {"type":"init_ok", ←─────────┐
   │                               │    "session_id":"xxx",          │
   │                               │    "role_id":"小星",            │
@@ -87,8 +88,8 @@ wss://<生产域名>/ws
   │                               ├── {"type":"pong"} ←────────────┤
   │                               │                                 │
   ├── 断开 ─────────────────────▶ │
-  │                               ├── session_manager.remove()
-  │                               ├── cancel proactive task
+  │                               ├── unregister_ws() + schedule_remove()
+  │                               │   （M-12：60s 宽限期，超时后 remove + cancel proactive task）
 ```
 
 ### 2.2 客户端 → 服务端消息
@@ -178,8 +179,8 @@ wss://<生产域名>/ws
 | `type` | string | 固定 `"segment"` |
 | `content` | string | 一个独立气泡的文本内容 |
 
-- **当前分段推送暂停**：服务端把完整回复作为**单个** `segment` 发送（分段算法保留待恢复，见[第 4 节](#4-分段推送)）
-- 前端把 `segment` 内容累积进当前 assistant 气泡（markdown 源码），收到 `done` 后用 marked 渲染
+- **当前分段推送暂停**：服务端把完整回复作为**单个** `segment` 发送（分段算法已删除、可从 git 历史恢复，见[第 4 节](#4-分段推送)）
+- 前端把 `segment` 内容累积进当前 assistant 气泡（`data-raw` 属性保存 markdown 源码），每段到达即用 marked **增量流式渲染**（气泡带 streaming 光标样式），收到 `done` 后做终态渲染并移除流式标记
 
 #### `done` — 回复结束
 
@@ -232,7 +233,7 @@ wss://<生产域名>/ws
 
 - 客户端 `message` 内容最大 **100KB**（`#176`）
 - 超出时服务端返回 `{"type":"error","content":"消息过长（最大100KB）"}`，继续等待下条消息
-- 服务端回复无硬限制，由模型 `max_tokens` 情绪动态调控
+- 服务端回复无协议层硬限制，长度由模型 `max_tokens` 情绪动态调控（`_max_tokens_for_emotion`）；LLM 流式读取另有 `stream_max_bytes` 安全上限（默认 1 MiB，PR-013）
 
 ### 2.5 断开重连
 
@@ -247,7 +248,7 @@ WebSocket onclose
 ```
 
 - 断线后自动重连：初始延时 **2 秒**，每次失败翻倍，上限 **30 秒**（JS 侧指数退避）
-- WS 断开时服务端会 `remove()` 内存会话；重连 init 时重建 WebAgent，从 DB 恢复最近 30 轮对话（`#98`）与人格文件，会话体验不中断
+- WS 断开时服务端进入 **60s 宽限期**（M-12 `schedule_remove()`）：宽限期内重连直接复用内存会话；超时后才真正 `remove()`。重建 WebAgent 时从 DB 恢复最近 30 轮对话（`#98`）与人格文件，会话体验不中断
 - 多标签页：新标签页的 proactive 任务会 cancel 旧标签页的任务（`register_proactive` 逻辑）
 
 ---
@@ -426,27 +427,43 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `timestamp` | string | 调用时间（`HH:MM:SS`） |
+| `timestamp` | string | 调用时间（`YYYY-MM-DD HH:MM:SS`） |
 | `model` | string | 使用的模型 |
 | `duration_ms` | float | 调用耗时（毫秒） |
 | `max_tokens` | int | 该次调用的最大 token 数 |
 | `messages` | array | 完整请求 messages（含 system/user/assistant） |
 | `response` | string | 完整响应文本 |
-| `source` | string | 调用来源（`react` / `session` / `assess` / `tool_agent` / `dream` 等） |
+| `source` | string | 调用来源（`react` / `assess` / `tool_agent` / `proactive` / `dream` 等） |
 | `request_id` | string | 请求唯一 ID，全链路追踪 |
 | `truncated` | bool | 是否因 max_tokens 截断 |
 | `finish_reason` | string | API 返回的 finish_reason（stop/length/content_filter/null） |
 | `temperature` | float | 该次调用的温度参数 |
+| `response_format` | dict/null | 结构化输出 schema（JSON Schema 调用时传入，否则 null） |
 
 ### 3.10 `GET /api/monitor/clear` — 清空监控缓冲
 
 **Response**: `{"status": "cleared"}`
 
-### 3.11 `GET /monitor` — 监控页面
+### 3.11 `GET /api/tools/metrics` — 工具调用指标
+
+返回 `core/monitor.py` 的 ToolMetricsCollector 内存统计，按工具名聚合调用次数、成败、重试与平均耗时。
+
+**Response**: JSON 对象，键为工具名，值字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `calls` | int | 总调用次数 |
+| `successes` | int | 成功次数 |
+| `failures` | int | 失败次数 |
+| `retries` | int | 累计重试次数 |
+| `success_rate` | float | 成功率（0-1，保留 4 位小数） |
+| `avg_elapsed_ms` | float | 平均耗时（毫秒，保留 2 位小数） |
+
+### 3.12 `GET /monitor` — 监控页面
 
 返回 `web/static/monitor.html`（配合 3.9 / 3.10 使用）。
 
-### 3.12 `GET /favicon.ico` — 站点图标
+### 3.13 `GET /favicon.ico` — 站点图标
 
 返回 `204 No Content`（支持 GET/HEAD），避免浏览器请求 favicon 产生 404 噪音（`WS-029`）。
 
@@ -454,11 +471,11 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 ## 4. 分段推送
 
-> 当前状态：分段推送**暂停使用**——`_send_segments` 直接把完整回复作为单个 `segment` 发送（代码内 TODO：待 markdown 流式稳定后恢复）。`_split_segments` 与 `_calc_delay` 仍保留在 `web/server.py` 中，以下算法为保留实现。
+> 当前状态：分段推送**暂停使用**——`_send_segments` 直接把完整回复作为单个 `segment` 发送（代码内 TODO：待 markdown 流式稳定后恢复）。原 `_split_segments`（6 级分段）与 `_calc_delay`（情绪延时）已在 unified-pipeline P3 清理（2026-07-16）中从 `web/server.py` 删除，以下算法为**历史实现**（git 历史可查），供恢复时参考。
 
 ### 4.1 服务端分段（`_split_segments`）
 
-6 级 fallback 算法：
+历史 6 级 fallback 算法（已删除）：
 
 ```
 输入文本
@@ -483,7 +500,7 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 服务端生成完整回复
     │
     ├── WebSocket: _send_segments() → 单个 segment（完整回复）→ done
-    │   （保留实现：_split_segments() → 逐段 _calc_delay → 逐段 send segment）
+    │   （历史实现已删除：_split_segments() → 逐段 _calc_delay → 逐段 send segment）
     │
     └── REST: 返回完整 response → 前端单气泡渲染
 ```
@@ -492,7 +509,7 @@ data: 2026-07-13 12:24:38 [INFO] web.session: [session] create: 3626d9aa3865
 
 ## 5. 情绪调速
 
-分段之间的发送延时由情绪状态动态决定（当前随分段推送一并暂停，`_calc_delay` 保留在 `web/server.py` 中）：
+分段之间的发送延时由情绪状态动态决定（随分段推送一并停用，`_calc_delay` 已在 P3 清理中删除，以下为历史实现）：
 
 ```
 delay = base[emotion] × (1 + seg_len / 80) × random(0.8, 1.3)
@@ -530,10 +547,10 @@ delay = base[emotion] × (1 + seg_len / 80) × random(0.8, 1.3)
 
 ### 6.1 循环机制
 
-每 15 秒 tick 的后台协程（`_proactive_loop`）：
+每 15 秒 tick 的后台协程（`RuntimeDriver.run()`，`core/runtime_driver.py`；unified-pipeline P2 起 Web/CLI 共用同一循环）：
 
 ```
-_proactive_loop (15s tick, asyncio.create_task)
+RuntimeDriver.run (15s tick, asyncio.create_task)
     │
     ├── 睡眠/唤醒检查（每 tick）
     │   ├── 午睡 12:00-13:00 / 夜睡 23:00-01:00 → 入睡
@@ -585,6 +602,7 @@ class SessionManager:
     _sessions: dict[session_id → WebAgent]  # 活跃会话池
     _proactive_tasks: dict[session_id → asyncio.Task]
     _active_ws: dict[session_id → WebSocket]
+    _pending_remove: dict[session_id → asyncio.Task]  # M-12 延迟销毁
     _lock: Lock  # 线程安全
 ```
 
@@ -593,6 +611,8 @@ class SessionManager:
 | `get_or_create(session_id, role_id)` | 获取或创建 WebAgent；新 session 绑定 `role_id`，已有 session 忽略 `role_id` |
 | `remove(session_id)` | 移除会话、cancel 后台任务、清理 WS |
 | `register_proactive(sid, task, ws)` | 注册/替换 proactive 任务（新标签页 cancel 旧任务） |
+| `schedule_remove(session_id, delay=60)` | M-12：WS 断开后延迟销毁，宽限期内重连/新注册会取消；到期仍无活跃连接才真正 `remove()` |
+| `unregister_ws(session_id, ws)` | M-12：仅当断开的是当前活跃连接才清除 WS 归属（多标签页防误清） |
 | `get_active_ws(session_id)` | 获取当前活跃的 WebSocket（多标签页切换） |
 | `cleanup_old(max_sessions, ttl)` | 清理超时会话（默认 24h TTL, 最多 50 个） |
 | `shutdown()` | 优雅关闭：保存所有 session、cancel 所有任务 |
@@ -618,8 +638,8 @@ class SessionManager:
             ├── connect() → WebSocket /ws
             ├── send {"type":"init", "role_id":"小星", "session_id":"小星"}  ← 从 cookie 读取
             │
-            ├── 服务端重建 WebAgent（旧 WS 断开时已 remove；
-            │   从 DB 恢复最近 30 轮 + personalities/小星.json 情绪状态）
+            ├── 服务端复用或重建 WebAgent（M-12：断开 60s 宽限期内复用内存会话；
+            │   超时销毁后重建，从 DB 恢复最近 30 轮 + personalities/小星.json 情绪状态）
             ├── 旧 proactive 任务被 cancel
             └── 注册新 proactive 任务
 ```
@@ -631,7 +651,7 @@ class SessionManager:
 | 独立 Personality | ✓ 每个 WebAgent 按 role_id 加载独立 personality 文件 |
 | 独立 EmotionalState | ✓ 同一角色的不同 session 也拥有独立情绪状态 |
 | 独立 ConversationBuffer | ✓ 每个 WebAgent 独立短期记忆 |
-| SQLite session_id 过滤 | ✓ user_facts / experiences / reflections / conversation_turns / relationship_metrics / relationship_snapshots / observations / facts_v2 均带 session_id 列并按其过滤；注意 user_facts 的唯一约束 `UNIQUE(category, fact_key)` 不含 session_id，多角色同 key 会互相覆盖（已知未修） |
+| SQLite session_id 过滤 | ✓ experiences / conversation_turns / relationship_metrics / relationship_snapshots / observations / facts_v2 / insights_v2 均带 session_id 列并按其过滤；schema v4/v5（Layer 1）起 user_facts、reflections 已分别归档为 user_facts_archive / reflections_archive，由 facts_v2 / insights_v2 取代，facts_v2 唯一约束为 `UNIQUE(session_id, category, fact_key)`（#UK-001 已修） |
 | session → role 映射 | ✓ `session_roles` 表持久化 `session_id → role_id` |
 | 共享 Provider/Embedding | ✓ SN-005/006：SessionManager 级别共享 HTTP 会话 |
 | 共享 EmbeddingCache | ✓ 只读 LRU 无竞争 |
@@ -657,6 +677,7 @@ session_manager.cleanup_old(max_sessions=50, ttl_seconds=86400)
 | 场景 | 服务端行为 | 客户端行为 |
 |------|-----------|-----------|
 | Origin 不合法 | `websocket.close(code=4003)` 拒绝连接 | `onclose` → 自动重连（会再次被拒） |
+| init 携带 token 不匹配（启用 `web_access_token` 时） | `websocket.close(code=4001)` 拒绝连接 | 同上 |
 | 连接数超限（每 IP >5 或全局 >100） | `websocket.close(code=4004)` 拒绝连接 | 同上 |
 | 消息 >100KB | 回复 `{"type":"error","content":"消息过长"}` | 前端显示系统消息提示 |
 | WebSocket 异常断开 | log `info` 级别 | `onclose` → 自动重连（指数退避） |
@@ -669,6 +690,7 @@ session_manager.cleanup_old(max_sessions=50, ttl_seconds=86400)
 |------|------------|----------|
 | 请求格式非法 / 字段缺失 | 422 | FastAPI 标准校验错误体 |
 | 触发速率限制 | 429 | `{"error":"Too many requests. Please slow down."}` |
+| 未携带/错误访问 token（启用 `web_access_token` 时） | 401 | `{"detail":"unauthorized"}` |
 | session 不存在 | 200 | 自动创建新 session |
 | 服务端异常 | 500 | 异常信息通过 response 透出 |
 
@@ -681,13 +703,15 @@ ws.onerror = function() { setStatus('error'); };
 ws.onclose = function() {
     setStatus('disconnected');
     hideTyping();
-    setTimeout(connect, reconnectDelay);                   // 自动重连
-    reconnectDelay = Math.min(reconnectDelay * 2, 30000);  // 指数退避，上限 30s
+    if (wsIntentionalClose) return;
+    showOfflineBanner(true);                                 // 断线重连横幅
+    reconnectTimer = setTimeout(connect, reconnectDelay);    // 自动重连
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);    // 指数退避，上限 30s
 };
 ```
 
 - 连接 error → 状态显示"连接异常"（黄灯）
-- 连接 close → 状态显示"已断开"（红灯）→ 2s 后自动重连，失败逐次翻倍至 30s 上限
+- 连接 close → 状态显示"已断开"（红灯）+ 显示断线重连横幅 → 2s 后自动重连，失败逐次翻倍至 30s 上限
 - REST fallback 失败 → 静默恢复 UI（`catch` 中重置 `isProcessing` 状态）
 
 ---
@@ -790,6 +814,7 @@ if origin and origin != "null":
 | `DEEPSEEK_API_MODEL` | `api_model` |
 | `AI_FRIEND_DB_PATH` | `db_path` |
 | `AI_FRIEND_LOG_LEVEL` | `log_level` |
+| `AI_FRIEND_EMBEDDING_ENDPOINT` | `embedding_endpoint`（默认 `http://localhost:8080/v1/embeddings`） |
 
 ---
 
