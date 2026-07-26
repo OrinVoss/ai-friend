@@ -1,8 +1,10 @@
 """Tests for core/async_utils.py (#263: timeout 传播)"""
 import asyncio
+import gc
 import threading
 import time
 import unittest
+import warnings
 
 from core.async_utils import run_async
 
@@ -72,6 +74,44 @@ class TestRunAsyncRunningLoop(unittest.TestCase):
         t.join(timeout=5)
         self.assertFalse(t.is_alive())
         self.assertEqual(result, [99])
+
+    def test_nested_run_async_rejected(self):
+        """AU-004: run_async from inside a worker thread must fail-fast."""
+        async def inner():
+            return "inner"
+
+        def sync_wrapper():
+            return run_async(inner())
+
+        async def outer():
+            # This coroutine runs inside the worker thread's event loop;
+            # calling a sync function that invokes run_async again should be
+            # rejected because the thread-local reentrancy marker is set.
+            return sync_wrapper()
+
+        errors = []
+
+        def target():
+            async def caller():
+                # caller() runs in this thread's loop, so run_async(outer())
+                # bridges to the worker thread where outer() executes.
+                return run_async(outer())
+
+            try:
+                asyncio.run(caller())
+            except RuntimeError as e:
+                errors.append(str(e))
+
+        # The rejected nested call leaves the inner coroutine unawaited; force
+        # GC inside a warning filter so the expected RuntimeWarning is silent.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            t = threading.Thread(target=target)
+            t.start()
+            t.join(timeout=5)
+            gc.collect()
+        self.assertFalse(t.is_alive())
+        self.assertEqual(errors, ["nested run_async call"])
 
 
 if __name__ == "__main__":

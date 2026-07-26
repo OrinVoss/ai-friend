@@ -7,11 +7,18 @@ import asyncio
 import concurrent.futures
 import contextvars
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
 # AU-001: module-level singleton executor
 _EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# AU-004: thread-local reentrancy guard. run_async's worker branch runs the
+# coroutine in a worker thread that itself has a running event loop; if that
+# coroutine calls back into a synchronous wrapper that uses run_async again,
+# it would re-submit to the same 4-worker pool and potentially starve it.
+_run_async_local = threading.local()
 
 
 def run_async(coro, timeout: float = 60.0):
@@ -22,6 +29,8 @@ def run_async(coro, timeout: float = 60.0):
       ThreadPoolExecutor with a single worker thread.
     - Timeouts propagate cancellation into the running coroutine so that
       cleanup (e.g. DB rollback) can execute instead of leaving zombie work.
+    - Nested calls from inside a worker thread are rejected immediately
+      (AU-004) instead of deadlocking the thread pool.
     """
     try:
         loop = asyncio.get_running_loop()
@@ -32,6 +41,14 @@ def run_async(coro, timeout: float = 60.0):
     # Already inside an event loop — use a thread to run the coroutine.
     # A3（2026-07-21）：copy_context 显式传播——ThreadPoolExecutor 不会自动
     # 携带 ContextVar，request_id 等上下文需要随任务进入 worker 线程。
+
+    # AU-004: fail-fast on nested run_async calls to prevent thread-pool
+    # starvation. The marker is set in the worker thread, so a synchronous
+    # callback invoked from within the coroutine can detect it.
+    if getattr(_run_async_local, "inside", False):
+        logger.error("[async] nested run_async call detected")
+        raise RuntimeError("nested run_async call")
+
     ctx = contextvars.copy_context()
     holder: dict = {}  # worker 启动后填入 task 句柄，供超时取消
 
@@ -40,7 +57,14 @@ def run_async(coro, timeout: float = 60.0):
         holder["task"] = task
         return await task
 
-    future = _EXECUTOR.submit(ctx.run, asyncio.run, _body())
+    def _worker():
+        _run_async_local.inside = True
+        try:
+            return asyncio.run(_body())
+        finally:
+            _run_async_local.inside = False
+
+    future = _EXECUTOR.submit(ctx.run, _worker)
     try:
         return future.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
