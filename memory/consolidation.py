@@ -231,16 +231,27 @@ class MemoryConsolidator:
             except Exception as e:
                 logger.warning(f"[consolidate] care clue extraction failed: {e}")
 
-        if errors:
-            logger.warning(f"Consolidation partial: {len(errors)} step(s) failed: {errors}")
-            # P1: clear buffer on any error to avoid re-processing already-extracted facts
+        # Step 8: clear the pending buffer only when fact extraction succeeded.
+        # If a later step (experience/insight/relationship/prune/embed) fails,
+        # the facts already promoted to the database must not be lost; we still
+        # clear the buffer to avoid re-extracting them. If fact extraction
+        # itself failed, keep the buffer so the next consolidation can retry.
+        facts_ok = "facts" not in errors
+        if facts_ok:
             self._pending_buffer.clear()
             self._seen_ids.clear()
-            return
-
-        self._pending_buffer.clear()
-        self._seen_ids.clear()
-        logger.info("Consolidation complete.")
+            if errors:
+                logger.warning(
+                    f"Consolidation partial: {len(errors)} non-fact step(s) failed: "
+                    f"{errors}; facts already committed are kept"
+                )
+            else:
+                logger.info("Consolidation complete.")
+        else:
+            logger.warning(
+                f"Consolidation partial: fact extraction failed ({errors}); "
+                f"keeping {len(self._pending_buffer)} turn(s) in buffer for retry"
+            )
 
     def _verify_contradiction_llm(self, new_f, old_f) -> bool:
         """Bug 3（2026-07-20）：LLM 复核 embedding 检出的候选矛盾。
@@ -789,6 +800,13 @@ class MemoryConsolidator:
                             texts.append(" ".join(parts))
                             targets.append((table, rid))
                         vecs = self._embed.encode(texts)
+                        if vecs is None or len(vecs) != len(targets):
+                            logger.warning(
+                                f"[embed] encode returned unexpected result "
+                                f"shape={getattr(vecs, 'shape', None)} for "
+                                f"{len(targets)} texts from {table}; skipping"
+                            )
+                            continue
                         for (tbl, rid), vec in zip(targets, vecs):
                             all_updates.append((tbl, rid, EmbeddingEngine.vec_to_bytes(vec)))
                 if all_updates:

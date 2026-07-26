@@ -127,7 +127,8 @@ class MemoryAgent:
                                 needs_more_evidence=True)
         clues = await self._extract_clues(f"{fact.fact_key} {fact.fact_value}")
         evidences, top_sim = await self._retrieve_parallel(clues, max_evidence=10)
-        verified, contradictions, consistency = await self._cross_verify(evidences)
+        verified, contradictions, consistency = await self._cross_verify(
+            evidences, self._embed)
 
         # FactChecker semantic contradiction against sibling facts
         candidates = await repo.search_facts_v2(fact.fact_key, limit=5)
@@ -326,9 +327,14 @@ class MemoryAgent:
     # ── Cross verification ──
 
     async def _cross_verify(self, evidences: list[MemoryEvidence],
+                            embed=None,
                             ) -> tuple[list[MemoryEvidence], list[str], float]:
-        """Thin wrapper around retrieval_pipeline.cross_verify."""
-        return await cross_verify(evidences, self._embed)
+        """Thin wrapper around retrieval_pipeline.cross_verify.
+
+        ``embed`` defaults to ``self._embed`` so consistency checks do not
+        silently fall back to the neutral 0.5 score.
+        """
+        return await cross_verify(evidences, embed or self._embed)
 
     # ── Confidence + reconstruction ──
 

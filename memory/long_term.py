@@ -126,4 +126,3 @@ class LongTermMemory:
         return run_async(self.repo.search_turns(query, limit))
     def get_turns_range(self, turn_from: int, count: int = 10):
         return run_async(self.repo.get_turns_range(turn_from, count))
-        return run_async(self.repo.get_relationship_history(days))

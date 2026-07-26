@@ -1,5 +1,6 @@
 import logging
 import re
+import threading
 from typing import Optional
 
 import numpy as np
@@ -17,6 +18,11 @@ class MemoryRetriever:
     Layer 1: Hot Memory -- always included (high-score facts, recent experiences)
     Layer 2: Hybrid Search -- semantic (0.6) + keyword (0.4) with optional LLM rerank
     Layer 3: On-demand -- triggered by "[回忆: xxx]" syntax
+
+    Retrieval is intentionally synchronous and protected by a threading lock.
+    storage/database.py::cursor() holds a process-wide threading.Lock (H-03);
+    concurrent retrieval calls from multiple threads (e.g. Web workers) could
+    otherwise interleave SQLite operations and deadlock the event loop.
     """
 
     def __init__(self, long_term: LongTermMemory, llm_rerank_fn: Optional[callable] = None,
@@ -24,6 +30,7 @@ class MemoryRetriever:
         self.ltm = long_term
         self.llm_rerank_fn = llm_rerank_fn
         self._embed = embedding_engine
+        self._lock = threading.RLock()
 
     @property
     def embedding_engine(self):
@@ -31,62 +38,68 @@ class MemoryRetriever:
         return self._embed
 
     def retrieve_for_query(self, query: str) -> MemoryContext:
-        """Layer 1 + Layer 2: build context for a user message."""
-        logger.info(f"[retrieval] query_len={len(query)}")
+        """Layer 1 + Layer 2: build context for a user message.
 
-        # Layer 1: hot memory (always included)
-        hot_facts = self.ltm.get_all_active_facts(limit=50)
-        recent_experiences = self.ltm.get_recent_experiences(limit=5)
-        reflections = self.search_reflections(query, limit=3)  # #251: 有 query 按相关度，空则按时间
-        relationship = self.ltm.get_relationship()
+        The whole operation runs under ``self._lock`` so that SQLite queries
+        issued through the sync wrappers are serialized. Do not wrap this
+        method in ``asyncio.gather`` or other concurrent primitives.
+        """
+        with self._lock:
+            logger.info(f"[retrieval] query_len={len(query)}")
 
-        # Layer 2: hybrid or keyword scoring
-        keywords = self.extract_keywords(query)
-        embed_ok = self._embed and self._embed.health_check()  # RT-003: cache result
-        # RT-006: encode the query exactly once and thread the vector through
-        # both the fact and experience scorers instead of re-encoding per call.
-        query_vec = None
-        if embed_ok:
-            try:
-                query_vec = self._embed.encode_single(query)
-            except Exception as e:
-                logger.warning(f"[retrieval] query encode failed, keyword fallback: {e}")
-                embed_ok = False
-        if embed_ok:
-            candidates = self._hybrid_score(query, hot_facts, keywords, query_vec)
-        else:
-            candidates = self._score_facts(hot_facts, keywords, query)
-        candidates = candidates[:30]
+            # Layer 1: hot memory (always included)
+            hot_facts = self.ltm.get_all_active_facts(limit=50)
+            recent_experiences = self.ltm.get_recent_experiences(limit=5)
+            reflections = self.search_reflections(query, limit=3)  # #251: 有 query 按相关度，空则按时间
+            relationship = self.ltm.get_relationship()
 
-        # LLM reranking if > 15 candidates
-        if len(candidates) > 15 and self.llm_rerank_fn and query.strip():
-            selected_indices = self._llm_rerank(query, candidates)
-            if selected_indices is not None:
-                candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
+            # Layer 2: hybrid or keyword scoring
+            keywords = self.extract_keywords(query)
+            embed_ok = self._embed and self._embed.health_check()  # RT-003: cache result
+            # RT-006: encode the query exactly once and thread the vector through
+            # both the fact and experience scorers instead of re-encoding per call.
+            query_vec = None
+            if embed_ok:
+                try:
+                    query_vec = self._embed.encode_single(query)
+                except Exception as e:
+                    logger.warning(f"[retrieval] query encode failed, keyword fallback: {e}")
+                    embed_ok = False
+            if embed_ok:
+                candidates = self._hybrid_score(query, hot_facts, keywords, query_vec)
+            else:
+                candidates = self._score_facts(hot_facts, keywords, query)
+            candidates = candidates[:30]
 
-        # Truncate to 15 if no rerank was applied (or rerank failed)
-        if len(candidates) > 15:
-            candidates = candidates[:15]
+            # LLM reranking if > 15 candidates
+            if len(candidates) > 15 and self.llm_rerank_fn and query.strip():
+                selected_indices = self._llm_rerank(query, candidates)
+                if selected_indices is not None:
+                    candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
 
-        selected_facts = candidates[:10]
+            # Truncate to 15 if no rerank was applied (or rerank failed)
+            if len(candidates) > 15:
+                candidates = candidates[:15]
 
-        # Search experiences (semantic if available)
-        if embed_ok:
-            keyword_experiences = self._search_experiences_semantic(
-                query, recent_experiences, keywords, query_vec
+            selected_facts = candidates[:10]
+
+            # Search experiences (semantic if available)
+            if embed_ok:
+                keyword_experiences = self._search_experiences_semantic(
+                    query, recent_experiences, keywords, query_vec
+                )
+            else:
+                keyword_experiences = self.ltm.search_experiences(keywords, limit=5)
+            all_experiences = self._merge_unique_experiences(
+                keyword_experiences, recent_experiences
+            )[:5]
+
+            return MemoryContext(
+                facts=selected_facts,
+                experiences=all_experiences,
+                reflections=reflections[:3],
+                relationship=relationship,
             )
-        else:
-            keyword_experiences = self.ltm.search_experiences(keywords, limit=5)
-        all_experiences = self._merge_unique_experiences(
-            keyword_experiences, recent_experiences
-        )[:5]
-
-        return MemoryContext(
-            facts=selected_facts,
-            experiences=all_experiences,
-            reflections=reflections[:3],
-            relationship=relationship,
-        )
 
     def retrieve_by_recall_tag(self, text: str) -> Optional[str]:
         """Layer 3: check for [回忆: xxx] tag and return memory snippet."""
@@ -129,21 +142,22 @@ class MemoryRetriever:
         Layer 1 二期（2026-07-20）：方法名与 Reflection 返回形状不变，
         数据经 repository 适配器改读 insights_v2（content=hypothesis、
         significance=confidence），#251 评分逻辑不变。"""
-        if not query.strip():
-            return self.ltm.get_recent_reflections(limit=limit)
-        keywords = self.extract_keywords(query)
-        candidates = self.ltm.get_recent_reflections(limit=30)
-        if not candidates:
-            return []
-        query_vec = None
-        if self._embed and self._embed.health_check():
-            try:
-                query_vec = self._embed.encode_single(query)
-            except Exception as e:
-                logger.warning(f"[retrieval] reflection query encode failed, keyword fallback: {e}")
-        scored = [(r, self._reflection_score(r, keywords, query_vec)) for r in candidates]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return [r for r, _ in scored[:limit]]
+        with self._lock:
+            if not query.strip():
+                return self.ltm.get_recent_reflections(limit=limit)
+            keywords = self.extract_keywords(query)
+            candidates = self.ltm.get_recent_reflections(limit=30)
+            if not candidates:
+                return []
+            query_vec = None
+            if self._embed and self._embed.health_check():
+                try:
+                    query_vec = self._embed.encode_single(query)
+                except Exception as e:
+                    logger.warning(f"[retrieval] reflection query encode failed, keyword fallback: {e}")
+            scored = [(r, self._reflection_score(r, keywords, query_vec)) for r in candidates]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return [r for r, _ in scored[:limit]]
 
     def _reflection_score(self, r, keywords: list[str], query_vec=None) -> float:
         """#251: 单条反思评分 —— 语义 0.6 + 关键词 0.4（混合模式同 _hybrid_score）。

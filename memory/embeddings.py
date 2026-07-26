@@ -149,14 +149,17 @@ class EmbeddingEngine:
                 return True
         except Exception:
             pass
-        # Fallback: try the embeddings endpoint directly
+        # Fallback: lightweight probe on the embeddings endpoint.
+        # Use a recognisable probe string + header so server logs can filter
+        # or ignore health-check traffic.
         try:
             resp = self._session.post(
                 self._endpoint,
-                json={"input": ["test"]},
+                json={"input": ["health-check-ping"]},
+                headers={"X-Probe-Type": "health-check"},
                 timeout=5,
             )
-            return resp.status_code == 200
+            return 200 <= resp.status_code < 300
         except Exception:
             return False
 

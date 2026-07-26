@@ -94,10 +94,10 @@ class TestConsolidationFactChecker(unittest.TestCase):
         self.ltm.repo.deactivate_fact.assert_not_called()
         self.ltm.repo.update_fact_confidence.assert_not_called()
 
-    # ── P1: error handling clears buffer ──
+    # ── P1/P5: buffer clearing depends on fact extraction success ──
 
-    def test_consolidate_partial_failure_clears_buffer(self):
-        """P1: on any error, pending_buffer and seen_ids should be cleared."""
+    def test_consolidate_fact_failure_keeps_buffer(self):
+        """P5: if fact extraction itself fails, keep buffer for retry."""
         from models.conversation import Turn
         t = Turn(turn_id=1, role="user", content="hello")
         self.consolidator._pending_buffer = [t]
@@ -105,6 +105,28 @@ class TestConsolidationFactChecker(unittest.TestCase):
 
         # Simulate fact extraction failure
         self.consolidator._extract_facts = MagicMock(side_effect=Exception("LLM error"))
+        self.consolidator.consolidate(MagicMock(), MagicMock())
+
+        self.assertEqual(len(self.consolidator._pending_buffer), 1)
+        self.assertEqual(len(self.consolidator._seen_ids), 1)
+
+    def test_consolidate_non_fact_failure_clears_buffer(self):
+        """P5: if facts extracted OK but a later step fails, clear buffer."""
+        from models.conversation import Turn
+        # Long enough to trigger experience summarization path
+        content = "hello " * 50
+        t = Turn(turn_id=1, role="user", content=content)
+        self.consolidator._pending_buffer = [t]
+        self.consolidator._seen_ids = {(1, "user")}
+
+        self.consolidator._extract_facts = MagicMock()
+        self.consolidator._summarize_experience = MagicMock(
+            side_effect=Exception("LLM error"))
+        self.consolidator._generate_reflection_l1 = MagicMock()
+        self.consolidator._update_relationship = MagicMock()
+        self.consolidator._prune = MagicMock()
+        self.consolidator._embed_new_items = MagicMock()
+
         self.consolidator.consolidate(MagicMock(), MagicMock())
 
         self.assertEqual(len(self.consolidator._pending_buffer), 0)
@@ -338,6 +360,57 @@ class TestEmbedNewItemsCoverage(unittest.TestCase):
             self.assertEqual(len(theirs), 1)
             self.assertIsNone(theirs[0]["embedding"])
             self.assertEqual(theirs[0]["embedding_version"], 0)
+
+
+class TestEmbedNewItemsDefensive(unittest.TestCase):
+    """P6: _embed_new_items must tolerate malformed encode() output."""
+
+    def _setup(self):
+        import asyncio
+        import numpy as np
+        from memory.consolidation import MemoryConsolidator
+        from memory.long_term import LongTermMemory
+        from storage.database import Database
+        from storage.repository import Repository
+
+        db = Database(":memory:")
+        asyncio.run(db.open())
+        repo = Repository(db)
+
+        async def _insert():
+            async with db.cursor() as c:
+                await c.execute(
+                    "INSERT INTO facts_v2 (category, fact_key, fact_value, session_id)"
+                    " VALUES ('preference', '饮品', '咖啡', 'default')")
+                await db.commit()
+        asyncio.run(_insert())
+
+        embed = MagicMock()
+        embed.health_check.return_value = True
+        ltm = LongTermMemory(repo)
+        consolidator = MemoryConsolidator(ltm, MagicMock(), embedding_engine=embed)
+        return db, consolidator, embed
+
+    def test_encode_none_skips_without_crash(self):
+        db, consolidator, embed = self._setup()
+        embed.encode.return_value = None
+        try:
+            consolidator._embed_new_items()  # should not raise
+        finally:
+            import asyncio
+            asyncio.run(db.close())
+
+    def test_encode_wrong_length_skips_without_crash(self):
+        db, consolidator, embed = self._setup()
+        import numpy as np
+        # Return fewer vectors than requested
+        embed.encode.return_value = np.array(
+            [np.ones(8, dtype=np.float32)], dtype=np.float32)
+        try:
+            consolidator._embed_new_items()  # should not raise
+        finally:
+            import asyncio
+            asyncio.run(db.close())
 
 
 class TestInsightGeneration(unittest.TestCase):
