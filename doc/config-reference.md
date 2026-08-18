@@ -80,6 +80,7 @@
 | `personality_file` | string | `"personalities/default.json"` | 默认人格模板路径；新建角色时会复制此文件 |
 | `typing_speed` | float | `0.005` | CLI 打字机效果速度（秒/字符） |
 | `log_level` | string | `"INFO"` | 日志级别：DEBUG/INFO/WARNING/ERROR |
+| `console_log_level` | string | `"WARNING"` | CLI 交互期间控制台日志级别（完整日志始终写 `logs/` 文件） |
 | `max_tool_iterations` | int | `5` | ReAct 循环最大工具调用轮次 |
 | `agent2_total_timeout_seconds` | int | `120` | Agent 2 工具循环全局超时（秒），超期后降级为 Agent 3 直接回复（L4-2） |
 | `monitor_enabled` | bool | `true` | LLM 调用监控开关（Web `/monitor` 页），生产环境建议关闭以避免记录 prompt |

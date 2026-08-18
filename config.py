@@ -74,6 +74,9 @@ class Config:
     # WS init 消息需带 token 字段（web.md 一期）。
     web_access_token: str = ""
     log_level: str = "INFO"
+    # CLI 交互期间的控制台日志级别（默认 WARNING——聊天界面只留警告/错误，
+    # 完整日志始终写 logs/YYYY-MM-DD.log）；Web 模式不受影响
+    console_log_level: str = "WARNING"
     # MN-003: LLM monitor switch -- disable in production to avoid leaking prompts
     monitor_enabled: bool = True
     allowed_read_paths: list[str] = field(default_factory=lambda: [

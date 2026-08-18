@@ -41,6 +41,13 @@ class CliController:
             a.ui.status_fn = self._status_snapshot
             a.ui.start()
             a.ui.display_banner(a.personality.config.name)
+            if a.ui.session is not None:
+                # CLI-UI: 聊天界面接管后，控制台日志只留 WARNING+ 且经
+                # print_formatted_text 打到输入行上方，不再与对话刷屏混杂；
+                # 完整日志始终在 logs/ 文件里（console_log_level 可调）
+                from core.logging_setup import use_prompt_toolkit_console
+                use_prompt_toolkit_console(
+                    getattr(a.config, "console_log_level", "WARNING"))
         a.state = AgentState.BOOT
         self._on_boot()
         engine = ConversationEngine(a)

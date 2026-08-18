@@ -65,3 +65,50 @@ def setup_logging(level: str = "INFO") -> None:
     ch.setFormatter(console_fmt)
     ch.addFilter(RequestIdFilter())
     root.addHandler(ch)
+
+
+class _PromptToolkitHandler(logging.Handler):
+    """CLI 交互模式的控制台输出：经 print_formatted_text 打到输入行上方。
+
+    直接写 stderr 会把 prompt_toolkit 的输入行/状态栏冲花（2026-08-18 用户
+    反馈日志与聊天混在一起）；仅承载 WARNING+，完整日志始终在 logs/ 文件。
+    """
+
+    _COLORS = {
+        logging.WARNING: "\x1b[33m",
+        logging.ERROR: "\x1b[31m",
+        logging.CRITICAL: "\x1b[1;31m",
+    }
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            from prompt_toolkit import print_formatted_text
+            from prompt_toolkit.formatted_text import ANSI
+            color = self._COLORS.get(record.levelno, "\x1b[33m")
+            print_formatted_text(ANSI(f"{color}{self.format(record)}\x1b[0m"))
+        except Exception:
+            pass  # 日志永远不弄挂应用
+
+
+def use_prompt_toolkit_console(level: str = "WARNING") -> None:
+    """把 stderr 控制台 handler 换成 prompt_toolkit 感知版（CLI 聊天期间）。
+
+    仅替换控制台 handler；文件 handler 不受影响（完整日志照写）。
+    非交互环境（session 创建失败/管道）不应调用。
+    """
+    if not isinstance(level, str):  # 防御：MagicMock/None 等非法值回退默认
+        level = "WARNING"
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        # FileHandler 是 StreamHandler 子类，必须显式排除
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            root.removeHandler(h)
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s [%(request_id)s]: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    handler = _PromptToolkitHandler()
+    handler.setFormatter(fmt)
+    handler.setLevel(getattr(logging, level.upper(), logging.WARNING))
+    handler.addFilter(RequestIdFilter())
+    root.addHandler(handler)
