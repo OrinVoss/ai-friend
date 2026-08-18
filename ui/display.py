@@ -137,17 +137,42 @@ class DisplayEngine:
         print(f"{C_SYSTEM}[系统] {msg}{C_RESET}")
 
     @staticmethod
+    def format_system(msg: str) -> str:
+        """[系统] 文本的 ANSI 字符串版（TUI 不走 print，直接渲染）。"""
+        return f"{C_SYSTEM}[系统] {msg}{C_RESET}"
+
+    @staticmethod
     def print_error(msg: str) -> None:
         print(f"{C_ERROR}[错误] {msg}{C_RESET}")
 
     @staticmethod
-    def print_mood(emotion: str, valence: float | None = None,
-                   arousal: float | None = None) -> None:
+    def format_error(msg: str) -> str:
+        return f"{C_ERROR}[错误] {msg}{C_RESET}"
+
+    @staticmethod
+    def format_mood_line(emotion: str, valence: float | None = None,
+                         arousal: float | None = None) -> str:
+        """[心情: …] 的 ANSI 字符串版。"""
         icon, color = _MOOD_MAP.get(emotion, _MOOD_MAP["neutral"])
         extra = ""
         if valence is not None and arousal is not None:
             extra = f" (v={valence:.2f} a={arousal:.2f})"
-        print(f"{color}[心情: {icon} {emotion}{extra}]{C_RESET}")
+        return f"{color}[心情: {icon} {emotion}{extra}]{C_RESET}"
+
+    @staticmethod
+    def format_banner(name: str) -> str:
+        """欢迎面板的 ANSI 字符串版。"""
+        rows = [
+            (f"✦ {name} ✦", C_NAME),
+            ("你的 AI 朋友", C_DIM),
+            ("输入 /help 查看命令 · /exit 退出", C_DIM),
+        ]
+        return "\n" + panel("欢迎", rows, max_width=46) + "\n"
+
+    @staticmethod
+    def print_mood(emotion: str, valence: float | None = None,
+                   arousal: float | None = None) -> None:
+        print(DisplayEngine.format_mood_line(emotion, valence, arousal))
 
     @staticmethod
     def print_status(msg: str) -> None:
@@ -161,20 +186,18 @@ class DisplayEngine:
 
     @staticmethod
     def print_banner(name: str) -> None:
-        rows = [
-            (f"✦ {name} ✦", C_NAME),
-            ("你的 AI 朋友", C_DIM),
-            ("输入 /help 查看命令 · /exit 退出", C_DIM),
-        ]
-        print()
-        print(panel("欢迎", rows, max_width=46))
-        print()
+        print(DisplayEngine.format_banner(name))
+
+    @staticmethod
+    def format_help(commands: list[tuple[str, str]]) -> str:
+        """帮助面板的 ANSI 字符串版。"""
+        width = max(_cjk_aware_width(c) for c, _ in commands)
+        rows = [(f"{c:<{width}}  {d}", C_USER) for c, d in commands]
+        return panel("内置命令", rows)
 
     @staticmethod
     def print_help(commands: list[tuple[str, str]]) -> None:
-        width = max(_cjk_aware_width(c) for c, _ in commands)
-        rows = [(f"{c:<{width}}  {d}", C_USER) for c, d in commands]
-        print(panel("内置命令", rows))
+        print(DisplayEngine.format_help(commands))
 
     @classmethod
     def _word_wrap(cls, text: str, width: int) -> list[str]:

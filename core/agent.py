@@ -9,7 +9,7 @@ from typing import Optional
 
 from models.conversation import MemoryContext
 from core.personality import Personality
-from core.provider import LLMProvider
+from core.provider import LLMProvider, StreamAborted
 from core.dispatcher import parse_tool_calls, execute_tool_calls, format_tool_results, contains_fake_action
 from memory.short_term import ConversationBuffer
 from memory.long_term import LongTermMemory
@@ -298,6 +298,12 @@ class Agent:
                 for r in results:
                     self.record_tool_call(r["name"], r["success"], r["output"])
                 messages.append({"role": "user", "content": format_tool_results(results, output_cap=self.config.dispatcher_output_cap)})
+            except StreamAborted:
+                # TUI Esc 中断：用户打断首段流式——不落库、不出兜底文案，
+                # 返回空串，由前端展示"已中断"（所见与历史一致）
+                logger.info("[react] stream aborted by user (Esc)")
+                self._reset_react()
+                return ""
             except Exception:
                 logger.exception("[react] unexpected error in iteration")
                 if not final_text:

@@ -69,8 +69,13 @@ class TestCliController(unittest.TestCase):
 
     def test_handle_command_unknown(self):
         self.agent.ui = MagicMock()
-        self.ctrl._handle_command("/unknown_cmd")
-        self.agent.ui.display.print_system.assert_called()
+        # TUI-1 后命令输出统一走 emit（sink 缺省为 print），断言实际输出
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.ctrl._handle_command("/unknown_cmd")
+        self.assertIn("未知命令", buf.getvalue())
 
     def test_on_boot_with_custom_greeting(self):
         from core.agent import AgentState

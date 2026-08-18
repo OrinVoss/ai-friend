@@ -30,9 +30,9 @@ class CliController:
 
         A RuntimeDriver runs in a daemon thread, so the CLI also sleeps,
         dreams and reaches out proactively — same rhythm as the Web.
-        CLI-UI（2026-07-26）：输入改由 prompt_toolkit 接管（历史/补全/
-        状态栏），read_input 内部带 patch_stdout，后台主动消息不再
-        破坏输入行；旧的 0.1s 轮询 + 手写提示符已删除。
+        TUI-1（2026-08-18）：真控制台默认走全屏 TUI（ui/tui.py：滚动聊天区
+        + 固定输入框 + 状态栏 + F2 日志面板；config.cli_fullscreen_ui 可关）；
+        管道/CI 等无控制台环境回退行式 prompt 界面（prompt_toolkit 输入行）。
         """
         from core.agent import AgentState
         from core.runtime_driver import RuntimeDriver
@@ -40,19 +40,8 @@ class CliController:
         if a.ui:
             a.ui.status_fn = self._status_snapshot
             a.ui.start()
-            a.ui.display_banner(a.personality.config.name)
-            if a.ui.session is not None:
-                # CLI-UI: 聊天界面接管后，控制台日志只留 WARNING+ 且经
-                # print_formatted_text 打到输入行上方，不再与对话刷屏混杂；
-                # 完整日志始终在 logs/ 文件里（console_log_level 可调）
-                from core.logging_setup import use_prompt_toolkit_console
-                use_prompt_toolkit_console(
-                    getattr(a.config, "console_log_level", "WARNING"))
         a.state = AgentState.BOOT
-        self._on_boot()
         engine = ConversationEngine(a)
-        frontend = _CliFrontend(a.ui, a.personality.config.name)
-        driver = RuntimeDriver(engine, frontend)
         # Restore turn counter so restarts don't reset it (#RS-001 parity
         # with Web; also keeps conversation_turns.turn_number monotonic).
         try:
@@ -60,29 +49,64 @@ class CliController:
             a.turn_count = run_async(a.ltm.repo.get_max_turn_number())
         except Exception as e:
             logger.warning(f"[cli] restore turn_count failed: {e}")
+
+        from core.logging_setup import use_prompt_toolkit_console
+        tui_app = None
+        if (a.ui is not None and a.ui.session is not None
+                and getattr(a.config, "cli_fullscreen_ui", True)):
+            try:
+                from ui.tui import TuiChatApp
+                tui_app = TuiChatApp(self, engine, a.ui)
+            except Exception:
+                logger.exception("[cli] TUI 初始化失败，回退行式界面")
+                tui_app = None
+
+        if tui_app is not None:
+            frontend = tui_app.frontend
+            tui_app.preload()
+            self._on_boot(sink=tui_app.post_ai)
+            # 控制台 WARNING+ 日志进 F2 面板（完整日志始终在 logs/ 文件）
+            use_prompt_toolkit_console(
+                getattr(a.config, "console_log_level", "WARNING"),
+                sink=tui_app.post_log)
+        else:
+            frontend = _CliFrontend(a.ui, a.personality.config.name)
+            if a.ui:
+                a.ui.display_banner(a.personality.config.name)
+                if a.ui.session is not None:
+                    # CLI-UI: 行式界面下 WARNING+ 日志经 print_formatted_text
+                    # 打到输入行上方，不与对话刷屏混杂
+                    use_prompt_toolkit_console(
+                        getattr(a.config, "console_log_level", "WARNING"))
+            self._on_boot()
+
+        driver = RuntimeDriver(engine, frontend)
         driver.start_in_thread()
         try:
-            while a._running:
-                try:
-                    user_input = a.ui.read_input() if a.ui else None
-                except (EOFError, KeyboardInterrupt):
-                    break
-                if user_input is None or not user_input.strip():
-                    continue
-                user_input = user_input.strip()
-                if user_input.startswith("/"):
-                    self._handle_command(user_input)
-                    continue
-                try:
-                    engine.handle_message(user_input, frontend)
-                except Exception as e:
-                    logger.error(f"[cli] engine error: {e}", exc_info=True)
+            if tui_app is not None:
+                tui_app.run_blocking()
+            else:
+                while a._running:
+                    try:
+                        user_input = a.ui.read_input() if a.ui else None
+                    except (EOFError, KeyboardInterrupt):
+                        break
+                    if user_input is None or not user_input.strip():
+                        continue
+                    user_input = user_input.strip()
+                    if user_input.startswith("/"):
+                        self._handle_command(user_input)
+                        continue
+                    try:
+                        engine.handle_message(user_input, frontend)
+                    except Exception as e:
+                        logger.error(f"[cli] engine error: {e}", exc_info=True)
+                        if a.ui:
+                            a.ui.display.print_error(str(e))
                     if a.ui:
-                        a.ui.display.print_error(str(e))
-                if a.ui:
-                    a.ui.invalidate()  # 情绪/轮次已变，刷新 bottom_toolbar
-                if a.turn_count > 0 and a.turn_count % 10 == 0:
-                    a.personality.save(a.config.personality_file)
+                        a.ui.invalidate()  # 情绪/轮次已变，刷新 bottom_toolbar
+                    if a.turn_count > 0 and a.turn_count % 10 == 0:
+                        a.personality.save(a.config.personality_file)
         finally:
             driver.stop()
         self._on_shutdown()
@@ -97,13 +121,15 @@ class CliController:
             "sleeping": bool(getattr(a, "_sleeping", False)),
         }
 
-    def _on_boot(self) -> None:
+    def _on_boot(self, sink=None) -> None:
         from core.agent import AgentState
         a = self.a
         greeting = a.personality.config.first_run_greeting
         if not greeting:
             greeting = f"你好呀！我是{a.personality.config.name}，很高兴认识你~"
-        if a.ui:
+        if sink is not None:
+            sink(greeting)  # TUI-1：问候语进聊天区
+        elif a.ui:
             a.ui.display.respond(greeting, prefix=a.personality.config.name)
         a.state = AgentState.IDLE
 
@@ -118,8 +144,17 @@ class CliController:
             a.ui.stop()
         print(f"\n\033[1;36m{a.personality.config.name} 记下了你们的对话。下次见~\033[0m")
 
-    def _handle_command(self, cmd: str) -> None:
+    def _handle_command(self, cmd: str, sink=None) -> None:
+        """斜杠命令。sink 提供时（TUI-1）以 ANSI 字符串输出到 sink，否则直接打印。"""
+        from ui.display import DisplayEngine, panel, rel_bar
         a = self.a
+
+        def emit(text: str) -> None:
+            if sink is not None:
+                sink(text)
+            else:
+                print(text)
+
         if cmd in ("/exit", "/quit"):
             a._running = False
         elif cmd == "/save":
@@ -128,13 +163,12 @@ class CliController:
                                         max_experiences=a.config.max_experiences,
                                         max_reflections=a.config.max_reflections)
             a.personality.save(a.config.personality_file)
-            if a.ui:
-                a.ui.display.print_system("记忆已保存")
+            emit(DisplayEngine.format_system("记忆已保存"))
         elif cmd == "/mood" and a.ui:
             e = a.personality.emotion
-            a.ui.display.print_mood(e.dominant_emotion, e.valence, e.arousal)
+            emit(DisplayEngine.format_mood_line(
+                e.dominant_emotion, e.valence, e.arousal))
         elif cmd == "/status" and a.ui:
-            from ui.display import panel, rel_bar
             rel = a.ltm.get_relationship()
             rows = [(f"轮次: {a.turn_count} │ 事实: {len(a.ltm.get_all_active_facts())}", "")]
             for k, v in rel.items():
@@ -151,15 +185,15 @@ class CliController:
                         arrow = "↑" if delta > 0.01 else "↓" if delta < -0.01 else "→"
                         rows.append((f"{dim} 趋势(7d): {values[0]:.2f}→{values[-1]:.2f} {arrow}",
                                      "\033[2m"))
-            print(panel("状态", rows))
+            emit(panel("状态", rows))
         elif cmd == "/forget":
             a.short_term.clear()
-            if a.ui:
-                a.ui.display.print_system("短期记忆已清除")
+            emit(DisplayEngine.format_system("短期记忆已清除"))
         elif cmd == "/help" and a.ui:
-            a.ui.display_help()
+            from ui.cli import SLASH_HELP
+            emit(DisplayEngine.format_help(SLASH_HELP))
         elif a.ui:
-            a.ui.display.print_system(f"未知命令: {cmd}")
+            emit(DisplayEngine.format_system(f"未知命令: {cmd}"))
 
 
 class _StreamTagFilter:

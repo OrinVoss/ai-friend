@@ -21,6 +21,14 @@ class TruncatedResponseError(Exception):
     半截 JSON 对下游等同于格式错误，视为可重试错误（与网络错误同级）。"""
 
 
+class StreamAborted(Exception):
+    """TUI Esc 中断（2026-08-18）：on_token 回调抛出以中止流式生成。
+
+    不在 generate() 的重试清单（Truncated/Connection/HTTP/Chunked/ReadTimeout）
+    之内，因此直接向上传播、绝不重试；由 Agent._react_loop 捕获后返回空串。
+    """
+
+
 class LLMProvider(ABC):
     """Abstract base class for LLM providers.
 

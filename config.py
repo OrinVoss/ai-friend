@@ -77,6 +77,9 @@ class Config:
     # CLI 交互期间的控制台日志级别（默认 WARNING——聊天界面只留警告/错误，
     # 完整日志始终写 logs/YYYY-MM-DD.log）；Web 模式不受影响
     console_log_level: str = "WARNING"
+    # TUI-1: CLI 全屏界面（滚动聊天区 + 固定输入框 + F2 日志面板）；
+    # False 回退行式 prompt 界面。无控制台环境（管道/CI）自动回退
+    cli_fullscreen_ui: bool = True
     # MN-003: LLM monitor switch -- disable in production to avoid leaking prompts
     monitor_enabled: bool = True
     allowed_read_paths: list[str] = field(default_factory=lambda: [
