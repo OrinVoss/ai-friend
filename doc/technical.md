@@ -47,10 +47,10 @@ main.py / web_main.py
     │   ├── monitor.py ────────── LLM API 调用监控（环形缓冲 200 条，开发调试用）
     │   ├── embedding_server.py ─ 本地嵌入服务器自动启动（CLI/Web 共享）(#58)
     │   ├── logging_setup.py ──── 日志配置（CLI/Web 共享）(#58)
-    │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134）
+    │   ├── async_utils.py ─────── 异步→同步统一桥接 run_async()（#134；AU-004 thread-local 重入防护，嵌套调用立即抛错）
     │   ├── dispatcher.py ─────── tool_call 三层解析（JSON calls 数组 / XML / 裸 JSON）+ 别名下沉 + 工具调度
     │   ├── cognitive_state.py ─── CognitiveState Phase 1+2（输入去重/error_fallback 跳过/Agent 1 决策温度 0.3）
-    │   └── inner_drive_state.py ─ 内驱状态池（二期：关注列表 / 沉思循环 / 响应线索）
+    │   └── inner_drive_state.py ─ 内驱状态池（二期：关注列表 / 沉思循环 / 响应线索；create_inner_drive_state() 单一创建点）
     │
     ├── memory/（9 模块）
     │   ├── short_term.py ───── ConversationBuffer（内存 deque）
@@ -72,7 +72,7 @@ main.py / web_main.py
     │   ├── web_tools.py ───── web_search + web_fetch（AnySearch）
     │   └── music_tool.py ──── music_play（模糊搜索）
     │
-    ├── tests/ ───────────────── 单元测试（851 用例，60 个测试文件）
+    ├── tests/ ───────────────── 单元测试（871 用例，61 个测试文件）
     │
     ├── storage/
     │   ├── database.py ───── SQLite 异步连接（aiosqlite + asyncio.Lock）+ 8 表 Schema + WAL 模式
@@ -134,7 +134,7 @@ Web 模式： web_main.py → uvicorn
 
 - **三层架构**：Agent 1 InnerDriveAgent（自主推理，记忆检索 + 缺口决策）→ Agent 2 ToolAgent（外部工具执行，ToolAttemptTracker 重试）→ Agent 3 Roleplay（人格驱动, temp=0.8），从根本上解决模型虚构工具调用问题。闲聊场景优化为单次 LLM 调用
 - **单向依赖**：core → memory → storage，core → tools，层间无循环依赖（个别内部环靠 lazy import 维持）
-- **统一装配**：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）
+- **统一装配**：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）；InnerDriveState 由 `create_inner_drive_state()`（core/inner_drive_state.py）单一创建点构造，session_factory 与 agent_wiring 共用（2026-07-26）
 - **接口隔离**：provider 抽象 LLM 调用，storage 抽象持久化，各层可独立替换
 - **统一管线 + 双前端**：CLI 与 Web 共享 `ConversationEngine` + `RuntimeDriver`，只有 Frontend 渲染不同
 
@@ -452,6 +452,8 @@ prompt 注入：
       LLM 调 <tool_call>{"name": "recall"} 主动回溯
 ```
 
+> 并发约束（2026-07-26 审查修复）：`MemoryRetriever.retrieve_for_query` / `search_reflections` 全程持 `threading.RLock` 串行执行——`storage/database.py::cursor()` 持有进程级 `threading.Lock`（H-03），并发检索可能交错 SQLite 操作冻死事件循环。禁止把这两个方法放入 `asyncio.gather` 等并发原语中调用。
+
 ### 4.3 记忆合并
 
 触发条件：每 5 轮 / |valence| > 0.7 / pending >= 10 / 空闲 > 120s
@@ -725,6 +727,8 @@ Agent 2 的多个工具请求可并行调度（`concurrent.futures.ThreadPoolExe
 #### 工具调用记录
 
 每次执行后记录到 `_tool_call_history` (最多 20 条)，注入 Agent 3 系统 prompt，AI 可告知用户真实调用记录。
+
+Agent 2 侧的 `ToolCallRecord`（core/tool_agent.py）结构为 `name / arguments / success / output / elapsed_ms / error_type / retryable / request`——`request` 字段（MH-002，2026-07-26）记录该次调用所属的自然语言请求（截断 80 字符）。`format_for_phase2()` 在存在两个及以上不同 `request` 时按请求分组渲染，每组前加小标题 `【请求：…】`，铁律段仅末尾一次（`format_tool_results(..., append_iron_rule=False)` 分组内关闭）；单请求时格式不变。
 
 ### 5.5 自主行为（作息 + 探索 + 聊天）
 

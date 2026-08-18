@@ -52,7 +52,7 @@
 | 区块 | 数据来源 | 说明 |
 |------|----------|------|
 | Block 0 | `datetime.now()` | 当前时间，格式 `YYYY-MM-DD HH:mm Weekday` |
-| Block 1 | `tool_records` | Agent 2 外部工具执行结果 |
+| Block 1 | `tool_records` | Agent 2 外部工具执行结果；多请求时按请求分组（小标题 `【请求：…】`），铁律仅末尾一次（MH-002） |
 | Block 1b | `inner_drive_summary` | Agent 1 自主推理摘要 |
 | Block 2 | `personalities/{role_id}.json → PersonalityConfig` | 人格核心定义（静态缓存） |
 | Block 3 | `config.conversation_examples` | 可配置对话风格示例（#28），仅前 `conversation_examples_max_turns` 轮（默认 3）注入 |

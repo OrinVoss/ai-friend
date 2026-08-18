@@ -542,7 +542,7 @@ class BaseLLMProvider(ABC):
 
 ## 6. 验收标准
 
-1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 841 passed + 2 skipped，60+ 个测试文件）。
+1. **单元测试**：`pytest tests --ignore=tests/real_api -q` 保持不降级（当前 869 passed + 2 skipped，60+ 个测试文件）。
 2. **Token 效率**：同样 10 轮闲聊，API token 输入下降 ≥ 20%。
 3. **记忆质量**：连续对话 50 轮后，Fact confidence 衰减机制生效，无自相矛盾 Fact。
 4. **稳定性**：Web 端 30 分钟无人访问自动释放资源，shutdown 不丢数据。

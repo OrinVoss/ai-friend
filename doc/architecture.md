@@ -133,7 +133,7 @@ models / prompts                  （纯数据 / 模板层，被各层引用）
 - `core/agent.py` 是装配枢纽，直接依赖 15 个内部模块（全项目最多）。
 - 跨层例外：`storage/repository.py`、`memory/long_term.py` 等直接使用 `core/async_utils.py` 的 `run_async()`，`memory/consolidation.py` 使用 `core/personality.py`；被引用方不回依赖，故不成环。
 - 潜在环靠函数内 lazy import 打破：`agent ↔ cli_controller`、`short_term ↔ context_manager`、`prompts.system → core.prompt_cache`。
-- 统一装配：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）。
+- 统一装配：`core/session_factory.py` 是 CLI/Web 唯一装配点，provider 与 embed engine 进程共享，Repository 按 session 隔离（P0）；InnerDriveState 由 `create_inner_drive_state()`（core/inner_drive_state.py）单一创建点构造，session_factory 与 agent_wiring 共用（2026-07-26）。
 
 ---
 
@@ -250,7 +250,7 @@ ConversationEngine（core/conversation_engine.py，唯一管线）
 | Agent 3 | history_search | 搜索原始对话历史（关键词/语义/按轮次） | SQLite + 向量 |
 
 Agent 1 (InnerDriveAgent) 自主推理决策，输出自然语言工具请求。
-Agent 2 (ToolAgent) 接收请求执行外部工具，ToolAttemptTracker 控制重试。
+Agent 2 (ToolAgent) 接收请求执行外部工具，ToolAttemptTracker 控制重试；每条 `ToolCallRecord` 带 `request` 字段归因所属请求（MH-002），多请求时 `format_for_phase2` 按请求分组渲染后注入 Agent 3。
 Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部工具可用。
 
 ---
@@ -260,7 +260,7 @@ Agent 3 (Roleplay Agent) 接收 inner_drive_summary + tool_results，仅内部�
 | | CLI | Web |
 |------|-----|-----|
 | 驱动 | ConversationEngine + RuntimeDriver | ConversationEngine + RuntimeDriver |
-| 输入 | stdin 线程 | WebSocket |
+| 输入 | prompt_toolkit PromptSession（历史/补全/状态栏） | WebSocket |
 | 输出 | 打字机效果 | 流式 Markdown 气泡（分段暂禁，单段发送） |
 | 主动对话 | RuntimeDriver 守护线程 | RuntimeDriver 协程（WS init 时启动） |
 | 会话 | 单用户 | SessionManager |
@@ -408,7 +408,7 @@ Stage 3 (执行):  chat → MessageHandler.handle_proactive(intent=intent)
 ├── storage/                 SQLite（aiosqlite 异步 + WAL + 版本化迁移 + 软删除）
 ├── prompts/                 提示词模板
 ├── models/                  数据模型（EmotionalState / Turn / UserFact / Observation / FactV2）
-├── ui/                      CLI 界面
+├── ui/                      CLI 界面（prompt_toolkit 输入层 + 面板/状态栏渲染）
 └── web/                     Web 界面
     ├── server.py            FastAPI + WebSocket + Pydantic + 滑动窗口限流
     ├── session.py           SessionManager + WebAgent（封装 Agent 私有接口）

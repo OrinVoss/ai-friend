@@ -1,13 +1,13 @@
 # AI Friend 完整开发日志
 
 > **项目周期**：2026-05-28 → 2026-07-26（59 天）
-> **提交总数**：394 次
-> **测试增长**：0 → 841 passed
+> **提交总数**：405 次
+> **测试增长**：0 → 869 passed
 > **数据库 Schema**：v1 → v6
 > **架构演进**：单体 Agent → 两阶段 → 三层 Agent → 六层架构
 > **文档体系**：从零 → 15+ 份技术文档
 >
-> 本文结合全部 394 次提交记录与 changes/ 目录下所有修改记录文件写成，
+> 本文结合全部 405 次提交记录与 changes/ 目录下所有修改记录文件写成，
 > 覆盖每一次架构决策、每一轮 Bug 歼灭、每一个功能落地的完整背景与实施细节。
 
 ---
@@ -926,13 +926,46 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 全量测试：841 passed + 2 skipped。
 
+### 7月26日下午：一致性与体验收尾
+
+同一天的最后一波提交，主题是"对齐"——prompt 声明与执行对齐、状态语义对齐、终端体验对齐。
+
+**`148e9aa` — Fix #301: align Agent 3 prompt tool declaration with execution registry**
+
+变更记录（`2026-07-26-修复issue301-agent3工具声明与执行一致.md`）：Agent 3 prompt 的「可用工具」块此前与 ReAct 循环实际执行的 registry 不一致。修复后 `build_system_prompt` 增加 `rule_tools` 参数：工具块只渲染内部 registry（recall / remember / history_search，与执行严格一致），输出规则块的 intent 选项改由 `rule_tools`（全量 registry）派生。
+
+**四问题修复（`f5a2c10` / `7718717` / `233f412` / `3565c63`）**
+
+按 `doc/fix-plan-2026-07-26-四问题修复.md`（`34babc4` 立项）逐项落地：
+
+1. **inner_drive_state 淘汰策略补测试**（`f5a2c10`，`2026-07-26-内驱状态淘汰策略补充测试.md`）：核实实现已是"非活跃优先 + priority + created_at"淘汰（非 FIFO），不改代码，只补三个行为用例。
+2. **MH-002 多请求工具结果归因**（`7718717`，`2026-07-26-多请求工具结果归因.md`）：`ToolCallRecord` 增加 `request` 字段（自然语言请求归属，截断 80 字符）；`format_for_phase2` 在多请求时按请求分组渲染（小标题【请求：…】，铁律段仅末尾一次），单请求格式不变；`format_tool_results` 增加 `append_iron_rule` 参数。解决"请求 2 成功、请求 1 失败时说不清哪件事没办成"。
+3. **WS-27/28 CognitiveState 一致性**（`233f412`，`2026-07-26-CognitiveState一致性修复.md`）：删除 message_handler 对 `state.memory_summary` / `memory_confidence` 的改写，确立"装配后不再修改"约定；新增 `render_memory_light()` helper 统一 Agent 3 轻量渲染（inner_drive 与 message_handler 原各写一遍）；`_run_agent3` 有摘要时不再冗余 `retrieve_for_query`。
+4. **AU-004 run_async 重入防护**（`3565c63`，`2026-07-26-run_async重入防护.md`）：thread-local 标记，worker 线程内嵌套调用立即抛 `RuntimeError("nested run_async call")`，把潜在的 4 线程池饿死（60 秒级卡顿）变成立刻可定位的报错。
+
+**`70e953d` — Fix code review issues: retrieval serialization, embed context, health probe, dead code, buffer cleanup, encode guard**
+
+变更记录（`2026-07-26-代码审查修复-死锁与健壮性.md`）：当天代码审查发现的 6 项逐项修复——`MemoryRetriever` 加 `threading.RLock` 串行化检索（禁 `asyncio.gather` 并发调用，防 SQLite 交错冻死事件循环）；`memory_agent._cross_verify` 显式传 embed；`health_check` 回退探测改 "health-check-ping" + `X-Probe-Type` 头、状态码放宽 2xx；`long_term` 删除引用未定义变量的死代码；consolidation 事实提取成功即清空缓冲区（后续步骤失败也清）；`_embed_new_items` 防御 encode 返回 None/数量不匹配。
+
+**`7643131` — refactor: unify InnerDriveState construction into create_inner_drive_state**
+
+变更记录（`2026-07-26-innerdrivestate单一创建点.md`）：`core/inner_drive_state.py` 新增 `create_inner_drive_state()` 工厂函数，消除 session_factory 与 agent_wiring 两处重复的 7 项参数映射（"初始化链断裂"），创建职责收敛为单一点。
+
+**`d006086` — feat(cli): prompt_toolkit UI upgrade — history/completion/status bar, phase hints, panels**
+
+变更记录（`2026-07-26-CLI界面升级.md`）：CLI 输入层重写为 prompt_toolkit `PromptSession`（FileHistory 历史、斜杠命令补全、AutoSuggestFromHistory、bottom_toolbar 状态栏、patch_stdout），删除 NonBlockingInputReader 轮询线程；`ui/display.py` 新增面板/关系进度条/分隔线/新 banner/emoji mood；管线透传 `on_status` 阶段提示（她在想…/翻工具箱…/写回复…）；非控制台回退 `input()`，非 tty 强制 UTF-8。新增 `prompt_toolkit==3.0.51` 依赖。
+
+另有 `707830f` sleep 锁护栏测试（SL-002：梦境生成绝不在锁内 await，纯测试无行为变化）。
+
+全量测试：**869 passed + 2 skipped**（871 collected）。
+
 ---
 
 ## 最终章：项目总结
 
 ### 代码库全景
 
-**提交分布**：394 次提交，约 7 次/活跃日。单分支（main），从头到尾一条线。
+**提交分布**：405 次提交，约 7 次/活跃日。单分支（main），从头到尾一条线。
 
 **版本里程碑**：
 
@@ -955,7 +988,7 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 - 第 50 天：466
 - 第 54 天：635
 - 第 56 天：842
-- 第 59 天：841（+2 skipped，测试归并后总数略降）
+- 第 59 天：869（+2 skipped；上午归并后 841，下午 #301 / MH-002 / 审查修复 / CLI 升级等新增用例）
 
 **数据库 Schema 演进**：v1（原始 SQLite）→ v2（observations/facts_v2）→ v3（UK-001）→ v4（facts_v2 上线）→ v5（insights_v2）→ v6（archive 清理）
 
@@ -973,14 +1006,14 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 ### 经验与教训
 
 **做得好的**：
-1. **文档纪律**——394 次提交几乎每次都同步更新文档和 changes/ 记录。13+ 份文档分布在所有维度
+1. **文档纪律**——405 次提交几乎每次都同步更新文档和 changes/ 记录。13+ 份文档分布在所有维度
 2. **问题清单驱动**——178 个问题按优先级歼灭，不做随机修 Bug
 3. **从战术到战略的跃迁**——第 48 天从"修 Bug"切换到"系统性设计"，3 天设计 5 天落地
 4. **根因追击**——#299 从 WebSocket 连接失败一路深挖到 CORS、权限、记忆固化、API 兼容
-5. **测试随行**——每次 Bug 修复都附带回归测试，测试规模从 0 增长到 841
+5. **测试随行**——每次 Bug 修复都附带回归测试，测试规模从 0 增长到 869
 
 **可以更好的**：
-1. **单分支风险**——394 次提交全在 main 上，无功能分支隔离
+1. **单分支风险**——405 次提交全在 main 上，无功能分支隔离
 2. **嵌入服务器稳定性**——问题从 Day 14 出现，Day 55 看门狗才根治，41 天的间歇性故障
 3. **v0.5 计划规模失当**——"4 周完成"过于乐观，实际约 6 周才接近完成
 4. **前端系统性不足**——大部分时间前端远落后于后端，UI 开发碎片化
@@ -990,7 +1023,7 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 
 ### 尾声
 
-394 次提交，59 天，从命令行下一段"你好"到拥有完整人格、情绪、记忆、工具、Web 界面、监控面板、Token 鉴权的 AI 系统。
+405 次提交，59 天，从命令行下一段"你好"到拥有完整人格、情绪、记忆、工具、Web 界面、监控面板、Token 鉴权的 AI 系统。
 
 项目从零开始，最终成长为：
 - **3 层 Agent 架构**（InnerDrive → ToolAgent → Roleplay）
@@ -1008,5 +1041,5 @@ Prompt 等价验证：构造同样的记忆摘要与 drive_summary，分别走 s
 *开发日志完 · 全文约 18,000 字*
 
 *项目路径：D:\桌面\编程作品\AI朋友*
-*提交范围：b289667 → 3ccb7d7（共 394 次）*
+*提交范围：b289667 → d006086（共 405 次）*
 *数据来源：全部 git log + changes/ 目录下所有修改记录文件*

@@ -365,7 +365,7 @@ class RuntimeDriver:
 | 嵌入 | `auto_start_embedding()` | 同左 |
 | 框架 | 无 | `uvicorn.run("web.server:app")` |
 | 启动后 | `Agent.run()` → CliController 输入循环（ConversationEngine） | FastAPI 监听 |
-| 输入 | stdin → CliController 输入循环 | WebSocket |
+| 输入 | prompt_toolkit `read_input()` → CliController 输入循环 | WebSocket |
 | 输出 | 打字机效果 → stdout | 单条气泡 → WebSocket |
 | 主动 | RuntimeDriver 守护线程 | RuntimeDriver asyncio task |
 | Session | 单用户 | SessionManager |

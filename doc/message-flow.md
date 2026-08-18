@@ -119,22 +119,23 @@ SessionManager.get_or_create() → WebAgent
 
 ```
                  ┌──────────────────────────┐
-                 │  后台守护线程             │
-                 │  sys.stdin.readline()     │
-                 │  → 有输入则放入 Queue     │
+                 │  prompt_toolkit           │
+                 │  PromptSession.prompt()   │
+                 │  FileHistory/命令补全/    │
+                 │  状态栏/bottom_toolbar    │
+                 │  非控制台环境回退 input() │
                  └──────────┬───────────────┘
                             │
                  ┌──────────▼───────────────┐
-                 │  主循环非阻塞出队         │
-                 │  read_line() 内部即        │
-                 │  Queue.get_nowait()      │
+                 │  主循环阻塞读取一行       │
+                 │  ui.read_input()         │
                  │  → 有输入 →              │
                  │    engine.handle_message  │
                  │    (即 PERCEIVE)          │
-                 │  → 无输入 →              │
-                 │    time.sleep(0.1) 轮询   │
+                 │  patch_stdout 让后台主动 │
+                 │  消息安全插入输入行上方   │
                  │  主动触发由 RuntimeDriver │
-                 │  守护线程负责(见 1.5 节)   │
+                 │  守护线程负责(见 1.5 节)  │
                  └──────────────────────────┘
 ```
 
@@ -270,7 +271,7 @@ self._tool_call_history.append({
 
 ### 3. THINK — 调用 LLM（三层）
 
-先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。Agent 1 决策时使用 `CognitiveState`（Phase 1+2）：输入去重过滤、error_fallback 跳过重复、决策温度 0.3。`InnerDriveState`（core/inner_drive_state.py，内驱状态池二期）参与主动沉思循环——独处时 `surface()` 浮现挂念条目，对话时 `surface_for_query()` 按语义相关浮现。
+先执行 Agent 1 InnerDrive，需要时再执行 Agent 2 ToolAgent，最后 Agent 3 Roleplay。Web 与 CLI 路径均由 `MessageHandler.handle_message` 串联全程（含 PromptCache、context_summary 复用、Agent 3 意图回路）；CLI 经 `ConversationEngine` 进入同一入口（统一管线 P3 后，CliController 内联实现已删除）。同一条消息内 Agent 1 的 assess / review / re_decide 共享 `_cs_memo` 记忆摘要缓存，`memory_agent.answer()` 每轮至多一次（R1，2026-07-20）。Agent 1 决策时使用 `CognitiveState`（Phase 1+2）：输入去重过滤、error_fallback 跳过重复、决策温度 0.3；装配后不再修改 `memory_summary` / `memory_confidence` / `memory_answer`（WS-27/28，2026-07-26），Agent 3 的轻量记忆视图统一由 `render_memory_light()`（core/cognitive_state.py）渲染，有摘要时 `_run_agent3` 不再冗余 `retrieve_for_query`。`InnerDriveState`（core/inner_drive_state.py，内驱状态池二期）参与主动沉思循环——独处时 `surface()` 浮现挂念条目，对话时 `surface_for_query()` 按语义相关浮现。
 
 #### Agent 1: InnerDriveAgent（自主推理决策）
 
@@ -313,6 +314,8 @@ POST DeepSeek API  ── 模型决策并执行工具
         ▼
 Agent 1 重新评估 → 调整策略或放弃外部工具
 ```
+
+工具结果归因（MH-002，2026-07-26）：每条 `ToolCallRecord` 带 `request` 字段记录所属自然语言请求（截断 80 字符）；`run_with_requests` 多请求并发合并后，`format_for_phase2` 在存在两个及以上不同 `request` 时按请求分组渲染（小标题 `【请求：…】`，铁律段仅末尾一次）再注入 Agent 3，Agent 3 因此能说清"哪件事没办成"；单请求时格式不变。
 
 #### Agent 3: Roleplay Agent（人格驱动回复）
 
@@ -501,7 +504,7 @@ _send_segments(): 整条回复作为单个 segment 发送
     ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  IDLE（CLI）/ WebSocket（Web）                                │
-│  CLI: 守护线程 → Queue → 出队成功 → PERCEIVE                  │
+│  CLI: PromptSession 阻塞读取一行 → engine.handle_message      │
 │  Web: 协程收到 "message" → process_message()                  │
 └──────────────────────────────────────────────────────────────┘
     │

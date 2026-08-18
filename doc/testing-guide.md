@@ -13,7 +13,7 @@
 python -m pytest tests --ignore=tests/real_api -q
 ```
 
-当前共 60+ 个测试文件、841 个用例（841 passed + 2 skipped）。
+当前共 60+ 个测试文件、871 个用例（869 passed + 2 skipped）。
 
 ### 按文件运行
 

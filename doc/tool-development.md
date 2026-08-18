@@ -230,6 +230,10 @@ Agent 1 InnerDrive
         Agent 1 重新评估 → 调整策略或放弃工具
 ```
 
+### 工具调用记录归因（MH-002，2026-07-26）
+
+Agent 2 每次执行生成 `ToolCallRecord`（`core/tool_agent.py`）：`name / arguments / success / output / elapsed_ms / error_type / retryable / request`。`request` 字段记录该调用所属的自然语言请求（截断 80 字符），由 ToolAgent 在记录时填入，新工具无需感知。`run_with_requests` 多请求并发合并后，`format_for_phase2()` 在存在两个及以上不同 `request` 时按请求分组渲染（每组小标题 `【请求：…】`，铁律段仅末尾一次，分组内经 `format_tool_results(..., append_iron_rule=False)` 关闭）；单请求时格式不变。
+
 ### 新工具注意事项
 
 1. **Agent 3 不会看到你的工具** — 外部工具只对 Agent 2 可见
