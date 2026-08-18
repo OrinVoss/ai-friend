@@ -86,3 +86,28 @@ class TestPrintMood(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReadInput(unittest.TestCase):
+    """#305: read_input 必须用 patch_stdout 上下文，而非 prompt() 关键字参数。"""
+
+    def test_uses_patch_stdout_context_manager(self):
+        from unittest.mock import MagicMock, patch
+        from ui.cli import ConsoleInterface
+        ui = ConsoleInterface()
+        ui.session = MagicMock()
+        ui.session.prompt.return_value = "你好"
+        with patch("ui.cli._patch_stdout") as mock_ps:
+            self.assertEqual(ui.read_input(), "你好")
+            mock_ps.assert_called_once_with()
+        _, kwargs = ui.session.prompt.call_args
+        self.assertNotIn("patch_stdout", kwargs)
+
+    def test_fallback_to_builtin_input_without_session(self):
+        from unittest.mock import patch
+        from ui.cli import ConsoleInterface
+        ui = ConsoleInterface()
+        ui.session = None  # 非控制台环境
+        with patch("builtins.input", return_value="hi") as mock_input:
+            self.assertEqual(ui.read_input(), "hi")
+            mock_input.assert_called_once()
