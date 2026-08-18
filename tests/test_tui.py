@@ -192,6 +192,28 @@ class TestTuiChatApp(unittest.TestCase):
         app.post_ai("回复")  # 回复落块时清除活动状态
         self.assertEqual(app.model.activity, "")
 
+    def test_scroll_follow_transitions(self):
+        """上翻取消跟随，Ctrl+End 恢复跟随；无 render_info 时不炸。"""
+        app, _, _ = _make_app()
+        self.assertTrue(app._follow)
+        app.scroll_chat(-1)
+        self.assertFalse(app._follow)
+        app.scroll_to_bottom()
+        self.assertTrue(app._follow)
+        self.assertFalse(app._new_below)
+
+    def test_new_message_marks_new_below_when_not_following(self):
+        app, _, _ = _make_app()
+        app.scroll_chat(-1)  # 用户上翻阅读
+        app.post_ai("新回复")
+        self.assertTrue(app._new_below)
+        text = "".join(t for _, t in app._status_fragments())
+        self.assertIn("新消息", text)
+        # 自己发消息 → 强制回到底部
+        app.post_user("我回来了")
+        self.assertTrue(app._follow)
+        self.assertFalse(app._new_below)
+
 
 class TestReactLoopAbort(unittest.TestCase):
     """TUI-2：StreamAborted 经 provider 直穿（不重试），_react_loop 返回空串。"""

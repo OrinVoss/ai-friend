@@ -105,6 +105,26 @@ def _ai_content_fragments(text: str) -> list[tuple[str, str]]:
     return frags
 
 
+class _ChatWindow(Window):
+    """滚轮滚动时维护 follow 状态：上滚取消跟随，滚到底自动恢复。"""
+
+    def __init__(self, app: "TuiChatApp", *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._app = app
+
+    def _scroll_up(self) -> None:
+        self._app._follow = False
+        super()._scroll_up()
+
+    def _scroll_down(self) -> None:
+        super()._scroll_down()
+        info = self.render_info
+        if info is not None and self.vertical_scroll >= max(
+                0, info.content_height - info.window_height):
+            self._app._follow = True
+            self._app._new_below = False
+
+
 class ChatModel:
     """聊天内容模型：块（kind, prefix, text）列表 + 活动状态 + 日志环形缓冲。
 
@@ -172,6 +192,10 @@ class TuiChatApp:
         self.model = ChatModel()
         self._lock = threading.Lock()
         self.show_logs = False
+        # 滚动跟随：跟随新消息自动滚底；用户上翻时取消跟随，
+        # 翻页/滚轮到底或发新消息时恢复（CC 同款行为）
+        self._follow = True
+        self._new_below = False  # 非跟随期间来了新消息 → 状态栏提示
         self.interrupt = threading.Event()  # TUI-2: Esc 中断
         self._generating = False
         self._activity_since: float | None = None
@@ -198,7 +222,7 @@ class TuiChatApp:
         )
 
         self._chat_control = FormattedTextControl(self._chat_fragments)
-        self._chat_win = Window(self._chat_control, wrap_lines=True)
+        self._chat_win = _ChatWindow(self, self._chat_control, wrap_lines=True)
 
         self._log_control = FormattedTextControl(self._log_text)
         log_win = Window(self._log_control, wrap_lines=True, height=8,
@@ -234,6 +258,18 @@ class TuiChatApp:
                 self.interrupt.set()
                 event.app.invalidate()
 
+        @kb.add("pageup")
+        def _page_up(event):
+            self.scroll_chat(-1)
+
+        @kb.add("pagedown")
+        def _page_down(event):
+            self.scroll_chat(1)
+
+        @kb.add("c-end")
+        def _to_bottom(event):
+            self.scroll_to_bottom()
+
         body = HSplit([
             self._chat_win,
             log_container,
@@ -259,6 +295,7 @@ class TuiChatApp:
             full_screen=True,
             style=_STYLE,
             output=output,
+            mouse_support=True,  # 滚轮翻聊天区（终端选中复制用 Shift+拖拽）
         )
 
     # ── 渲染数据源（app 循环线程内调用）──
@@ -266,8 +303,10 @@ class TuiChatApp:
     def _chat_fragments(self):
         with self._lock:
             frags = self.model.fragments()
-        # 保持滚动到底（渲染时会被 clamp 到有效范围）
-        self._chat_win.vertical_scroll = _SCROLL_BOTTOM
+        # 仅在跟随模式滚到底（渲染时 clamp 到有效范围）；
+        # 用户上翻阅读时不拽回底部
+        if self._follow:
+            self._chat_win.vertical_scroll = _SCROLL_BOTTOM
         return frags
 
     def _log_text(self):
@@ -280,11 +319,14 @@ class TuiChatApp:
             generating = self._generating
             since = self._activity_since
             show_logs = self.show_logs
+            new_below = self._new_below and not self._follow
         parts = []
         if activity or generating:
             elapsed = time.monotonic() - since if since else 0.0
             spin = _SPINNER[int(time.monotonic() * 10) % len(_SPINNER)]
             parts.append(f"{spin} {activity or '她在想…'}（{elapsed:.0f}s · esc 中断）")
+        if new_below:
+            parts.append("↓ 新消息（C-End 到底）")
         try:
             s = self._status_fn() or {}
         except Exception:
@@ -296,7 +338,7 @@ class TuiChatApp:
             parts.append(f"轮次 {s['turn']}")
         if s.get("sleeping"):
             parts.append("💤 睡眠中")
-        parts.append("F2 日志" + ("·开" if show_logs else ""))
+        parts.append("F2 日志" + ("·开" if show_logs else "") + " · PgUp 翻页")
         from datetime import datetime
         parts.append(datetime.now().strftime("%H:%M"))
         return [("class:status", "  ".join(parts))]
@@ -307,16 +349,44 @@ class TuiChatApp:
         if self.app.is_running:
             self.app.loop.call_soon_threadsafe(self.app.invalidate)
 
+    # ── 滚动控制（PgUp/PgDn/滚轮/Ctrl+End）──
+
+    def scroll_chat(self, pages: float) -> None:
+        """翻页滚动聊天区（正数向下）。上滚取消跟随，滚到底恢复。"""
+        info = self._chat_win.render_info
+        height = info.window_height if info is not None else 10
+        if pages < 0:
+            self._follow = False
+        self._chat_win.vertical_scroll = max(
+            0, self._chat_win.vertical_scroll + int(height * pages))
+        if info is not None and self._chat_win.vertical_scroll >= max(
+                0, info.content_height - info.window_height):
+            self._follow = True
+            self._new_below = False
+        if self.app.is_running:
+            self.app.invalidate()
+
+    def scroll_to_bottom(self) -> None:
+        self._follow = True
+        self._new_below = False
+        self._chat_win.vertical_scroll = _SCROLL_BOTTOM
+        if self.app.is_running:
+            self.app.invalidate()
+
     def post_ai(self, text: str, sleep: bool = False) -> None:
         prefix = f"{'💤' if sleep else ''}● {self._name}: "
         with self._lock:
             self.model.activity = ""
             self._generating = False
             self.model.add("ai", text, prefix=prefix)
+            if not self._follow:
+                self._new_below = True
         self._refresh()
 
     def post_user(self, text: str) -> None:
         with self._lock:
+            self._follow = True  # 自己发消息 → 跳到底部
+            self._new_below = False
             self.model.add("user", text, prefix="> ")
         self._refresh()
 
