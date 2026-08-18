@@ -156,8 +156,7 @@ class ConversationEngine:
 
     def persist_proactive_message(self, text: str, metadata: dict | None = None) -> None:
         """Persist an engine-initiated message (sleep/wake) to history."""
-        self._agent.add_turn("assistant", text, metadata=metadata)
-        self._agent.increment_turn_count()
+        self._agent.append_turn_atomic("assistant", text, metadata=metadata)  # #311
 
     async def generate_dream(self) -> str:
         return await self._agent._generate_dream()

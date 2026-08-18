@@ -64,7 +64,8 @@ INNER_DRIVE_SCHEMA = {
             },
             "reasoning": {
                 "type": "string",
-                "description": "推理过程：解释为什么需要或不需要外部工具。带情绪表达，Agent 3 会看到这段文字",
+                # 改进3: 要求 2-4 句详细决策依据，便于追踪边界情况
+                "description": "推理过程：2-4 句详细说明决策依据——用户输入触发了什么判断、考虑过哪些选项、为什么选择/排除工具。带情绪表达，Agent 3 会看到这段文字",
             },
             "summary": {
                 "type": "string",
@@ -131,7 +132,8 @@ PROACTIVE_LOOP_SCHEMA = {
             },
             "reasoning": {
                 "type": "string",
-                "description": "决策理由，会作为 inner_drive_summary 传给 Agent 3",
+                # 改进3: 要求 2-4 句详细决策依据，便于追踪边界情况
+                "description": "决策理由：2-4 句详细说明——为什么现在说话/探索/沉默、依据哪些上下文（近期话题、关系阶段、情绪状态）。会作为 inner_drive_summary 传给 Agent 3",
             },
             "care_updates": {
                 "type": "object",
@@ -277,7 +279,7 @@ class InnerDriveAgent:
                 f"[inner_drive] {source}: "
                 f"needs_tools={result.needs_external_tools} "
                 f"requests={len(result.tool_requests)} "
-                f"reason={result.reasoning[:80]}"
+                f"reason={result.reasoning}"
             )
             return result
 
@@ -490,7 +492,7 @@ class InnerDriveAgent:
                 intent = self._parse_proactive_intent(resp)
                 logger.info(
                     f"[inner_drive] proactive decision (fallback): action={intent.action} "
-                    f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+                    f"topic={intent.topic_hint[:60]} reason={intent.reasoning}"
                 )
                 return intent
 
@@ -550,7 +552,7 @@ class InnerDriveAgent:
         intent = self._parse_proactive_intent(resp)
         logger.info(
             f"[inner_drive] proactive decision: action={intent.action} "
-            f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+            f"topic={intent.topic_hint[:60]} reason={intent.reasoning}"
         )
         return intent
 
@@ -566,7 +568,7 @@ class InnerDriveAgent:
         )
         logger.info(
             f"[inner_drive] proactive decision: action={intent.action} "
-            f"topic={intent.topic_hint[:60]} reason={intent.reasoning[:60]}"
+            f"topic={intent.topic_hint[:60]} reason={intent.reasoning}"
         )
         return intent
 
@@ -807,7 +809,7 @@ class InnerDriveAgent:
             )
         logger.info(
             f"[inner_drive] assess agent3 intent result: needs_tools={result.needs_external_tools} "
-            f"reason={result.reasoning[:80]}"
+            f"reason={result.reasoning}"
         )
         return result
 

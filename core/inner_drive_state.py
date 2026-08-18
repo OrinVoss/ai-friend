@@ -373,7 +373,8 @@ class InnerDriveState:
     def _hours_until(iso: str, now: datetime) -> float | None:
         try:
             return (datetime.fromisoformat(iso) - now).total_seconds() / 3600
-        except ValueError:
+        except (ValueError, TypeError):
+            # #315: TypeError — LLM 写入带时区的 ISO 时间时 naive-aware 相减
             return None
 
     @staticmethod
@@ -382,7 +383,7 @@ class InnerDriveState:
             return None
         try:
             return (now - datetime.fromisoformat(iso)).total_seconds() / 3600
-        except ValueError:
+        except (ValueError, TypeError):  # #315: 同上
             return None
 
     # ── Persistence ──

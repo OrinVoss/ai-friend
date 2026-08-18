@@ -415,6 +415,8 @@ async def websocket_endpoint(websocket: WebSocket):
     _ws_connections.append({"ip": client_ip, "ws": websocket})
     logger.info(f"[ws] accepted: {client_ip}:{websocket.client.port} ({len(_ws_connections)} total)")
     session_id = None
+    # #308: token 启用时，连接必须先通过 init 帧鉴权，否则拒绝一切业务帧
+    ws_authed = not _token_enabled()
 
     try:
         while True:
@@ -432,12 +434,19 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg_type == "message":
                 request_id_var.set(new_request_id())
 
+            # #308: 未通过 init 鉴权的连接不允许收发任何业务帧
+            if not ws_authed and msg_type != "init":
+                logger.warning(f"[auth] ws '{msg_type}' before init from {client_ip}, closing")
+                await websocket.close(code=4001)
+                return
+
             if msg_type == "init":
                 # A1: token 启用时，init 消息必须带匹配 token，否则 4001 关闭
                 if _token_enabled() and data.get("token") != _token_enabled():
                     logger.warning("[auth] ws init rejected: bad token")
                     await websocket.close(code=4001)
                     return
+                ws_authed = True
                 sid = data.get("session_id")
                 role_id = data.get("role_id")
                 session_id, agent = session_manager.get_or_create(sid, role_id)

@@ -201,19 +201,24 @@ def _run_tool_with_timeout(tool, args: dict[str, Any]) -> ToolResult:
                 retryable=False,
             )
 
+    # #307: 不能用 with 包裹 executor——超时后 __exit__ 的 shutdown(wait=True)
+    # 会无限等待仍在运行的工具线程，把"超时返回"变成"调用线程永久挂起"。
+    executor = ThreadPoolExecutor(max_workers=1)
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_worker)
-            result = future.result(timeout=timeout)
+        future = executor.submit(_worker)
+        result = future.result(timeout=timeout)
     except FutureTimeoutError:
         elapsed = (time.perf_counter() - t0) * 1000
         logger.warning(f"[tool] {tool.name()} timed out after {timeout}s")
+        future.cancel()  # 对已在运行的任务无效，但不阻塞
+        executor.shutdown(wait=False)  # 不等待卡死的 worker，调用线程立即解脱
         return ToolResult.fail(
             f"工具执行超时（>{timeout}s）",
             error_type=ERROR_TYPE_NETWORK_ERROR,
             retryable=True,
             elapsed_ms=elapsed,
         )
+    executor.shutdown(wait=True)  # 正常路径 worker 已结束，立即返回
 
     elapsed = (time.perf_counter() - t0) * 1000
     result.elapsed_ms = elapsed

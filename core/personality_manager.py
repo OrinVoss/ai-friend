@@ -13,7 +13,16 @@ class PersonalityManager:
         self._dir = Path(personality_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _validate_role_id(role_id: str) -> None:
+        """#309: role_id 会拼进文件路径，拒绝路径穿越字符（纵深防御，
+        Web 入口 SessionManager 已有一层校验）。"""
+        from utils import is_valid_session_id
+        if not is_valid_session_id(role_id):
+            raise ValueError(f"invalid role_id: {role_id!r}")
+
     def personality_path(self, role_id: str) -> str:
+        self._validate_role_id(role_id)
         return str(self._dir / f"{role_id}.json")
 
     def list_roles(self) -> list[str]:
@@ -21,6 +30,7 @@ class PersonalityManager:
         return sorted(p.stem for p in self._dir.glob("*.json"))
 
     def role_exists(self, role_id: str) -> bool:
+        self._validate_role_id(role_id)
         return (self._dir / f"{role_id}.json").exists()
 
     def load_role(self, role_id: str) -> Personality:
@@ -40,6 +50,7 @@ class PersonalityManager:
     def create_role(self, role_id: str, base: Personality | None = None) -> Personality:
         """以 default 为模板创建新角色（base 为空时读 default.json）。
         已存在则抛 FileExistsError。"""
+        self._validate_role_id(role_id)  # #309
         path = self._dir / f"{role_id}.json"
         if path.exists():
             raise FileExistsError(f"Role already exists: {role_id}")

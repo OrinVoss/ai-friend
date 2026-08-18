@@ -4,7 +4,9 @@ CLI-UI（2026-07-26）：输入由 prompt_toolkit 接管（历史/补全/粘贴�
 bottom_toolbar 状态栏），替代旧的 NonBlockingInputReader 轮询线程。
 后台主动消息经 patch_stdout 安全打印，不再打断输入行。
 """
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from prompt_toolkit import PromptSession
@@ -12,6 +14,7 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout as _patch_stdout
 
 from ui.display import mood_icon
 
@@ -85,12 +88,27 @@ class ConsoleInterface:
         return ANSI("\x1b[2m" + " │ ".join(parts) + "\x1b[0m")
 
     def read_input(self) -> str:
-        """阻塞读取一行输入；patch_stdout=True 让后台主动消息安全插入。
-        非控制台环境（session 创建失败）回退普通 input()。"""
+        """阻塞读取一行输入；patch_stdout 上下文让后台主动消息安全插入。
+        非控制台环境（session 创建失败）回退普通 input()。
+        #305: patch_stdout 是上下文管理器，不是 prompt() 的参数。
+        #305(二)：main() 是 async——调用线程已有运行中的事件循环，
+        prompt_toolkit 同步 prompt() 内部 asyncio.run() 不能嵌套，
+        此时放到无循环的专用线程里执行（worker 内 asyncio.run 合法）。"""
         if self.session is None:
             return input("你 ▸ ")
-        return self.session.prompt(
-            ANSI("\x1b[1;32m你 ▸\x1b[0m "), patch_stdout=True)
+        prompt_text = ANSI("\x1b[1;32m你 ▸\x1b[0m ")
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            with _patch_stdout():
+                return self.session.prompt(prompt_text)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(self._prompt_blocking, prompt_text).result()
+
+    def _prompt_blocking(self, prompt_text) -> str:
+        """在无事件循环的 worker 线程里执行同步 prompt（read_input 的桥）。"""
+        with _patch_stdout():
+            return self.session.prompt(prompt_text)
 
     def invalidate(self) -> None:
         """触发 bottom_toolbar 重绘（情绪/轮次变化后调用，可跨线程）。"""

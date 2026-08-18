@@ -125,10 +125,6 @@ class Personality:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            # A4（2026-07-21）：解析成功后才刷新 .bak——PE-004 原来在读前
-            # 复制，会把损坏文件覆盖到备份上；改后 .bak 始终是 last-known-good
-            import shutil
-            shutil.copy2(path, bak_path)
         except (json.JSONDecodeError, OSError) as e:
             # A4: 损坏时先尝试从 .bak（last-known-good）恢复，再退默认人格
             if os.path.exists(bak_path):
@@ -142,6 +138,16 @@ class Personality:
             else:
                 logger.warning(f"Failed to load personality from {path}: {e}")
                 return cls(PersonalityConfig())
+        else:
+            # A4（2026-07-21）：解析成功后才刷新 .bak——PE-004 原来在读前
+            # 复制，会把损坏文件覆盖到备份上；改后 .bak 始终是 last-known-good。
+            # #314: 刷新失败（.bak 只读/磁盘满）仅记日志——不能把刚解析好的
+            # 当前人格丢弃去退回旧 .bak。
+            try:
+                import shutil
+                shutil.copy2(path, bak_path)
+            except OSError as e:
+                logger.warning(f"[personality] 刷新 .bak 失败（忽略，不影响本次加载）: {e}")
 
         p_data = data.get("personality", data)
         e_data = data.get("emotional_state", {})

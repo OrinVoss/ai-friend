@@ -32,8 +32,8 @@ class TestConsolidationFactChecker(unittest.TestCase):
         )
         self.ltm.get_similar_facts.return_value = [old_fact]
 
-        # Run extraction
-        self.consolidator._extract_facts("用户说：我最爱吃披萨，最喜欢蓝色，名字是小明")
+        # Run extraction（接地校验要求 _format_turns 形状："用户: " 前缀）
+        self.consolidator._extract_facts("用户: 我最爱吃披萨，最喜欢蓝色，名字是小明")
 
         # 完整上线：不再写旧表 store_facts_bulk，3 条事实逐条 promote 到 facts_v2
         self.ltm.store_fact.assert_not_called()
@@ -69,7 +69,7 @@ class TestConsolidationFactChecker(unittest.TestCase):
         )
         self.ltm.get_similar_facts.return_value = [old_fact]
 
-        self.consolidator._extract_facts("用户说我叫小红")
+        self.consolidator._extract_facts("用户: 我叫小红")
 
         # 完整上线：新事实经 promote 落库 facts_v2
         self.ltm.store_fact.assert_not_called()
@@ -88,7 +88,7 @@ class TestConsolidationFactChecker(unittest.TestCase):
         )
         self.ltm.get_similar_facts.return_value = [old_fact]
 
-        self.consolidator._extract_facts("用户最爱吃披萨")
+        self.consolidator._extract_facts("用户: 我最爱吃披萨")
 
         # Same value → no contradiction → no deactivation
         self.ltm.repo.deactivate_fact.assert_not_called()
@@ -236,7 +236,7 @@ class TestMemoryLifecycleIntegration(unittest.TestCase):
         self.ltm.get_similar_facts.return_value = []
 
         with patch("memory.consolidation.run_async", lambda coro: coro.send(None)):
-            consolidator._extract_facts("用户说喜欢咖啡", observation_ids=[1])
+            consolidator._extract_facts("用户: 我喜欢喝咖啡", observation_ids=[1])
 
         consolidator._lifecycle.promote_fact.assert_awaited_once()
         args = consolidator._lifecycle.promote_fact.call_args.kwargs

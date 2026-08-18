@@ -97,8 +97,10 @@ def _start_llama_server(project: str, server_log_path: str,
         server_log = open(server_log_path, "a", encoding="utf-8")
         bat_path = os.path.join(project, "start_embedding_server.bat")
         if os.path.exists(bat_path):
+            # H-04(补): 端口经 %1 传给 bat——否则 bat 硬编码 8080 而
+            # embedding_endpoint 是别的端口（如 18080）时，起完连不上
             return subprocess.Popen(
-                [bat_path],
+                [bat_path, str(_port_from_endpoint(endpoint))],
                 cwd=project,
                 stdout=server_log,
                 stderr=subprocess.STDOUT,

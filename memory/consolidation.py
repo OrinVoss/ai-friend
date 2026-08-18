@@ -28,6 +28,28 @@ from prompts.templates import (
 logger = logging.getLogger(__name__)
 
 
+def _user_utterances(source_text: str) -> str:
+    """从 _format_turns 输出中抽取用户亲口内容（"用户:" 开头的行）。"""
+    return "\n".join(
+        l[3:] for l in source_text.split("\n") if l.startswith("用户:"))
+
+
+def _grounded_in_user_text(value: str, user_text: str) -> bool:
+    """接地校验（改进2）：事实的值必须能在用户亲口内容中找到出处——
+    子串命中，或 2-gram shingle 覆盖率 ≥ 0.5（允许轻微转述）。
+    用户什么都没说时，任何"用户事实"都无从谈起 → 不接地。"""
+    v = value.strip()
+    if not v or not user_text.strip():
+        return False
+    if v in user_text:
+        return True
+    shingles = {v[i:i + 2] for i in range(len(v) - 1)}
+    if not shingles:  # 单字值且未子串命中
+        return False
+    hits = sum(1 for s in shingles if s in user_text)
+    return hits / len(shingles) >= 0.5
+
+
 class MemoryConsolidator:
     def __init__(self, ltm: LongTermMemory, llm_generate_fn: callable,
                  embedding_engine=None, timeout: float = 60.0,
@@ -42,6 +64,10 @@ class MemoryConsolidator:
         self._pending_buffer: list = []
         self._seen_ids: set = set()  # #22: dedup
         self._consolidation_count = 0
+        # 改进1: observation 幂等签名——(start_id, end_id, len, hash(turn_text))
+        # → obs_id；同批重试（facts 失败保留 buffer 后）复用而不重复创建
+        self._last_obs_sig: tuple | None = None
+        self._last_obs_id: int | None = None
         # R3: 本批是否产出了新事实/新体验（L1 insight 短路的判据，
         # 替代「全部用户轮 ≤4 字」的粗略启发式，2026-07-20）
         self._batch_new_info = False
@@ -54,8 +80,11 @@ class MemoryConsolidator:
         )
 
     def _call_llm(self, prompt: str, temperature: float = 0.2,
-                  max_tokens: int | None = None) -> str:
+                  max_tokens: int | None = None) -> str | None:
         """Call LLM with timeout protection. (#184)
+
+        返回 None 表示调用失败（超时/异常），区别于 LLM 返回空内容——
+        #310: _extract_facts 依赖此区分决定 pending buffer 的去留。
 
         max_tokens: 可选输出预算（统一固化调用需要比默认 512 更大的空间，
         否则末段会被 finish_reason=length 截掉）。
@@ -66,10 +95,10 @@ class MemoryConsolidator:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError:
             logger.warning(f"[consolidate] LLM timed out after {self._timeout}s")
-            return ""
+            return None
         except Exception as e:
             logger.warning(f"[consolidate] LLM call failed: {e}")
-            return ""
+            return None
 
     def should_consolidate(self, turn_count: int, emotional_intensity: float,
                            idle_duration: float, config) -> bool:
@@ -117,15 +146,24 @@ class MemoryConsolidator:
         try:
             start_id = min((t.turn_id for t in self._pending_buffer), default=None)
             end_id = max((t.turn_id for t in self._pending_buffer), default=None)
-            obs = run_async(self._lifecycle.observe(
-                content=turn_text,
-                source_turn=end_id,
-                episode_turn_start=start_id,
-                episode_turn_end=end_id,
-                created_by="consolidation",
-            ))
-            if obs and obs.id:
-                lifecycle_obs_ids.append(obs.id)
+            # 改进1（幂等）：同批重试复用已创建的 observation——
+            # 此前 facts 失败保留 buffer 后，每次重试都重复创建一条观察
+            obs_sig = (start_id, end_id, len(turn_text), hash(turn_text))
+            if self._last_obs_sig == obs_sig and self._last_obs_id:
+                lifecycle_obs_ids.append(self._last_obs_id)
+                logger.info(f"[consolidate] reuse observation {self._last_obs_id} (retry batch)")
+            else:
+                obs = run_async(self._lifecycle.observe(
+                    content=turn_text,
+                    source_turn=end_id,
+                    episode_turn_start=start_id,
+                    episode_turn_end=end_id,
+                    created_by="consolidation",
+                ))
+                if obs and obs.id:
+                    lifecycle_obs_ids.append(obs.id)
+                    self._last_obs_sig = obs_sig
+                    self._last_obs_id = obs.id
         except Exception as e:
             logger.warning(f"[consolidate] observation creation failed: {e}")
 
@@ -262,7 +300,7 @@ class MemoryConsolidator:
             old_key=old_f.fact_key, old_value=old_f.fact_value,
             new_key=new_f.fact_key, new_value=new_f.fact_value,
         )
-        result = self._call_llm(prompt, temperature=0.0).upper()
+        result = (self._call_llm(prompt, temperature=0.0) or "").upper()
         # NOT_CONTRADICT 包含 CONTRADICT，顺序判断
         if "NOT_CONTRADICT" in result:
             return False
@@ -304,6 +342,10 @@ class MemoryConsolidator:
         try:
             prompt = safe_format(EMOTION_ANALYSIS_PROMPT, text=text)
             result = self._call_llm(prompt, temperature=0.2)
+            if not result:
+                # #310: None = 调用失败（超时/402 等），直接走安全中性兜底，
+                # 不再让 None.strip() 的 AttributeError 掩盖真实原因
+                return 0.0, False, 0.5
             # TM-005: LLM may wrap JSON in markdown code fences; extract first
             # valid JSON object before passing to json.loads.
             m = re.search(r'\{[^}]+\}', result.strip(), re.DOTALL)
@@ -320,17 +362,26 @@ class MemoryConsolidator:
 
     def _extract_facts(self, turn_text: str,
                        observation_ids: Optional[list[int]] = None) -> None:
-        try:
-            prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
-            result = self._call_llm(prompt, temperature=0.2)
-            self._parse_fact_lines(result, observation_ids=observation_ids)
-        except Exception as e:
-            logger.warning(f"Fact extraction failed: {e}")
+        """#310: 失败必须向上抛——consolidate 的 except 据此把 "facts" 写入
+        errors 并保留 pending buffer 下批重试。此前此处吞掉一切异常，LLM 失败
+        被当成"无事实"、buffer 被清空，用户事实永久丢失。"""
+        prompt = safe_format(FACT_EXTRACTION_PROMPT, text=turn_text)
+        result = self._call_llm(prompt, temperature=0.2)
+        if result is None:
+            raise RuntimeError("fact extraction LLM call failed")
+        self._parse_fact_lines(result, observation_ids=observation_ids,
+                               source_text=turn_text)
 
     def _parse_fact_lines(self, text: str,
-                          observation_ids: Optional[list[int]] = None) -> None:
-        """解析 FACT|... 行，做矛盾检测后落库 facts_v2。"""
+                          observation_ids: Optional[list[int]] = None,
+                          source_text: Optional[str] = None) -> None:
+        """解析 FACT|... 行，做矛盾检测后落库 facts_v2。
+
+        改进2（后处理校验）：source_text 提供原始对话时，对每条事实做接地
+        校验——值必须能在"用户:"行中找到出处，LLM 的推断/画像无处落地，
+        直接丢弃并记日志。"""
         new_facts = []
+        user_text = _user_utterances(source_text) if source_text is not None else None
         for line in text.strip().split("\n"):
             line = line.strip()
             if re.match(r'FACT\s*\|', line):  # #141: tolerate whitespace around |
@@ -358,6 +409,13 @@ class MemoryConsolidator:
                         category = category.strip()
                         key = key.strip()
                         value = value.strip()
+                        # 改进2: 接地校验——推断/画像类事实在用户亲口内容中
+                        # 无处落地，丢弃（source_text 未提供时不校验）
+                        if (user_text is not None
+                                and not _grounded_in_user_text(value, user_text)):
+                            logger.info(f"[consolidate] drop ungrounded fact: "
+                                        f"{key} = {value} (conf={confidence})")
+                            continue
                         new_facts.append((category, key, value, confidence, importance))
                         logger.debug(f"Extracted fact: {key} = {value} (imp={importance})")
 
@@ -401,6 +459,8 @@ class MemoryConsolidator:
         try:
             prompt = safe_format(EXPERIENCE_SUMMARIZATION_PROMPT, text=turn_text)
             result = self._call_llm(prompt, temperature=0.3)
+            if not result:
+                return  # #310: None = 调用失败，本批跳过（不掩盖真实原因）
             self._parse_experience_block(result, short_term)
         except Exception as e:
             logger.warning(f"Experience summarization failed: {e}")
@@ -469,6 +529,8 @@ class MemoryConsolidator:
             prompt = safe_format(INSIGHT_GENERATION_PROMPT,
                                  facts=fact_text, experiences=exp_text)
             result = self._call_llm(prompt, temperature=0.4)
+            if not result:
+                return  # #310: None = 调用失败，本批跳过
             # min_confidence 沿用旧 L1 的 significance>0.4 门槛
             self._parse_insight_block(result, personality,
                                       min_confidence=0.4, level="L1")
@@ -541,7 +603,8 @@ class MemoryConsolidator:
             if "FACTS" in sections:
                 try:
                     self._parse_fact_lines(sections["FACTS"],
-                                           observation_ids=observation_ids)
+                                           observation_ids=observation_ids,
+                                           source_text=turn_text)
                 except Exception as e:
                     logger.warning(f"[consolidate] unified FACTS parse failed: {e}")
                     errors.append("facts")

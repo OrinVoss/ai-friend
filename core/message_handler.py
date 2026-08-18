@@ -431,7 +431,10 @@ class MessageHandler:
                 tracker.total_attempts += 1
                 track_failures(tracker, tool_result)
 
-                while tracker.can_retry_in_round and not tool_result.any_success:
+                # #317: 内层重试同样受总超时约束——否则单轮 3 次重试
+                # （LLM + 最长 45s 工具超时）即可远超 agent2_total_timeout
+                while (tracker.can_retry_in_round and not tool_result.any_success
+                       and time.monotonic() <= deadline):
                     tracker.retry_count += 1
                     logger.info(f"[msg] agent2: retry {tracker.retry_count}/3")
                     # MH-001: retry against the first request's description

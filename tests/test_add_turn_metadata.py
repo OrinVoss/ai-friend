@@ -17,6 +17,10 @@ class TestAddTurnMetadata(unittest.TestCase):
         a.ltm = MagicMock()
         a.personality = MagicMock()
         a.turn_count = 0
+        # #311: __new__ 绕过 __init__，需手动补 _turn_lock（正常实例由
+        # __init__ 创建，此处仅为单测夹具对齐生产不变量）
+        import threading
+        a._turn_lock = threading.RLock()
         return a
 
     def test_sleep_metadata_coerces_to_false(self):

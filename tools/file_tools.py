@@ -14,13 +14,21 @@ from tools.traits import (
 logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 500 * 1024  # 500KB
+# #318: .env 移出可读扩展名——敏感文件由下方黑名单统一拦截
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".py", ".rs", ".js", ".ts", ".json", ".xml", ".html",
     ".css", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf",
-    ".csv", ".log", ".sh", ".bat", ".ps1", ".env", ".gitignore",
+    ".csv", ".log", ".sh", ".bat", ".ps1", ".gitignore",
     ".java", ".cpp", ".c", ".h", ".hpp", ".go", ".rb", ".php",
     ".vue", ".svelte", ".jsx", ".tsx", ".sql", ".r", ".lua",
 }
+
+# #318: 敏感文件黑名单——即使在白名单目录内也拒绝读取，
+# 防止 API key / token 被读入模型上下文并经对话或网络工具外泄
+_SENSITIVE_NAMES = {
+    ".env", "config.json", "credentials.json", "secrets.json", "secret.json",
+}
+_SENSITIVE_SUFFIXES = (".key", ".pem", ".p12", ".pfx", ".kdbx")
 
 # FL-002: cache allowed roots for 60s to avoid re-reading config on every call
 _ALLOWED_ROOTS_CACHE: list[str] | None = None
@@ -68,6 +76,14 @@ def _get_allowed_roots() -> list[str]:
         return fallback
 
 
+def _is_sensitive_file(path: str) -> bool:
+    """#318: 命中敏感文件名/后缀即拒绝读取（.env、config.json、私钥等）。"""
+    name = os.path.basename(path).lower()
+    if name in _SENSITIVE_NAMES or name.startswith(".env."):
+        return True
+    return name.endswith(_SENSITIVE_SUFFIXES)
+
+
 def _path_in_allowed(filepath: str) -> str | None:
     """Resolve and check path is in an allowed directory. Returns real path or None."""
     resolved = os.path.realpath(filepath)  # #209: resolve symlinks/junctions
@@ -75,6 +91,9 @@ def _path_in_allowed(filepath: str) -> str | None:
         try:
             root_real = os.path.realpath(root)
             if resolved.startswith(root_real + os.sep) or resolved == root_real:  # #209: boundary check
+                if _is_sensitive_file(resolved):  # #318
+                    logger.warning(f"[file] blocked sensitive file read: {resolved}")
+                    return None
                 return resolved
         except Exception as e:
             logger.debug(f"Path check failed for root {root}: {e}")
@@ -220,7 +239,11 @@ class ReadFileTool(Tool):
         # If we read exactly `limit` lines there may be more remaining.
         has_more = len(selected) >= limit
 
-        short = os.path.relpath(resolved, os.path.join(os.path.dirname(__file__), ".."))
+        try:
+            short = os.path.relpath(resolved, os.path.join(os.path.dirname(__file__), ".."))
+        except ValueError:
+            # Windows 跨盘符（如白名单目录在 C 盘、项目在 D 盘）relpath 抛 ValueError
+            short = resolved
         header = f"{short}  ({size/1024:.1f}KB, L{start+1}-L{end})"
 
         out = [header]

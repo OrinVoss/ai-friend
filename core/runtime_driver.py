@@ -77,7 +77,11 @@ class RuntimeDriver:
                         cooldown = self.SLEEP_MSG_COOLDOWN_TICKS
                         sleep_cooldown = self.SLEEP_TRANSITION_TICKS
                         await self._emit(self._fe.on_proactive, msg)
-                        engine.persist_proactive_message(msg, metadata={"sleep": True})
+                        # #312: 持久化经 run_async 阻塞等待——在事件循环里
+                        # 同步直调会冻结整个循环（Web 主循环），必须走 executor
+                        await self._run_blocking(partial(
+                            engine.persist_proactive_message, msg,
+                            metadata={"sleep": True}))
                         if should_sleep:
                             await engine.generate_dream()
                 else:

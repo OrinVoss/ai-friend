@@ -387,10 +387,13 @@ class Database:
                 # #SR-002 在 v5 迁移块之前执行，老库的 reflections 行需先搬完
                 # session，v5 迁移才能带出正确的 session_id；已升级库则
                 # reflections 不存在、只搬 insights_v2。
+                # #313: 清单必须包含 facts_v2/observations——否则 session 合并后
+                # 这些行仍挂旧 session_id，按新 session 查询永远不可见
                 tables = [
                     t for t in (
                         "user_facts", "experiences", "reflections", "insights_v2",
                         "conversation_turns", "relationship_snapshots",
+                        "facts_v2", "observations",
                     ) if t in existing_tables
                 ]
                 for table in tables:
@@ -435,7 +438,8 @@ class Database:
                 for stale in others:
                     logger.warning(f"[db] dropping stale session {stale} for role {rid}")
                     for table in ["user_facts", "experiences", "reflections", "insights_v2",
-                                  "conversation_turns", "relationship_snapshots"]:
+                                  "conversation_turns", "relationship_snapshots",
+                                  "facts_v2", "observations"]:  # #313: 同 _move_session_data
                         if table not in existing_tables:
                             continue  # schema v4/v5: 新库无 user_facts / reflections
                         await c.execute(f"DELETE FROM {table} WHERE session_id = ?", (stale,))

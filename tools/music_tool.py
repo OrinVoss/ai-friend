@@ -176,8 +176,12 @@ class MusicPlayTool(Tool):
             return self._play(chosen, os.path.relpath(chosen, MUSIC_DIR))
 
         # Try exact path first
-        exact = os.path.join(MUSIC_DIR, song)
-        if os.path.isfile(exact) and _is_audio(exact):
+        # #319: song 为绝对路径或含 .. 时 join 结果会逃出 MUSIC_DIR——
+        # realpath 后做目录边界校验（与 MusicListTool 一致）
+        exact = os.path.realpath(os.path.join(MUSIC_DIR, song))
+        music_root = os.path.realpath(MUSIC_DIR)
+        if (exact.startswith(music_root + os.sep)
+                and os.path.isfile(exact) and _is_audio(exact)):
             return self._play(exact, song)
 
         # Search for matching file

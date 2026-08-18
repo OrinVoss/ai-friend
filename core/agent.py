@@ -62,6 +62,10 @@ class Agent:
         self.config = config
         self.state = AgentState.BOOT
         self.turn_count = 0
+        # #311: 互斥锁——Web 线程池 / driver 后台线程会并发进入 process_* 与
+        # add_turn/increment_turn_count，保护回合号分配与共享可变状态
+        import threading
+        self._turn_lock = threading.RLock()
         self.last_activity_time = time.time()
         self.current_input: str | None = None
         self.current_response: str = ""
@@ -123,15 +127,25 @@ class Agent:
 
     def add_turn(self, role: str, content: str, metadata: dict | None = None) -> None:
         """Persist a conversation turn to short-term memory and the repository."""
-        self.short_term.add_turn(role, content, metadata=metadata)
-        # metadata without the is_tool_claim key (e.g. {"sleep": True}) must
-        # coerce to False — a raw .get() returns None and int(None) crashes
-        # insert_turn, silently dropping the turn (#156 root cause).
-        self.ltm.repo.insert_turn_sync(
-            self.turn_count, role, content,
-            str(self.personality.emotion.to_dict()),
-            is_tool_claim=bool(metadata.get("is_tool_claim")) if metadata else False,
-        )
+        with self._turn_lock:  # #311: 序列化并发写入
+            # #311: 先写库再写内存——DB 失败时两边都不留，避免"内存有、磁盘无"
+            # metadata without the is_tool_claim key (e.g. {"sleep": True}) must
+            # coerce to False — a raw .get() returns None and int(None) crashes
+            # insert_turn, silently dropping the turn (#156 root cause).
+            self.ltm.repo.insert_turn_sync(
+                self.turn_count, role, content,
+                str(self.personality.emotion.to_dict()),
+                is_tool_claim=bool(metadata.get("is_tool_claim")) if metadata else False,
+            )
+            self.short_term.add_turn(role, content, metadata=metadata)
+
+    def append_turn_atomic(self, role: str, content: str,
+                           metadata: dict | None = None) -> None:
+        """#311: add_turn + increment_turn_count 原子化——供不经 process_* 的
+        引擎路径（sleep/wake 持久化等）使用，避免与用户消息线程交错。"""
+        with self._turn_lock:
+            self.add_turn(role, content, metadata=metadata)
+            self.increment_turn_count()
 
     def record_tool_call(self, name: str, success: bool, output: str) -> None:
         """Append a tool call record, keeping the rolling window bounded."""
@@ -151,7 +165,8 @@ class Agent:
         self.current_input = user_input
 
     def increment_turn_count(self) -> None:
-        self.turn_count += 1
+        with self._turn_lock:  # #311
+            self.turn_count += 1
 
     def update_last_activity(self) -> None:
         self.last_activity_time = time.time()
@@ -199,14 +214,19 @@ class Agent:
 
     # ── Message entry points (delegate to MessageHandler) ──
 
+    # #311: 三个入口共用 _turn_lock（RLock）——整条消息交换互斥，
+    # 用户消息 / 主动消息 / 并发请求不会交错修改回合号与短期记忆
     def process_message(self, user_input: str, on_token=None) -> str:
-        return self._messages.handle_message(user_input, on_token)
+        with self._turn_lock:
+            return self._messages.handle_message(user_input, on_token)
 
     def process_proactive(self, on_token=None, *, intent=None) -> str:
-        return self._messages.handle_proactive(on_token=on_token, intent=intent)
+        with self._turn_lock:
+            return self._messages.handle_proactive(on_token=on_token, intent=intent)
 
     def process_explore(self, intent=None) -> str | None:
-        return self._messages.handle_explore(intent=intent)
+        with self._turn_lock:
+            return self._messages.handle_explore(intent=intent)
 
     def decide_proactive_action(self, idle_duration: float):
         """Use inner drive to decide what proactive action to take."""

@@ -253,6 +253,12 @@ class SessionManager:
 
     def get_or_create(self, session_id: Optional[str] = None,
                       role_id: Optional[str] = None) -> tuple[str, WebAgent]:
+        # #309: session_id/role_id 会拼进文件路径（personalities/*.json、
+        # data/ 状态文件），拒绝路径分隔符/".."/绝对路径等非法输入。
+        from utils import is_valid_session_id
+        for candidate in (session_id, role_id):
+            if candidate is not None and not is_valid_session_id(candidate):
+                raise ValueError(f"invalid session_id/role_id: {candidate!r}")
         with self._lock:
             # Layer 6: 一个角色只有一个 session，session_id 与 role_id 必须一致。
             if role_id is not None:
@@ -297,9 +303,12 @@ class SessionManager:
                 logger.warning(f"[session] set_session_role failed: {e}")
             # #123: trigger cleanup every 10 new sessions to evict stale REST sessions
             self._create_count += 1
-            if self._create_count % 10 == 0:
-                self.cleanup_old()
-            return sid, agent
+            need_cleanup = self._create_count % 10 == 0
+        # #306: cleanup_old 会再次获取 self._lock（threading.Lock 非递归），
+        # 在锁内调用即同线程二次获取 → 自死锁。必须挪到锁外调用。
+        if need_cleanup:
+            self.cleanup_old()
+        return sid, agent
 
     def remove(self, session_id: str) -> None:
         with self._lock:

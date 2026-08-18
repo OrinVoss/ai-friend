@@ -36,7 +36,8 @@ class TestConsolidationUnified(unittest.TestCase):
         self.personality.emotion.dominant_emotion = "content"
 
     def _buffer_long_user_turn(self):
-        t = Turn(turn_id=1, role="user", content="x" * 250)
+        # 接地校验要求 mock 的事实值（咖啡）能在用户话语中找到出处
+        t = Turn(turn_id=1, role="user", content="我喜欢喝咖啡，" + "x" * 250)
         self.consolidator._pending_buffer = [t]
         self.consolidator._seen_ids = {(1, "user")}
 
