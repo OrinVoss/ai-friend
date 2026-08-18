@@ -33,6 +33,7 @@ def build_messages(agent, sys_prompt: str, user_input: str | None) -> list[dict]
     react_budget = _budget if isinstance(_budget, int) else 0
     running_chars = 0
     dropped = 0
+    fallback_noted = False
     for t in agent.short_term.get_all_reversed():
         # 修复：当前输入在 handle_message 时已 add_turn 入历史，末尾还会
         # 以"用户输入：..."形式再追加一次——跳过历史里的这份（即倒序首个
@@ -51,6 +52,16 @@ def build_messages(agent, sys_prompt: str, user_input: str | None) -> list[dict]
         # 修复：错误兜底文案（API 故障期的"抱歉，我暂时无法处理…"）不进
         # prompt 历史——保留在 DB/界面记录，但不让模型误以为发生过系统错误
         if getattr(t, 'metadata', None) and t.metadata.get('error_fallback'):
+            # 2026-08-18 监控发现：纯跳过让模型不知道上次动作失败，随后
+            # 假装动作已成功（"雨声白噪音走起"）。注入一次系统注记告知。
+            if not fallback_noted:
+                fallback_noted = True
+                history_messages.append({
+                    "role": "system",
+                    "content": "（系统注记：你上一次外部动作因故障未能完成，"
+                               "已如实告诉用户做不到；若用户追问就坦白解释，"
+                               "不要假装该动作已成功。）",
+                })
             continue
         if any(t.content.strip().startswith(p) for p in ['（调用', '(调用', '（前奏', '(前奏']):
             continue

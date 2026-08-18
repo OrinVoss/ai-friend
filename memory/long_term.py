@@ -41,6 +41,19 @@ class LongTermMemory:
                                turn_end: Optional[int] = None,
                                importance: float = 0.5,
                                embedding: Optional[bytes] = None) -> int:
+        # 写入侧近重复去重（2026-08-18 监控发现逐字重复体验/梦境）：
+        # 与最近 30 条比对，2-gram 覆盖率 ≥ 0.8 视为重复，跳过落库返回 0。
+        # embedding 语义合并失效期（端口不一致）堆过大量重复，此为廉价兜底。
+        try:
+            from utils import shingle_similarity
+            recent = await self._get_recent_experiences(limit=30)
+            for ex in recent:
+                if shingle_similarity(getattr(ex, "summary", "") or "", summary) >= 0.8:
+                    logger.info(f"[mem] store_exp skipped (near-dup of "
+                                f"id={getattr(ex, 'id', '?')}): {summary[:50]}")
+                    return 0
+        except Exception as e:
+            logger.debug(f"[mem] experience dedup check failed: {e}")
         logger.debug(f"[mem] store_exp: {summary[:50]} significance={significance:.2f}")
         return await self.repo.insert_experience(summary, tone, significance,
                                                  tags, turn_start, turn_end, importance,

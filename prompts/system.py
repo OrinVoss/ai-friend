@@ -635,7 +635,12 @@ def _build_internal_tools_block(tools) -> str:
         "示例：\n"
         f"<tool_call>\n{_build_tool_call_example(specs[0])}\n</tool_call>\n\n"
         "工具会依次执行，执行结果会返回给你。\n"
-        "如果不需要调用工具，正常回复就好。"
+        "如果不需要调用工具，正常回复就好。\n"
+        # 2026-08-18 监控发现：分析摘要写"需要调用 notify 工具"时，模型
+        # 直接 <tool_call> 调外部工具 → 未知工具。补硬约束堵住这个诱导。
+        "注意：<tool_call> 只能调用上面列出的工具。放歌、发通知、搜索、"
+        "读文件等外部动作一律不要直接 <tool_call>（会报“未知工具”）——"
+        "需要外部动作时，按下方输出规则给出 JSON intent。"
     )
 
 

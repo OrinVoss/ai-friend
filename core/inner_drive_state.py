@@ -194,7 +194,15 @@ class InnerDriveState:
                 entry = self._make_entry(item, source=source)
                 if entry is None:
                     continue
-                if any(e.content == entry.content and e.status == "active"
+                # 近重复去重（2026-08-18 监控发现"第三次挂科/挂了三次"并存）：
+                # 精确相同总是去重；2-gram 覆盖率 ≥ 0.7 判近重复——
+                # 仅限双方 ≥10 字符（短文本 shingle 集合太小，易误伤，
+                # 如"旧同优先级/新同优先级"共享部首导致 0.75 的假命中）
+                from utils import shingle_similarity
+                if any(e.status == "active"
+                       and (e.content == entry.content
+                            or (len(e.content) >= 10 and len(entry.content) >= 10
+                                and shingle_similarity(e.content, entry.content) >= 0.7))
                        for e in self._entries):
                     continue
                 self._entries.append(entry)
