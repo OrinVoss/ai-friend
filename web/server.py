@@ -450,6 +450,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # #158: connection limits — max 5 per IP, max 100 global
     client_ip = websocket.client.host if websocket.client else "unknown"
+    # #360: WS 建连也限流——此前可不断重连反复试探 init token
+    if not rate_limiter.is_allowed(client_ip, "/ws", 20, 60):
+        logger.warning(f"[ws] connect rate limited from {client_ip}")
+        await websocket.close(code=4004)
+        return
     conn_count = sum(1 for ws in _ws_connections if ws.get("ip") == client_ip)
     if conn_count >= 5:
         logger.warning(f"[ws] too many connections from {client_ip}")
