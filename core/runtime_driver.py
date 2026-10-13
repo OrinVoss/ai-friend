@@ -59,6 +59,19 @@ class RuntimeDriver:
         # F1: silent 退避冷却——next LLM decision earliest timestamp
         self._next_decision_after: float = 0.0
 
+    async def _interruptible_sleep(self, seconds: float) -> None:
+        """Sleep in ≤1s slices so stop() is honored promptly (#339).
+
+        TICK_ASLEEP can be 30s; a plain asyncio.sleep would keep the CLI
+        thread alive long after stop() returned, and a new driver started
+        meanwhile would double-tick the engine.
+        """
+        remaining = seconds
+        while remaining > 0 and not self._stop.is_set():
+            slice_s = min(1.0, remaining)
+            await asyncio.sleep(slice_s)
+            remaining -= slice_s
+
     # ── Main loop ──
 
     async def run(self) -> None:
@@ -88,7 +101,7 @@ class RuntimeDriver:
                     sleep_cooldown = max(0, sleep_cooldown - 1)
 
                 if engine.is_sleeping:
-                    await asyncio.sleep(self._tick_asleep)
+                    await self._interruptible_sleep(self._tick_asleep)
                     continue
 
                 idle = engine.idle_seconds
@@ -98,12 +111,12 @@ class RuntimeDriver:
                         # F1: 用户活跃期间清除 silent 退避冷却与计数
                         self._next_decision_after = 0.0
                         engine.reset_silents()
-                    await asyncio.sleep(self._tick_cooldown)
+                    await self._interruptible_sleep(self._tick_cooldown)
                     continue
 
                 # F1: silent 退避冷却——冷却期内不触发 LLM 决策
                 if time.time() < self._next_decision_after:
-                    await asyncio.sleep(self._tick_cooldown)
+                    await self._interruptible_sleep(self._tick_cooldown)
                     continue
 
                 score = engine.calculate_proactivity(idle)
@@ -135,19 +148,23 @@ class RuntimeDriver:
                         cooldown = self.PROACTIVE_COOLDOWN_TICKS
                         await self._emit(self._fe.on_proactive, response)
 
-                await asyncio.sleep(self._tick_normal)
+                await self._interruptible_sleep(self._tick_normal)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.warning(f"[runtime] tick error: {e}", exc_info=True)
-                await asyncio.sleep(self._tick_error)
+                await self._interruptible_sleep(self._tick_error)
 
     # ── Hosting ──
 
     def start_in_thread(self) -> None:
         """Start the loop in a daemon thread with its own event loop (CLI)."""
         if self._thread is not None:
-            return
+            if self._thread.is_alive():
+                return
+            # #339: 引用还在但线程已死（stop() 保留引用的场景）——清掉再启
+            self._thread = None
+            self._stop.clear()
 
         def _thread_main():
             loop = asyncio.new_event_loop()
@@ -166,7 +183,13 @@ class RuntimeDriver:
         """Signal the loop to end. Task cancellation (Web) also ends it."""
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=3)
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                # #339: 线程未死就置 None 会让 start_in_thread 再启一个
+                # driver，双 driver 并发 tick 同一 engine。保留引用，
+                # 让 start_in_thread 的非 None 守卫继续挡住重启。
+                logger.warning("[runtime] driver thread still alive after stop(); keeping reference")
+                return
             self._thread = None
 
     # ── Internals ──
