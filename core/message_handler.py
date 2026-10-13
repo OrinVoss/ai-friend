@@ -429,7 +429,8 @@ class MessageHandler:
                         f"first={drive_result.tool_requests[0].description[:80]}"
                     )
                     tool_result = self._tool_agent.run_with_requests(
-                        [req.description for req in drive_result.tool_requests]
+                        # #369: 透传 suggested_tool/params_hint，不再只传 description
+                        [req.to_prompt_text() for req in drive_result.tool_requests]
                     )
                 else:
                     logger.info(f"[msg] agent2: round {round_num}/{self.MAX_AGENT2_ROUNDS}, no request text")
@@ -445,7 +446,8 @@ class MessageHandler:
                     logger.info(f"[msg] agent2: retry {tracker.retry_count}/3")
                     # MH-001: retry against the first request's description
                     # (the one most likely to still be actionable mid-round).
-                    retry_req = (drive_result.tool_requests[0].description
+                    # #369: 重试同样透传工具/参数提示
+                    retry_req = (drive_result.tool_requests[0].to_prompt_text()
                                  if drive_result.tool_requests else user_input)
                     tool_result = self._tool_agent.run_with_request(retry_req)
                     tracker.total_attempts += 1

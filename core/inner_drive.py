@@ -27,6 +27,17 @@ class ToolRequest:
     suggested_tool: str = ""    # "web_fetch" (optional hint)
     params_hint: dict = field(default_factory=dict)  # {"url": "https://..."}
 
+    def to_prompt_text(self) -> str:
+        """#369: 序列化给 Agent 2 的请求文本——此前 suggested_tool/params_hint
+        解析后从不透传，Agent 2 只能靠自然语言重新猜参数。"""
+        parts = [self.description]
+        if self.suggested_tool:
+            parts.append(f"建议工具：{self.suggested_tool}")
+        if self.params_hint:
+            import json as _json
+            parts.append(f"参数提示：{_json.dumps(self.params_hint, ensure_ascii=False)}")
+        return "\n".join(parts)
+
 
 @dataclass
 class InnerDriveResult:
