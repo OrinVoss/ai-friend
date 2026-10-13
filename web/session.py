@@ -314,6 +314,12 @@ class SessionManager:
             self.cleanup_old()
         return sid, agent
 
+    def get(self, session_id: str) -> "WebAgent | None":
+        """#345: 只读查询——不创建 session/角色文件。
+        GET /api/status、/api/chat/history 用，防止扫描请求批量制造 session。"""
+        with self._lock:
+            return self._sessions.get(session_id)
+
     def remove(self, session_id: str) -> None:
         with self._lock:
             self._cancel_pending_remove(session_id)

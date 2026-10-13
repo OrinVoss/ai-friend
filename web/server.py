@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware import Middleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -202,7 +202,14 @@ async def status_api(session_id: str = "default"):
     """Return relationship metrics + history (#132)."""
     await ensure_session()
     logger.info(f"[rest] status session={session_id}")
-    _, agent = session_manager.get_or_create(session_id)
+    # #345: GET 端点不得有创建副作用——仅当 session 已在内存、或数据库中
+    # 有历史（合法的刷新恢复场景）时才允许取/建；否则 404，防扫描批量建 session。
+    agent = session_manager.get(session_id)
+    if agent is None:
+        known = await session_manager.repo.get_sessions_by_role(session_id)
+        if not known:
+            raise HTTPException(status_code=404, detail="session not found")
+        _, agent = session_manager.get_or_create(session_id)
     raw_rel = agent.agent.ltm.get_relationship()
     raw_history = agent.agent.ltm.get_relationship_history(days=7)
 
@@ -285,7 +292,13 @@ async def chat_history_api(session_id: str = "default"):
     """Return recent conversation turns for UI display on reconnect."""
     await ensure_session()
     logger.info(f"[rest] history session={session_id}")
-    _, agent = session_manager.get_or_create(session_id)
+    # #345: 同 status_api——GET 不得有创建副作用；DB 中有历史才允许建。
+    agent = session_manager.get(session_id)
+    if agent is None:
+        known = await session_manager.repo.get_sessions_by_role(session_id)
+        if not known:
+            raise HTTPException(status_code=404, detail="session not found")
+        _, agent = session_manager.get_or_create(session_id)
     turns = []
     for t in agent.agent.short_term.get_all():
         turns.append({
