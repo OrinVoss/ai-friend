@@ -321,16 +321,23 @@ async def logs_api(request: Request):
 
     async def event_stream():
         if os.path.exists(log_file):
+            # #355: readline/readlines 走 asyncio.to_thread——阻塞式文件 IO
+            # 在事件循环上（网络文件系统下会卡住整个 loop）；断连时
+            # 句柄随 with 退出释放，连接存活期持有属正常 SSE 语义。
+            def _read_last_lines() -> list[str]:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    return f.readlines()[-100:]
+
+            lines = await asyncio.to_thread(_read_last_lines)
+            for line in lines:
+                yield f"data: {line.rstrip()}\n\n"
+            # Tail the file for new lines
             with open(log_file, "r", encoding="utf-8") as f:
-                # Send the last 100 lines on connect
-                lines = f.readlines()
-                for line in lines[-100:]:
-                    yield f"data: {line.rstrip()}\n\n"
-                # Tail the file for new lines
+                f.seek(0, 2)
                 while True:
                     if await request.is_disconnected():
                         break
-                    line = f.readline()
+                    line = await asyncio.to_thread(f.readline)
                     if line:
                         yield f"data: {line.rstrip()}\n\n"
                     else:
