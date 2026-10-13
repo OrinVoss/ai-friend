@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware import Middleware
@@ -238,7 +238,11 @@ async def status_api(session_id: str = "default"):
             # Convert UTC timestamps stored in SQLite to Beijing time (UTC+8)
             try:
                 dt = datetime.fromisoformat(str(ts).replace(" ", "T"))
-                dt = dt + timedelta(hours=8)
+                if dt.tzinfo is not None:
+                    # #359: aware 时间直接换算，避免硬编码 +8h 双重偏移
+                    dt = dt.astimezone(timezone(timedelta(hours=8))).replace(tzinfo=None)
+                else:
+                    dt = dt + timedelta(hours=8)
                 ts = dt.strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 pass
