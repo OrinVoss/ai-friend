@@ -95,6 +95,9 @@ class MemoryConsolidator:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError:
             logger.warning(f"[consolidate] LLM timed out after {self._timeout}s")
+            # #338: 尝试取消，避免超时请求在线程池堆积（已在运行的无法取消，
+            # 但未开始的可以；至少不要继续持有引用）
+            future.cancel()
             return None
         except Exception as e:
             logger.warning(f"[consolidate] LLM call failed: {e}")
