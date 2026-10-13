@@ -376,15 +376,37 @@ async def monitor_page():
     return FileResponse("web/static/monitor.html")
 
 
-async def _send_segments(websocket: WebSocket, agent, response: str, emotion: str):
+# #351: 每 session 一把 send 锁——proactive driver 任务与 WS handler
+# 任务可能同时向同一连接 send_text，uvicorn 的 send_text 非原子，
+# 两个协程交错会产生损坏/交织的帧。
+_ws_send_locks: dict[str, asyncio.Lock] = {}
+
+
+def _ws_send_lock(session_id: str) -> asyncio.Lock:
+    lock = _ws_send_locks.get(session_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _ws_send_locks[session_id] = lock
+    return lock
+
+
+async def _send_segments(websocket: WebSocket, agent, response: str, emotion: str,
+                         session_id: str | None = None):
     # TODO: re-enable segmentation when markdown streaming is stable
-    await websocket.send_text(json.dumps({
-        "type": "segment", "content": response,
-    }, ensure_ascii=False))
-    await websocket.send_text(json.dumps({
-        "type": "done", "content": response,
-        "emotion": emotion, "turn": agent.turn_count,
-    }, ensure_ascii=False))
+    lock = _ws_send_lock(session_id) if session_id else None
+    async def _send():
+        await websocket.send_text(json.dumps({
+            "type": "segment", "content": response,
+        }, ensure_ascii=False))
+        await websocket.send_text(json.dumps({
+            "type": "done", "content": response,
+            "emotion": emotion, "turn": agent.turn_count,
+        }, ensure_ascii=False))
+    if lock is not None:
+        async with lock:
+            await _send()
+    else:
+        await _send()
 
 
 class _WsProactiveFrontend(Frontend):
@@ -399,7 +421,7 @@ class _WsProactiveFrontend(Frontend):
     async def on_proactive(self, text: str) -> None:
         ws = session_manager.get_active_ws(self._session_id) or self._fallback
         _, agent = session_manager.get_or_create(self._session_id)
-        await _send_segments(ws, agent, text, agent.emotion)
+        await _send_segments(ws, agent, text, agent.emotion, session_id=self._session_id)
 
 
 @app.websocket("/ws")
@@ -514,7 +536,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 # #349: 同 session 消息串行化（与 REST 路径共用一把锁）
                 async with session_manager.session_lock(session_id):
                     response = await loop.run_in_executor(None, agent.process_message, content)
-                await _send_segments(websocket, agent, response, agent.emotion)
+                await _send_segments(websocket, agent, response, agent.emotion,
+                                     session_id=session_id)
 
             elif msg_type == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
