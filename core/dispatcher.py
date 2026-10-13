@@ -274,12 +274,27 @@ def _execute_single(
         }
 
     # KI-1: 参数别名归一下沉到各工具（原 dispatcher 全局别名已删除），
-    # 在校验前完成，required 检查看到的是规范参数名
-    args = tool.normalize_args(args)
+    # 在校验前完成，required 检查看到的是规范参数名。
+    # #330: normalize_args/parameters_schema 是工具自定义代码，抛异常时
+    # 并行模式下 f.result() 会把异常传播到 execute_tool_calls 调用方，
+    # 拖垮整批已成功执行的结果——兜底为该工具的 fail 结果。
+    try:
+        args = tool.normalize_args(args)
 
-    # Layer5-D4: pre-execution parameter validation
-    schema = tool.parameters_schema()
-    validation_error = _validate_args(args, schema)
+        # Layer5-D4: pre-execution parameter validation
+        schema = tool.parameters_schema()
+        validation_error = _validate_args(args, schema)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(f"Tool {name} arg normalization/validation error")
+        _record_metric(name, False, 0.0, collect_metrics)
+        return {
+            "name": name,
+            "success": False,
+            "output": f"工具参数处理异常: {exc}",
+            "error_type": ERROR_TYPE_INTERNAL,
+            "retryable": False,
+            "elapsed_ms": 0.0,
+        }
     if validation_error:
         _record_metric(name, False, 0.0, collect_metrics)
         return {
