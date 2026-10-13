@@ -206,6 +206,7 @@ Emotion → Memory consolidation → Insight（后处理，不变）
 
 ```bash
 pip install -r requirements.txt
+# 开发/测试另需: pip install -r requirements-dev.txt
 cp config.example.json config.json
 # 编辑 config.json 填入 API Key
 # 或用环境变量: export DEEPSEEK_API_KEY=sk-...
