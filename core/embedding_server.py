@@ -7,6 +7,8 @@ import threading
 import time
 import urllib.request
 
+import atexit
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_ENDPOINT = "http://localhost:8080/v1/embeddings"
@@ -18,6 +20,16 @@ WAIT_POLL_INTERVAL = 1
 WATCHDOG_INTERVAL = 30         # 看门狗探活间隔（秒）
 WATCHDOG_FAIL_THRESHOLD = 3    # 连续失败多少次才认定崩溃（容忍瞬时抖动）
 WATCHDOG_MAX_RESTARTS = 3      # 连续重启失败上限，超过则放弃保持降级
+
+# #370: 只在 auto_start_embedding 真正拉起过 server 时才注册 atexit 清理
+_atexit_registered = False
+
+
+def _kill_own_llama_at_exit() -> None:
+    try:
+        kill_existing_llama()
+    except Exception:
+        pass
 
 
 def kill_existing_llama() -> None:
@@ -234,7 +246,6 @@ def auto_start_embedding(logger_ref: logging.Logger | None = None,
 
     # Kill stale llama process before starting fresh
     kill_existing_llama()
-
     project = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     model = os.path.join(project, "memory", "Qwen3.5-0.8B-Q6_K.gguf")
     if not os.path.exists(model):
@@ -251,6 +262,14 @@ def auto_start_embedding(logger_ref: logging.Logger | None = None,
     if proc is None:
         log.warning("[embed] failed to start embedding server")
         return
+
+    # #370: 主进程退出时带走我们拉起的 llama-server——否则子进程脱离存活，
+    # 只能靠下次启动的 kill_existing_llama 兜底。共享实例（"already
+    # running" 路径）不归我们管，不注册。
+    global _atexit_registered
+    if not _atexit_registered:
+        atexit.register(_kill_own_llama_at_exit)
+        _atexit_registered = True
 
     # M-18: watcher 就绪后交接给 watchdog 线程持续守护（崩溃自动重启）。
     # 注意："server already running" 路径不挂 watchdog——进程不是本进程拉起的，
