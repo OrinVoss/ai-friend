@@ -239,10 +239,14 @@ class SessionManager:
         async with self._open_lock:
             if self.db is not None:
                 return
-            self.db = Database(self.config.db_path,
-                               backup_enabled=self.config.db_backup_enabled,
-                               backup_keep=self.config.db_backup_keep)
-            await self.db.open()
+            # #325: db.open() 可能抛异常——先把对象放进局部变量，
+            # 全部成功后再赋给 self.db，避免留下"非 None 但不可用"的
+            # 半成品状态导致之后永远不重试。
+            db = Database(self.config.db_path,
+                          backup_enabled=self.config.db_backup_enabled,
+                          backup_keep=self.config.db_backup_keep)
+            await db.open()
+            self.db = db
             self.repo = Repository(self.db)
             # SN-005/006: build the shared clients once for all future sessions.
             self._shared_provider = build_provider(self.config)
