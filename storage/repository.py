@@ -855,12 +855,24 @@ class Repository:
             embedding_version=r["embedding_version"] if "embedding_version" in keys else 0,
         )
 
+    @staticmethod
+    def _parse_json_list(raw, field_name: str = "") -> list:
+        """#341: JSON 列容错——单行坏数据不应拖垮整个 session 的检索。"""
+        if not raw:
+            return []
+        try:
+            val = json.loads(raw)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"[db] corrupt JSON in {field_name}: {e}; treating as []")
+            return []
+        return val if isinstance(val, list) else []
+
     def _row_to_experience(self, r) -> Experience:
         return Experience(
             id=r["id"], summary=r["summary"], emotional_tone=r["emotional_tone"],
             significance=r["significance"],
             importance=r["importance"],
-            tags=json.loads(r["tags"]) if r["tags"] else [],
+            tags=self._parse_json_list(r["tags"], "experiences.tags"),
             turn_range_start=r["turn_range_start"],
             turn_range_end=r["turn_range_end"],
             created_at=r["created_at"], recall_count=r["recall_count"],
@@ -884,8 +896,8 @@ class Repository:
     def _row_to_insight(self, r) -> InsightV2:
         return InsightV2(
             id=r["id"], hypothesis=r["hypothesis"],
-            evidence_fact_ids=json.loads(r["evidence_fact_ids"])
-            if r["evidence_fact_ids"] else [],
+            evidence_fact_ids=self._parse_json_list(
+                r["evidence_fact_ids"], "insights_v2.evidence_fact_ids"),
             insight_type=r["insight_type"], confidence=r["confidence"],
             needs_more_evidence=bool(r["needs_more_evidence"]),
             expires_at=r["expires_at"], status=r["status"],
@@ -912,8 +924,8 @@ class Repository:
             fact_value=r["fact_value"], confidence=r["confidence"],
             stability=r["stability"], freshness=r["freshness"],
             importance=r["importance"], status=r["status"],
-            source_observation_ids=json.loads(r["source_observation_ids"])
-            if r["source_observation_ids"] else [],
+            source_observation_ids=self._parse_json_list(
+                r["source_observation_ids"], "facts_v2.source_observation_ids"),
             verification_count=r["verification_count"],
             last_verified_at=r["last_verified_at"],
             created_by=r["created_by"], created_at=r["created_at"],
