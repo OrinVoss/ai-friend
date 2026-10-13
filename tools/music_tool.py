@@ -11,7 +11,23 @@ from tools.traits import (
 
 logger = logging.getLogger(__name__)
 
-MUSIC_DIR = r"D:\音乐"
+def _default_music_dir() -> str:
+    """#357: 音乐目录可配置——config.json 的 music_dir 或环境变量
+    AI_FRIEND_MUSIC_DIR 优先，缺省回落到用户目录下的 Music 文件夹。"""
+    try:
+        from config import load_config
+        cfg_dir = getattr(load_config(), "music_dir", "")
+        if cfg_dir:
+            return cfg_dir
+    except Exception:
+        pass
+    env_dir = os.environ.get("AI_FRIEND_MUSIC_DIR", "")
+    if env_dir:
+        return env_dir
+    return os.path.join(os.path.expanduser("~"), "Music")
+
+
+MUSIC_DIR = _default_music_dir()
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".wav", ".aac", ".ogg", ".wma", ".m4a"}
 # MU-002: 音频扫描上限（#271: 只对音频文件计数，非音频不再消耗额度）
 MUSIC_SCAN_LIMIT = 10_000

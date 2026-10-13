@@ -169,6 +169,8 @@ class Config:
     consolidation_unified_call: bool = True
     # Web security: extra allowed CORS origins beyond localhost
     allowed_origins: list[str] = field(default_factory=list)
+    # #357: 音乐目录（music_list/music_play 工具），空 = 用户目录下 Music
+    music_dir: str = ""
     # #332: 反向代理直连地址白名单——只有对端 IP 在列表中时，
     # 限流才采信 X-Forwarded-For。默认空 = 不信任，防伪造绕过限流。
     # 部署在 nginx/反代之后时填代理 IP，如 ["127.0.0.1"]。
