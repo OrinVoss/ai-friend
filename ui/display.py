@@ -103,6 +103,19 @@ class DisplayEngine:
         self.typing_speed = typing_speed
 
     def typewrite(self, text: str, end: str = "\n") -> None:
+        # #368: 长文本整体打字会纯 sleep 很久（1500 字 ≈ 10s+）。
+        # 超过阈值时只对前一段逐字，其余直接输出——保留节奏感不拖体验。
+        TYPEWRITE_CHAR_LIMIT = 300
+        if len(text) > TYPEWRITE_CHAR_LIMIT:
+            head, tail = text[:TYPEWRITE_CHAR_LIMIT], text[TYPEWRITE_CHAR_LIMIT:]
+            self._typewrite_chars(head)
+            print(tail, end="", flush=True)
+            print(end, end="", flush=True)
+            return
+        self._typewrite_chars(text)
+        print(end, end="", flush=True)
+
+    def _typewrite_chars(self, text: str) -> None:
         for ch in text:
             print(ch, end="", flush=True)
             # DP-010: only delay on actual sentence-ending periods, not on \n
@@ -114,7 +127,6 @@ class DisplayEngine:
                 time.sleep(self.typing_speed * 4)
             else:
                 time.sleep(self.typing_speed)
-        print(end, end="", flush=True)
 
     def respond(self, text: str, prefix: str = "") -> None:
         width = min(shutil.get_terminal_size().columns, 80)
