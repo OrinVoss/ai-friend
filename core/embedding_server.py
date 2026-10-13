@@ -94,29 +94,34 @@ def _start_llama_server(project: str, server_log_path: str,
                         endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> subprocess.Popen | None:
     """Launch the llama-server subprocess and return the Popen handle."""
     try:
+        # #333: Popen 之后立即关闭父进程侧日志句柄（子进程已 dup），
+        # 否则看门狗每次重启泄漏一个文件句柄。
         server_log = open(server_log_path, "a", encoding="utf-8")
-        bat_path = os.path.join(project, "start_embedding_server.bat")
-        if os.path.exists(bat_path):
-            # H-04(补): 端口经 %1 传给 bat——否则 bat 硬编码 8080 而
-            # embedding_endpoint 是别的端口（如 18080）时，起完连不上
+        try:
+            bat_path = os.path.join(project, "start_embedding_server.bat")
+            if os.path.exists(bat_path):
+                # H-04(补): 端口经 %1 传给 bat——否则 bat 硬编码 8080 而
+                # embedding_endpoint 是别的端口（如 18080）时，起完连不上
+                return subprocess.Popen(
+                    [bat_path, str(_port_from_endpoint(endpoint))],
+                    cwd=project,
+                    stdout=server_log,
+                    stderr=subprocess.STDOUT,
+                )
+            # Fallback: relative paths from project directory
+            # H-04: 端口跟随 embedding_endpoint，避免自定义端口时启动与连接不一致
             return subprocess.Popen(
-                [bat_path, str(_port_from_endpoint(endpoint))],
+                [os.path.join("memory", "llama-bin", "llama-server.exe"),
+                 "-m", os.path.join("memory", "Qwen3.5-0.8B-Q6_K.gguf"),
+                 "--embeddings", "--port", str(_port_from_endpoint(endpoint)),
+                 "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
+                 "--threads", "4", "--host", "127.0.0.1"],
                 cwd=project,
                 stdout=server_log,
                 stderr=subprocess.STDOUT,
             )
-        # Fallback: relative paths from project directory
-        # H-04: 端口跟随 embedding_endpoint，避免自定义端口时启动与连接不一致
-        return subprocess.Popen(
-            [os.path.join("memory", "llama-bin", "llama-server.exe"),
-             "-m", os.path.join("memory", "Qwen3.5-0.8B-Q6_K.gguf"),
-             "--embeddings", "--port", str(_port_from_endpoint(endpoint)),
-             "-ngl", "99", "--ctx-size", "2048", "--batch-size", "512",
-             "--threads", "4", "--host", "127.0.0.1"],
-            cwd=project,
-            stdout=server_log,
-            stderr=subprocess.STDOUT,
-        )
+        finally:
+            server_log.close()
     except Exception:
         logger.exception("[embed] failed to launch llama-server")
         return None
