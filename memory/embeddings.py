@@ -23,6 +23,10 @@ class EmbeddingEngine:
         self._session.trust_env = False
         self._cache = EmbeddingCache()  # #196: integrated cache
         self._encode_lock = threading.Lock()  # #253: TOCTOU guard
+        # #327: health_check TTL 缓存——此前每次检索/嵌入都真实发 HTTP 探测，
+        # 是每条用户消息路径上的同步性能税。
+        self._health_ok_until: float = 0.0
+        self._health_ttl: float = 10.0  # seconds
 
     def encode(self, texts: list[str]) -> np.ndarray:
         """Batch encode texts -> (n, dim) float32 L2-normalized.
@@ -143,7 +147,27 @@ class EmbeddingEngine:
 
     def health_check(self) -> bool:
         """Check if embedding server is reachable. Compatible with llama-server
-        and OpenAI-compatible APIs (text-embeddings-inference, etc.). (#139)"""
+        and OpenAI-compatible APIs (text-embeddings-inference, etc.). (#139)
+
+        #327: 结果按 TTL 缓存（默认 10s）。成功结果直接短路；失败不缓存，
+        以便服务恢复后下一次探测立即生效。启动自检等需要真实探测的场景
+        请调用 health_check(force=True)。
+        """
+        return self._health_check_cached(force=False)
+
+    def health_check_uncached(self) -> bool:
+        """Force a real probe, bypassing the TTL cache (#327)."""
+        return self._health_check_cached(force=True)
+
+    def _health_check_cached(self, force: bool) -> bool:
+        if not force and time.monotonic() < self._health_ok_until:
+            return True
+        ok = self._probe()
+        if ok:
+            self._health_ok_until = time.monotonic() + self._health_ttl
+        return ok
+
+    def _probe(self) -> bool:
         from urllib.parse import urlparse
 
         try:
