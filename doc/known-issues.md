@@ -1594,8 +1594,9 @@ class PersonalityEvolution:
 ### 1. 循环导入风险
 `core/message_handler.py` 和 `core/cli_controller.py` 都在方法内部 `from prompts.system import build_system_prompt` 延迟导入。建议统一到模块级别或提取到共享位置。
 
-### 2. 异常处理：流式 JSON 解析静默忽略
-`core/provider.py:_do_request` 中流式解析时 `json.JSONDecodeError` 被 `continue` 静默跳过。如果 API 在中间返回非标准行，数据可能丢失且无日志。
+### 2. 异常处理：流式 JSON 解析静默忽略 ✅已修（#322，2026-10-13）
+~~`core/provider.py:_do_request` 中流式解析时 `json.JSONDecodeError` 被 `continue` 静默跳过。如果 API 在中间返回非标准行，数据可能丢失且无日志。~~
+已改为记 warning（带截断行内容）后继续。见 `changes/2026-10-13-修复issue322-流式JSON吞错.md`。
 
 ### 3. 性能：estimate_tokens 缺少缓存
 `core/context_manager.py:estimate_tokens()` 每次调用都检查 `_TOKENIZER is None`。可用 `@functools.lru_cache` 优化。

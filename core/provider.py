@@ -286,6 +286,8 @@ class DeepSeekProvider(LLMProvider):
                             meta["truncation_reason"] = "stream_max_bytes"
                             break
                     except json.JSONDecodeError:
+                        # #322: 不再静默吞掉，记 warning 便于排查非标准 SSE 行
+                        logger.warning(f"[api] stream JSON decode failed, line skipped: {data_str[:200]!r}")
                         continue
 
             if not saw_done and not meta["truncated"]:
