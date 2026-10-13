@@ -109,6 +109,16 @@ def _anysearch_api(tool_name: str, arguments: dict) -> dict:
             if "error" in result:
                 raise RuntimeError(result["error"].get("message", str(result["error"])))
             return result.get("result", {})
+        except requests.HTTPError as e:
+            # #335: 4xx 客户端错误（如 401 key 错、400 参数错）重试无意义，
+            # 白等 7s 还掩盖配置错误——直接抛出。
+            if e.response is not None and 400 <= e.response.status_code < 500:
+                logger.warning(f"[web] api call got {e.response.status_code}, not retrying")
+                raise
+            last_error = e
+            logger.debug(f"[web] api call attempt {attempt+1} failed: {e}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)  # 1, 2, 4s
         except Exception as e:
             last_error = e
             logger.debug(f"[web] api call attempt {attempt+1} failed: {e}")
