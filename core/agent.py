@@ -311,11 +311,16 @@ class Agent:
                 break
 
         # AG-002: guard against empty response after loop exhaustion
+        # #337: AG-005 的兜底只在模型确实没产出内容时使用——模型最终
+        # 已生成正常回复时，硬替换为"让我直接回复你吧。"是无上下文的
+        # 体验退化（假动作纠正的目的是止损，不是覆盖真实回复）。
+        if fake_action_count >= self._max_fake_actions and not tools_were_called:
+            if not final_text:
+                final_text = "让我直接回复你吧。"
+            else:
+                logger.info("[react] fake action limit reached but model produced a reply; keeping it")
         if not final_text:
             final_text = "抱歉，我暂时无法获取信息，让我直接回复你吧。"
-        # AG-005: hard fallback after max fake action corrections
-        if fake_action_count >= self._max_fake_actions and not tools_were_called:
-            final_text = "让我直接回复你吧。"
         self._reset_react()
 
         if final_text:
