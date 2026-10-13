@@ -50,9 +50,10 @@ def _is_server_ready(endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> bool:
     try:
         parsed = urlparse(endpoint)
         health_url = f"{parsed.scheme}://{parsed.netloc}/health"
-        resp = urllib.request.urlopen(health_url, timeout=2)
-        if 200 <= resp.status < 300:
-            return True
+        # #347: urlopen 响应必须关闭——看门狗 30s 周期探活，靠 GC 回收是隐患
+        with urllib.request.urlopen(health_url, timeout=2) as resp:
+            if 200 <= resp.status < 300:  # #198: accept any 2xx
+                return True
     except Exception:
         pass
     # Fallback: POST a dummy request to the embeddings endpoint
@@ -63,8 +64,8 @@ def _is_server_ready(endpoint: str = DEFAULT_EMBEDDING_ENDPOINT) -> bool:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        resp = urllib.request.urlopen(req, timeout=2)
-        return resp.status == 200
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status == 200
     except Exception:
         return False
 
