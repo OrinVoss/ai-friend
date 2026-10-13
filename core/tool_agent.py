@@ -189,11 +189,14 @@ class ToolAgent:
             if attempt > 1:
                 logger.info(f"[tool_agent] retry {attempt}/{max_retries}")
                 # TA-005: append failure context to existing messages instead of rebuilding
-                # #316: 上一轮"解析成功但执行失败"时 :215 已追加过同一 resp，
-                # 再追加会让模型看到两条连续相同的 assistant 消息
-                _last = messages[-1] if messages else {}
-                if not (_last.get("role") == "assistant" and _last.get("content") == resp):
-                    messages.append({"role": "assistant", "content": resp if 'resp' in dir() else ""})
+                # #316: 上一轮"解析成功但执行失败"时 :219 已追加过同一 resp，
+                # 再追加会让模型看到重复 assistant 消息。
+                # #329: 原守卫只查 messages[-1]，但执行失败路径末尾是 user 的
+                # result_text（:241），守卫失效——改为在整条消息列表中查重。
+                _resp_val = resp if 'resp' in dir() else ""
+                if not any(m.get("role") == "assistant" and m.get("content") == _resp_val
+                           for m in messages):
+                    messages.append({"role": "assistant", "content": _resp_val})
                 retry_prompt = _build_retry_prompt(last_failure, attempt)
                 messages.append({"role": "user", "content": retry_prompt})
                 # Layer5-TA1: simple exponential backoff for retryable failures.
