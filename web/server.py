@@ -458,6 +458,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 engine = ConversationEngine(agent.agent)
                 driver = RuntimeDriver(engine, _WsProactiveFrontend(session_id, websocket))
                 task = asyncio.create_task(driver.run())
+                # #340: 任务异常若无人 retrieve，只在 GC 时打印
+                # "Task exception was never retrieved"，且该 session 从此
+                # 静默失去主动回复能力——done-callback 里取出异常并记日志。
+                def _on_driver_done(t: asyncio.Task, sid: str = session_id) -> None:
+                    if t.cancelled():
+                        return
+                    exc = t.exception()
+                    if exc is not None:
+                        logger.error(f"[ws] proactive driver died for session={sid}: {exc}",
+                                     exc_info=exc)
+                task.add_done_callback(_on_driver_done)
                 session_manager.register_proactive(session_id, task, websocket)
                 await websocket.send_text(json.dumps({
                     "type": "init_ok", "session_id": session_id,
