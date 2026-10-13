@@ -192,6 +192,10 @@ def load_config(path: str = CONFIG_PATH) -> Config:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
+            # #346: 写错的键名（如 loglevel）此前静默不生效，难排查
+            unknown = [k for k in data if not hasattr(cfg, k)]
+            if unknown:
+                logger.warning(f"[config] unknown keys ignored in {path}: {unknown}")
             for k, v in data.items():
                 if hasattr(cfg, k):
                     setattr(cfg, k, v)
