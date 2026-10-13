@@ -53,6 +53,9 @@ class Database:
         self.conn: aiosqlite.Connection | None = None
 
     async def open(self) -> None:
+        # #354: 防重入——重复 open 会静默覆盖 self.conn、泄漏旧连接
+        if self.conn is not None:
+            raise RuntimeError("Database already open. Call close() first.")
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         # Check for a pre-existing non-empty file BEFORE connect — aiosqlite
         # creates the file on connect, which would make a fresh database look
@@ -578,14 +581,17 @@ class Database:
             return deleted
 
     async def close(self) -> None:
-        if self.conn:
-            try:
-                await self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:
-                pass
-            logger.info(f"[db] closed: {self.db_path}")
-            await self.conn.close()
-            self.conn = None
+        # #354: close 需持锁——否则可能在别的线程 cursor 持锁执行中
+        # 关闭连接。等锁拿到说明没有进行中的事务。
+        with self._lock:
+            if self.conn:
+                try:
+                    await self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:
+                    pass
+                logger.info(f"[db] closed: {self.db_path}")
+                await self.conn.close()
+                self.conn = None
 
     # ── Backup (P0-3: snapshot before destructive migrations) ──
 
