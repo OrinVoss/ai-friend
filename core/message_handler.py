@@ -298,7 +298,13 @@ class MessageHandler:
         # ── Agent 1: Inner Drive ──
         self._transition(MessageHandlerState.ASSESSING)
         # WS-24: 记忆检索前移到状态装配处，保证每条用户消息只检索一次。
-        memory_summary, memory_confidence, memory_answer = self._context_for_state(user_input)
+        # #328: 检索异常不得穿透——user turn 已在上方落库（:292），此处抛错
+        # 会留下无回复的孤儿回合且 turn_count 不自增，下条消息重复 turn_no。
+        try:
+            memory_summary, memory_confidence, memory_answer = self._context_for_state(user_input)
+        except Exception as exc:
+            logger.warning(f"[msg] memory context retrieval failed, degrading to no-memory: {exc}")
+            memory_summary, memory_confidence, memory_answer = "", 0.0, None
 
         # WS-11: 装配统一运行时状态；情绪在轮次开始一次性冻结，后续 Agent 1/3 共用。
         emotion_summary = a.personality.emotion.to_prompt_summary()
