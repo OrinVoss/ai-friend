@@ -229,12 +229,18 @@ class Agent:
             return self._messages.handle_explore(intent=intent)
 
     def decide_proactive_action(self, idle_duration: float):
-        """Use inner drive to decide what proactive action to take."""
+        """Use inner drive to decide what proactive action to take.
+
+        #350: 此前不加锁——RuntimeDriver 在 executor 后台线程调用它，与
+        并发的 process_message 同时读写 short_term/emotion/挂念清单。
+        与三个消息入口共用 _turn_lock（RLock），把决策也纳入回合互斥。
+        """
         from core.inner_drive import ProactiveIntent
-        inner_drive = self._messages.ensure_inner_drive()
-        # #177: 传入近期话题，让 LLM 选话题时避开重复
-        return inner_drive.assess_proactive(
-            idle_duration, recent_topics=self._proactive.get_recent_topics())
+        with self._turn_lock:
+            inner_drive = self._messages.ensure_inner_drive()
+            # #177: 传入近期话题，让 LLM 选话题时避开重复
+            return inner_drive.assess_proactive(
+                idle_duration, recent_topics=self._proactive.get_recent_topics())
 
     def _react_loop(self, messages: list[dict], on_token=None, add_to_history: bool = True,
                     tool_registry=None, skip_post_process: bool = False) -> str:
