@@ -388,8 +388,17 @@ class Repository:
                         status = 'active'
                 """, (category, key, value, confidence, stability, freshness, importance,
                       source_ids, created_by, self.session_id))
+            # #342: ON CONFLICT 更新路径下 c.lastrowid 不可靠（可能返回
+            # 失败 INSERT 分配的 id 而非冲突行的真实 id），显式 SELECT 真实 id。
+            await c.execute(
+                "SELECT id FROM facts_v2 WHERE session_id = ? AND category = ? AND fact_key = ?",
+                (self.session_id, category, key))
+            row = await c.fetchone()
             await self.db.commit()
-            return c.lastrowid
+            if row is None:
+                logger.warning(f"[db] upsert_fact_v2: id lookup failed for {category}/{key}")
+                return c.lastrowid
+            return row[0]
 
     async def get_active_facts_v2(self, limit: int = 50) -> list[FactV2]:
         async with self.db.cursor() as c:
