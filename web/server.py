@@ -485,8 +485,11 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(raw)
             msg_type = data.get("type", "")
             # A3: WS 长连接按消息帧打 request_id（init 除外——它只是握手）
+            # #364: 持 token 并在分支结束时 reset——同协程反复 set 覆盖旧值，
+            # 依赖 task 结束才释放上下文。
+            _rid_token = None
             if msg_type == "message":
-                request_id_var.set(new_request_id())
+                _rid_token = request_id_var.set(new_request_id())
 
             # #308: 未通过 init 鉴权的连接不允许收发任何业务帧
             if not ws_authed and msg_type != "init":
@@ -532,28 +535,33 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "message":
                 content = data.get("content", "").strip()
-                if not content:
-                    continue
-                # RL-001: apply per-IP rate limit to WebSocket chat messages
-                client_ip = websocket.client.host if websocket.client else "unknown"
-                if not rate_limiter.is_allowed(client_ip, "/api/chat", 30, 60):
-                    logger.warning(f"[ws] rate limited message from {client_ip} session={session_id}")
-                    await websocket.send_text(json.dumps({
-                        "type": "error",
-                        "content": "发送太频繁了，请稍后再试。",
-                    }, ensure_ascii=False))
-                    continue
-                logger.info(f"[ws] message session={session_id} len={len(content)}")
-                if not session_id:
-                    session_id = "default"
-                _, agent = session_manager.get_or_create(session_id)
-                agent.last_activity_time = time.time()
-                loop = asyncio.get_running_loop()  # #356: get_event_loop 已弃用
-                # #349: 同 session 消息串行化（与 REST 路径共用一把锁）
-                async with session_manager.session_lock(session_id):
-                    response = await loop.run_in_executor(None, agent.process_message, content)
-                await _send_segments(websocket, agent, response, agent.emotion,
-                                     session_id=session_id)
+                try:
+                    if not content:
+                        continue
+                    # RL-001: apply per-IP rate limit to WebSocket chat messages
+                    client_ip = websocket.client.host if websocket.client else "unknown"
+                    if not rate_limiter.is_allowed(client_ip, "/api/chat", 30, 60):
+                        logger.warning(f"[ws] rate limited message from {client_ip} session={session_id}")
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "content": "发送太频繁了，请稍后再试。",
+                        }, ensure_ascii=False))
+                        continue
+                    logger.info(f"[ws] message session={session_id} len={len(content)}")
+                    if not session_id:
+                        session_id = "default"
+                    _, agent = session_manager.get_or_create(session_id)
+                    agent.last_activity_time = time.time()
+                    loop = asyncio.get_running_loop()  # #356: get_event_loop 已弃用
+                    # #349: 同 session 消息串行化（与 REST 路径共用一把锁）
+                    async with session_manager.session_lock(session_id):
+                        response = await loop.run_in_executor(None, agent.process_message, content)
+                    await _send_segments(websocket, agent, response, agent.emotion,
+                                         session_id=session_id)
+                finally:
+                    # #364: 帧处理完释放 request_id 上下文
+                    if _rid_token is not None:
+                        request_id_var.reset(_rid_token)
 
             elif msg_type == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
