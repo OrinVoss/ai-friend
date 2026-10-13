@@ -249,8 +249,8 @@ class GrepTool(Tool):
                 retryable=False,
             )
 
-        # #172: check cache
-        cache_key = f"grep:{pattern}:{target}:{file_glob}:{ignore_case}"
+        # #172: check cache; #320: key 必须包含 context（影响输出行数）
+        cache_key = f"grep:{pattern}:{target}:{file_glob}:{ignore_case}:{context_lines}"
         cached = _cache_get(cache_key)
         if cached is not None:
             logger.debug(f"[tool] grep cache hit: {cache_key}")
