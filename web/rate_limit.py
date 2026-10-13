@@ -46,10 +46,17 @@ class RateLimiter:
             if evicted:
                 logger.debug(f"[rate_limit] evicted {evicted} expired timestamps for {key}")
 
+            # #331: 窗口清空后删除键本身——否则面向公网时每个扫描 IP
+            # 都新增一个永久保留的键，内存单调增长。当前请求无论如何都会
+            # 追加一个时间戳，删键后立即重建等价于惰性清理。
+            if not window:
+                self._windows.pop(key, None)
+
             if len(window) >= max_requests:
                 logger.warning(f"[rate_limit] blocked {client_ip} on {path} window={len(window)}/{max_requests}")
                 return False
 
+            window = self._windows.setdefault(key, deque())
             window.append(now)
             logger.debug(f"[rate_limit] allowed {client_ip}:{path} window={len(window)}/{max_requests}")
             return True
