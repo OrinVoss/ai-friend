@@ -295,8 +295,6 @@ class InnerDriveAgent:
         WS-21: cognitive_state 存在时，跳过本方法内部的记忆检索，直接消费状态
         中的 memory_summary / emotion_summary，实现每轮只检索一次。
         """
-        from prompts.system import build_inner_drive_prompt
-
         logger.info(f"[inner_drive] start len={len(user_input)}")
 
         if cognitive_state is not None:
@@ -339,22 +337,10 @@ class InnerDriveAgent:
             emotion_summary = None
 
         conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        sys_prompt = build_inner_drive_prompt(
-            personality=self._personality.config,
-            emotion=self._personality.emotion,
-            memory_context=mem_ctx,
-            conversation_history=conv_hist,
-            tools=self._full_registry,
-            tool_call_history=self._tool_call_history,
-            session_id=self._session_id,
-            prompt_cache=self._prompt_cache,
-            prompt_cache_ttl=self._prompt_cache_ttl,
-            memory_context_summary=cs_agent1,
-            rule_tools=self._rule_tools_registry,
+        sys_prompt = self._build_sys_prompt(  # #366
+            cs_agent1, mem_ctx=mem_ctx, conv_hist=conv_hist,
             emotion_summary=emotion_summary,
         )
-        if self._prompt_cache is not None:
-            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive")
 
         messages = [
             {"role": "system", "content": sys_prompt},
@@ -410,6 +396,33 @@ class InnerDriveAgent:
     def _context_summary_for(self, user_input: str) -> str:
         """Delegate to MemoryContextProvider: full memory context for Agent 1."""
         return self._memory_provider.summary_for(user_input)
+
+    def _build_sys_prompt(self, memory_context_summary: str, *,
+                          mem_ctx=None, conv_hist: str | None = None,
+                          emotion_summary: dict | None = None,
+                          cache_tag: str = "inner_drive") -> str:
+        """#366: 四处（assess/review/re_decide/assess_agent3_intent）逐字重复
+        的 build_inner_drive_prompt 装配收敛到一处。"""
+        from prompts.system import build_inner_drive_prompt
+        if conv_hist is None:
+            conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
+        prompt = build_inner_drive_prompt(
+            personality=self._personality.config,
+            emotion=self._personality.emotion,
+            memory_context=mem_ctx,
+            conversation_history=conv_hist,
+            tools=self._full_registry,
+            tool_call_history=self._tool_call_history,
+            session_id=self._session_id,
+            prompt_cache=self._prompt_cache,
+            prompt_cache_ttl=self._prompt_cache_ttl,
+            memory_context_summary=memory_context_summary,
+            rule_tools=self._rule_tools_registry,
+            emotion_summary=emotion_summary,
+        )
+        if self._prompt_cache is not None:
+            self._prompt_cache.maybe_log_stats(logger, tag=cache_tag)
+        return prompt
 
     @staticmethod
     def _format_memory_answer(ma) -> str:
@@ -631,29 +644,11 @@ class InnerDriveAgent:
                 summary=tool_records_text[:200],
             )
 
-        from prompts.system import build_inner_drive_prompt
-
         # M-04: 走 _context_summary_for，use_memory_agent 开关对 review 同样生效；
         # retriever 直接调用仅保留在 _context_summary_for 内部作回退。
         # 注意：review 结果的 context_summary 不填，避免改变 Agent 3 prompt 组成。
         cs = self._context_summary_for(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-
-        sys_prompt = build_inner_drive_prompt(
-            personality=self._personality.config,
-            emotion=self._personality.emotion,
-            memory_context=None,
-            conversation_history=conv_hist,
-            tools=self._full_registry,
-            tool_call_history=self._tool_call_history,
-            session_id=self._session_id,
-            prompt_cache=self._prompt_cache,
-            prompt_cache_ttl=self._prompt_cache_ttl,
-            memory_context_summary=cs,
-            rule_tools=self._rule_tools_registry,
-        )
-        if self._prompt_cache is not None:
-            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_review")
+        sys_prompt = self._build_sys_prompt(cs, cache_tag="inner_drive_review")  # #366
 
         review_msg = (
             f"用户原始输入：{user_input}\n\n"
@@ -686,11 +681,8 @@ class InnerDriveAgent:
 
     def re_decide(self, user_input: str, failure_log: list[dict]) -> InnerDriveResult:
         """Re-decide after Agent 2 tool failures. Try alternative approaches."""
-        from prompts.system import build_inner_drive_prompt
-
         # M-04: 同 review，记忆上下文走 _context_summary_for（尊重 use_memory_agent）
         cs = self._context_summary_for(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
 
         # Build failure context
         fail_lines = ["=== 之前的工具调用全部失败 ==="]
@@ -700,21 +692,7 @@ class InnerDriveAgent:
             )
         fail_lines.append("请重新决策：换个方式、换个工具、或者放弃并告知用户。")
 
-        sys_prompt = build_inner_drive_prompt(
-            personality=self._personality.config,
-            emotion=self._personality.emotion,
-            memory_context=None,
-            conversation_history=conv_hist,
-            tools=self._full_registry,
-            tool_call_history=self._tool_call_history,
-            session_id=self._session_id,
-            prompt_cache=self._prompt_cache,
-            prompt_cache_ttl=self._prompt_cache_ttl,
-            memory_context_summary=cs,
-            rule_tools=self._rule_tools_registry,
-        )
-        if self._prompt_cache is not None:
-            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_redecide")
+        sys_prompt = self._build_sys_prompt(cs, cache_tag="inner_drive_redecide")  # #366
 
         messages = [
             {"role": "system", "content": sys_prompt},
@@ -750,26 +728,9 @@ class InnerDriveAgent:
         an intent in JSON; Agent 1 evaluates it with full context and returns
         a normal InnerDriveResult (needs_external_tools + tool_requests).
         """
-        from prompts.system import build_inner_drive_prompt
-
         # M-04: 同 review，记忆上下文走 _context_summary_for（尊重 use_memory_agent）
         cs = self._context_summary_for(user_input)
-        conv_hist = self._short_term.format_for_prompt(max_tokens=self._conv_hist_tokens)
-        sys_prompt = build_inner_drive_prompt(
-            personality=self._personality.config,
-            emotion=self._personality.emotion,
-            memory_context=None,
-            conversation_history=conv_hist,
-            tools=self._full_registry,
-            tool_call_history=self._tool_call_history,
-            session_id=self._session_id,
-            prompt_cache=self._prompt_cache,
-            prompt_cache_ttl=self._prompt_cache_ttl,
-            memory_context_summary=cs,
-            rule_tools=self._rule_tools_registry,
-        )
-        if self._prompt_cache is not None:
-            self._prompt_cache.maybe_log_stats(logger, tag="inner_drive_intent")
+        sys_prompt = self._build_sys_prompt(cs, cache_tag="inner_drive_intent")  # #366
 
         # intent→tool 映射单一出处在 prompts/tools_description.py（由
         # _TOOL_INTENT_ALIASES 反向派生），不再在此硬编码
