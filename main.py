@@ -66,6 +66,12 @@ async def main():
         except Exception as e:
             logger.exception(f"Unhandled error in main loop: {e}")
         finally:
+            # #361: 关闭 HTTP session 连接池——此前仅靠 GC 回收 FD
+            for client in (provider, embed_engine):
+                try:
+                    client.session.close()
+                except Exception as e:
+                    logger.warning(f"[main] close http session failed: {e}")
             # MA-005: close must be awaited
             await db.close()
     except Exception as e:
