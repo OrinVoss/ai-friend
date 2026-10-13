@@ -8,3 +8,5 @@ uvicorn==0.30.1
 websockets==12.0
 numpy>=1.24.0
 prompt_toolkit==3.0.51
+aiosqlite==0.22.1
+pydantic==2.13.4
