@@ -293,8 +293,16 @@ class ToolAgent:
                     executor.submit(self.run_with_request, req, max_retries)
                     for req in tool_requests
                 ]
+                # #363: per-future 超时——单个请求 hang 住（嵌套重试+backoff
+                # 可拖数十秒）不再阻塞整批合并；超时请求记为失败（空结果）。
+                per_future_timeout = 180.0
                 for future in futures:
-                    single = future.result()
+                    try:
+                        single = future.result(timeout=per_future_timeout)
+                    except Exception as e:
+                        logger.warning(f"[tool_agent] request future failed/timeout: {e}")
+                        future.cancel()
+                        single = ToolAgentResult()
                     merged.records.extend(single.records)
                     merged.total_calls += single.total_calls
                     merged.success_count += single.success_count
