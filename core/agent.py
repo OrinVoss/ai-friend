@@ -377,7 +377,13 @@ class Agent:
         )
         interval = getattr(self.config, 'consolidation_interval', 5)
         if interval > 0 and self.turn_count % interval == 0:
-            self.consolidator.add_pending(self.short_term.get_all()[-1])
+            # #336: get_all() 可能为空（proactive 路径 skip_post_process=False
+            # 或 short_term 被外部清空时），原 [-1] 会 IndexError
+            turns = self.short_term.get_all()
+            if not turns:
+                logger.debug("[emotion] short_term empty, skipping consolidation trigger")
+                return
+            self.consolidator.add_pending(turns[-1])
             self.consolidator.consolidate(self.short_term, self.personality,
                                           max_facts=self.config.max_facts,
                                           max_experiences=self.config.max_experiences,
