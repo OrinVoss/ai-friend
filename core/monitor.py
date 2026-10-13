@@ -2,7 +2,8 @@
 
 开发调试用，记录每次发往 DeepSeek 的完整消息和返回。
 默认最多保留 200 条（环形缓冲），避免长期运行内存无限增长。
-可通过 max_size 参数调整；设为 0 则不限制。
+可通过 max_size 参数调整；#352 起不再允许 0/负数（无界缓冲是确定性内存泄漏，
+<=0 会回落到默认值）。
 """
 import json
 import logging
@@ -106,8 +107,15 @@ class MonitorBuffer:
     """线程安全的环形缓冲，保留最近 N 条 API 调用记录。"""
 
     def __init__(self, max_size: int = DEFAULT_MONITOR_SIZE):
+        # #352: max_size<=0 曾意为"不限制"——记录的是完整请求/响应 JSON，
+        # 长跑进程是确定性内存泄漏。改为硬上限兜底：<=0 时记 warning
+        # 并回落到默认值，真正想要大缓冲就显式设大值。
+        if max_size <= 0:
+            logger.warning(f"[monitor] max_size={max_size} unbounded is unsafe; "
+                           f"falling back to {DEFAULT_MONITOR_SIZE}")
+            max_size = DEFAULT_MONITOR_SIZE
         self._max_size = max_size
-        self._buffer: deque[MonitorRecord] = deque(maxlen=max_size if max_size > 0 else None)
+        self._buffer: deque[MonitorRecord] = deque(maxlen=max_size)
         self._lock = threading.Lock()
 
     @property
@@ -117,11 +125,15 @@ class MonitorBuffer:
     @max_size.setter
     def max_size(self, value: int):
         with self._lock:
+            # #352: 同 __init__，禁止无界
+            if value <= 0:
+                logger.warning(f"[monitor] max_size={value} unbounded is unsafe; "
+                               f"falling back to {DEFAULT_MONITOR_SIZE}")
+                value = DEFAULT_MONITOR_SIZE
             self._max_size = value
             # Rebuild deque with new maxlen
-            new_max = value if value > 0 else None
             old_items = list(self._buffer)
-            self._buffer = deque(old_items[-value:] if value > 0 else old_items, maxlen=new_max)
+            self._buffer = deque(old_items[-value:], maxlen=value)
 
     def record(self, rec: MonitorRecord):
         with self._lock:
