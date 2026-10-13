@@ -45,16 +45,24 @@ def _session() -> requests.Session:
     global _HTTP_SESSION, _HTTP_SESSION_TS
     now = time.time()
     if _HTTP_SESSION is None or (now - _HTTP_SESSION_TS) > _SESSION_TTL:
-        if _HTTP_SESSION is not None:
-            try:
-                _HTTP_SESSION.close()
-            except Exception:
-                pass
+        _close_session()
         s = requests.Session()
         s.trust_env = False
         _HTTP_SESSION = s
         _HTTP_SESSION_TS = now
     return _HTTP_SESSION
+
+
+def _close_session() -> None:
+    """#358: 连接层错误后主动丢弃 session，下次调用重建。"""
+    global _HTTP_SESSION, _HTTP_SESSION_TS
+    if _HTTP_SESSION is not None:
+        try:
+            _HTTP_SESSION.close()
+        except Exception:
+            pass
+    _HTTP_SESSION = None
+    _HTTP_SESSION_TS = 0.0
 
 
 def _is_safe_url(url: str) -> bool:
@@ -120,6 +128,9 @@ def _anysearch_api(tool_name: str, arguments: dict) -> dict:
             if attempt < 3:
                 time.sleep(2 ** attempt)  # 1, 2, 4s
         except Exception as e:
+            # #358: 连接层错误说明 session 可能已失效，丢弃它让下次重试重建
+            if isinstance(e, (requests.ConnectionError, requests.Timeout)):
+                _close_session()
             last_error = e
             logger.debug(f"[web] api call attempt {attempt+1} failed: {e}")
             if attempt < 3:
