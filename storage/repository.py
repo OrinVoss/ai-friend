@@ -760,9 +760,10 @@ class Repository:
     # ── Pruning ──
 
     async def prune_facts(self, max_count: int) -> int:
-        # Layer 1 完整上线：COUNT 与溢出降级都改打 facts_v2。溢出行的
-        # composite_score × 0.1 降级映射为 decay_fact_v2(id, 0.1) 语义
-        # （freshness/confidence × 0.1），单条 UPDATE 一次完成，避免逐条 commit。
+        # #324: 原实现只把溢出行 freshness/confidence ×0.1，行数不变，导致
+        # active 数恒定超限、同一批行被反复降级。改为与 prune_insights 一致
+        # 的软删语义（status='expired'），active 行数真正收敛到上限内；
+        # #217 复活语义保证被重新提及的事实可通过 upsert 回到 active。
         async with self.db.cursor() as c:
             await c.execute("SELECT COUNT(*) FROM facts_v2 WHERE status = 'active' AND session_id = ?", (self.session_id,))
             row = await c.fetchone()
@@ -770,12 +771,10 @@ class Repository:
             if count <= max_count:
                 return 0
             excess = count - max_count
-            logger.info(f"[db] prune_facts: degrading {excess} of {count}")
+            logger.info(f"[db] prune_facts: expiring {excess} of {count}")
             await c.execute("""
                 UPDATE facts_v2
-                SET freshness = MAX(0.0, freshness * 0.1),
-                    confidence = MAX(0.0, confidence * 0.1),
-                    updated_at = CURRENT_TIMESTAMP
+                SET status = 'expired', updated_at = CURRENT_TIMESTAMP
                 WHERE id IN (
                     SELECT id FROM facts_v2 WHERE status = 'active' AND session_id = ?
                     ORDER BY (0.5 * confidence + 0.3 * importance + 0.2 * freshness) ASC,
