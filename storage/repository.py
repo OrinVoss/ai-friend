@@ -445,6 +445,29 @@ class Repository:
                                f"'{self.session_id}' (missing or cross-session)")
             await self.db.commit()
 
+    async def decay_facts_v2_batch(self, items: list[tuple[int, float]],
+                                   decayed_ids: list[int]) -> None:
+        """#343: 批量衰减——所有 UPDATE 共用一个游标、一次 commit，
+        替代 decay_fact_v2 逐条"抢锁+commit"的 N+1 写放大。"""
+        if not items and not decayed_ids:
+            return
+        logger.info(f"[db] decay_facts_v2_batch: {len(items)} decay, {len(decayed_ids)} to decayed")
+        async with self.db.cursor() as c:
+            for fact_id, decay_factor in items:
+                await c.execute("""
+                    UPDATE facts_v2
+                    SET freshness = MAX(0.0, freshness * ?),
+                        confidence = MAX(0.0, confidence * ?),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND session_id = ?
+                """, (decay_factor, decay_factor, fact_id, self.session_id))
+            for fact_id in decayed_ids:
+                await c.execute(
+                    "UPDATE facts_v2 SET status = 'decayed', updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND session_id = ?",
+                    (fact_id, self.session_id))
+            await self.db.commit()
+
     async def decay_fact_v2(self, fact_id: int, decay_factor: float) -> None:
         logger.info(f"[db] decay_fact_v2: id={fact_id} factor={decay_factor:.2f}")
         async with self.db.cursor() as c:

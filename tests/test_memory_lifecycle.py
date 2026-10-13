@@ -97,19 +97,21 @@ class TestMemoryLifecycleManager(unittest.TestCase):
             freshness=1.0, confidence=0.8, last_verified_at=datetime.utcnow().isoformat(),
         )
         self.ltm.repo.get_active_facts_v2 = AsyncMock(return_value=[fact])
-        self.ltm.repo.decay_fact_v2 = AsyncMock()
+        self.ltm.repo.decay_facts_v2_batch = AsyncMock()
 
         self._run(self.manager.decay())
 
-        self.ltm.repo.decay_fact_v2.assert_awaited_once()
-        args = self.ltm.repo.decay_fact_v2.call_args.args
-        self.assertEqual(args[0], 1)
-        self.assertLess(args[1], 1.0)  # decay factor < 1
+        # #343: 批量衰减——单条调用 decay_facts_v2_batch，items 含 (id, factor)
+        self.ltm.repo.decay_facts_v2_batch.assert_awaited_once()
+        args = self.ltm.repo.decay_facts_v2_batch.call_args.args
+        items, _decayed_ids = args
+        self.assertEqual(items[0][0], 1)
+        self.assertLess(items[0][1], 1.0)  # decay factor < 1
 
     def test_garbage_collect_runs_decay_merge_archive(self):
         """garbage_collect should call decay, merge and archive."""
         self.ltm.repo.get_active_facts_v2 = AsyncMock(return_value=[])
-        self.ltm.repo.decay_fact_v2 = AsyncMock()
+        self.ltm.repo.decay_facts_v2_batch = AsyncMock()
         # Layer 1 二期（2026-07-20）：GC 纳入 expires_at 过期的 insight
         self.ltm.repo.expire_due_insights = AsyncMock(return_value=0)
         cursor = MagicMock()

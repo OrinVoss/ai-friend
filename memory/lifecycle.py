@@ -190,8 +190,15 @@ class MemoryLifecycleManager:
 
     async def decay(self, now: Optional[datetime] = None) -> None:
         """Decay freshness and confidence of active facts over time."""
-        now = now or datetime.utcnow()
+        # #343: now 用 aware UTC——last_verified_at 可能带 Z/偏移，
+        # naive - aware 会抛 TypeError 被吞，导致永远恒定 0.99 衰减。
+        from datetime import timezone
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         facts = await self.ltm.repo.get_active_facts_v2(limit=1000)
+        items: list[tuple[int, float]] = []
+        decayed_ids: list[int] = []
         for fact in facts:
             days_since_verified = 0
             if fact.last_verified_at:
@@ -199,18 +206,24 @@ class MemoryLifecycleManager:
                     verified = datetime.fromisoformat(
                         fact.last_verified_at.replace("Z", "+00:00")
                     )
+                    if verified.tzinfo is None:
+                        # DB CURRENT_TIMESTAMP 产出的是 naive UTC 串
+                        verified = verified.replace(tzinfo=timezone.utc)
                     days_since_verified = (now - verified).days
                 except Exception:
                     pass
 
             # Compound decay: at least 1 day to avoid division by zero surprises.
             decay_factor = 0.99 ** max(days_since_verified, 1)
-            await self.ltm.repo.decay_fact_v2(fact.id, decay_factor)
+            items.append((fact.id, decay_factor))
 
             projected_freshness = fact.freshness * decay_factor
             if projected_freshness < self._decay_threshold:
-                await self.ltm.repo.update_fact_v2_status(fact.id, "decayed")
+                decayed_ids.append(fact.id)
                 logger.info(f"[lifecycle] fact {fact.id} decayed")
+
+        # #343: 批量写——单游标单 commit，替代逐条 decay_fact_v2 的 N+1
+        await self.ltm.repo.decay_facts_v2_batch(items, decayed_ids)
 
     async def merge_duplicates(self) -> None:
         """语义近重复合并（A5，2026-07-21）：同 category 的 active facts 按
