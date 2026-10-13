@@ -19,6 +19,9 @@ from tools.traits import (
 
 logger = logging.getLogger(__name__)
 
+# #372: 超时泄漏的工具线程累计计数（观测用）
+_LEAKED_TOOL_THREADS = 0
+
 TOOL_CALL_PATTERN = re.compile(r'<tool_call>(.*?)</tool_call>', re.DOTALL)
 THINK_PATTERN = re.compile(r'<think>.*?</think>', re.DOTALL)
 
@@ -209,7 +212,12 @@ def _run_tool_with_timeout(tool, args: dict[str, Any]) -> ToolResult:
         result = future.result(timeout=timeout)
     except FutureTimeoutError:
         elapsed = (time.perf_counter() - t0) * 1000
-        logger.warning(f"[tool] {tool.name()} timed out after {timeout}s")
+        # #372: 超时后卡死的工具线程会继续运行直到工具自身返回——累计计数
+        # 便于观测泄漏速率（每次超时泄漏一个活动线程，上限受 timeout≤300s 约束）
+        global _LEAKED_TOOL_THREADS
+        _LEAKED_TOOL_THREADS += 1
+        logger.warning(f"[tool] {tool.name()} timed out after {timeout}s "
+                       f"(leaked threads total: {_LEAKED_TOOL_THREADS})")
         future.cancel()  # 对已在运行的任务无效，但不阻塞
         executor.shutdown(wait=False)  # 不等待卡死的 worker，调用线程立即解脱
         return ToolResult.fail(
