@@ -47,40 +47,6 @@ class Repository:
             freshness=1.0, importance=importance,
             created_by="consolidation", embedding=embedding)
 
-    async def store_facts_bulk(self, facts: list[dict]) -> int:
-        """#161: 单 cursor 单事务批量 upsert（末尾一次 commit）。
-        Layer 1 完整上线：目标表改为 facts_v2，SQL 与 upsert_fact_v2 非
-        embedding 分支一致（含 #217 复活语义 status='active'）。consolidation
-        新提取的事实不带向量，embedding 由 _embed_new_items 统一回写。
-        facts 元素键：category/key/value 必填，confidence/importance/fact_type/source_turn 可选
-        （fact_type/source_turn 无对应列，忽略）。"""
-        if not facts:
-            return 0
-        logger.info(f"[db] store_facts_bulk: {len(facts)} facts")
-        async with self.db.cursor() as c:
-            for f in facts:
-                await c.execute("""
-                    INSERT INTO facts_v2 (category, fact_key, fact_value, confidence, stability,
-                                          freshness, importance, verification_count,
-                                          last_verified_at, created_by, session_id)
-                    VALUES (?, ?, ?, ?, 0.5, 1.0, ?, 1, CURRENT_TIMESTAMP, 'consolidation', ?)
-                    ON CONFLICT(session_id, category, fact_key) DO UPDATE SET
-                        fact_value = CASE WHEN excluded.confidence >= facts_v2.confidence
-                                          THEN excluded.fact_value ELSE facts_v2.fact_value END,
-                        confidence = MAX(facts_v2.confidence, excluded.confidence),
-                        stability = MAX(facts_v2.stability, excluded.stability),
-                        freshness = excluded.freshness,
-                        importance = MAX(facts_v2.importance, excluded.importance),
-                        status = 'active',
-                        verification_count = facts_v2.verification_count + 1,
-                        last_verified_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (f["category"], f["key"], f["value"],
-                      f.get("confidence", 1.0), f.get("importance", 0.5),
-                      self.session_id))
-            await self.db.commit()
-            return len(facts)
-
     async def search_facts(self, query: str = "", limit: int = 30) -> list[UserFact]:
         logger.debug(f"[db] search_facts: query='{query[:40]}' limit={limit}")
         async with self.db.cursor() as c:
