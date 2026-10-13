@@ -233,6 +233,19 @@ class SessionManager:
         self._open_lock = asyncio.Lock()
         # M-12: session 延迟销毁 — sid → 待执行的 remove asyncio.Task
         self._pending_remove: dict[str, asyncio.Task] = {}
+        # #349: 每 session 一把 asyncio.Lock——同 session 的并发消息
+        # （REST+WS 或 WS 快发）此前并发进 executor 跑 process_message，
+        # 共享的 short_term/turn_count/情绪状态会被并发写坏。
+        self._session_locks: dict[str, asyncio.Lock] = {}
+
+    def session_lock(self, session_id: str) -> asyncio.Lock:
+        """Return the per-session serialization lock (#349)."""
+        with self._lock:
+            lock = self._session_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._session_locks[session_id] = lock
+            return lock
 
     async def open(self):
         # L-04: 锁内判空，幂等 — 并发调用只真正执行一次

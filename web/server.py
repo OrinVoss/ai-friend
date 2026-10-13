@@ -186,8 +186,10 @@ async def chat_api(req: ChatRequest):
     _, agent = session_manager.get_or_create(req.session_id)
     # M-16: process_message 内部是同步流式 HTTP，放 executor 跑，
     # 避免阻塞事件循环（与 WS 路径 :423 一致）
+    # #349: 同 session 消息串行化——并发 process_message 会写坏共享状态
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(None, agent.process_message, req.message)
+    async with session_manager.session_lock(req.session_id):
+        response = await loop.run_in_executor(None, agent.process_message, req.message)
     logger.info(f"[rest] chat_done session={req.session_id} turn={agent.turn_count} emotion={agent.emotion} resp_len={len(response)}")
     return ChatResponse(
         response=response,
@@ -509,7 +511,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 _, agent = session_manager.get_or_create(session_id)
                 agent.last_activity_time = time.time()
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.process_message, content)
+                # #349: 同 session 消息串行化（与 REST 路径共用一把锁）
+                async with session_manager.session_lock(session_id):
+                    response = await loop.run_in_executor(None, agent.process_message, content)
                 await _send_segments(websocket, agent, response, agent.emotion)
 
             elif msg_type == "ping":
