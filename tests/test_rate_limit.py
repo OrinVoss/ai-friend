@@ -63,10 +63,21 @@ class TestRateLimiter(unittest.TestCase):
 
 class TestGetClientIp(unittest.TestCase):
     def test_forwarded_for(self):
+        # #332: XFF 仅在直接对端是可信代理时才采信
         req = MagicMock()
         req.headers = {"x-forwarded-for": "203.0.113.1, 70.41.3.18"}
         req.client = MagicMock(host="10.0.0.1")
-        self.assertEqual(get_client_ip(req), "203.0.113.1")
+        self.assertEqual(get_client_ip(req, trusted_proxies={"10.0.0.1"}),
+                         "203.0.113.1")
+
+    def test_forwarded_for_untrusted_peer_ignored(self):
+        # #332: 对端不在可信代理列表时，XFF 视为伪造，不采信
+        req = MagicMock()
+        req.headers = {"x-forwarded-for": "203.0.113.1"}
+        req.client = MagicMock(host="10.0.0.1")
+        self.assertEqual(get_client_ip(req), "10.0.0.1")
+        self.assertEqual(get_client_ip(req, trusted_proxies={"192.168.1.1"}),
+                         "10.0.0.1")
 
     def test_direct_client(self):
         req = MagicMock()

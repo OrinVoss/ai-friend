@@ -113,7 +113,8 @@ app = FastAPI(
             allow_headers=["Content-Type"],
             allow_credentials=False,
         ),
-        Middleware(RateLimitMiddleware, limiter=rate_limiter),
+        Middleware(RateLimitMiddleware, limiter=rate_limiter,
+                   trusted_proxies=set(getattr(config, 'trusted_proxies', []))),
     ],
 )
 

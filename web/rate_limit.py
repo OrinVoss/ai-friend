@@ -69,29 +69,36 @@ class RateLimiter:
         return self.is_allowed(client_ip, path, max_requests, window_seconds)
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP, honoring X-Forwarded-For when behind a trusted proxy."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return "unknown"
+def get_client_ip(request: Request, trusted_proxies: set[str] | None = None) -> str:
+    """Extract client IP.
+
+    #332: X-Forwarded-For 仅在直接对端是可信代理时才采信——否则任何
+    客户端自加该头即可伪造 IP、绕过限流。可信代理由 config.trusted_proxies
+    配置（默认空 = 不信任）。
+    """
+    peer = request.client.host if request.client else None
+    if trusted_proxies and peer in trusted_proxies:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return peer or "unknown"
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Middleware that enforces per-path rate limits."""
 
-    def __init__(self, app, limiter: RateLimiter | None = None):
+    def __init__(self, app, limiter: RateLimiter | None = None,
+                 trusted_proxies: set[str] | None = None):
         super().__init__(app)
         self.limiter = limiter or RateLimiter()
+        self._trusted_proxies = trusted_proxies
 
     async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
         if not path.startswith("/api/"):
             return await call_next(request)
 
-        client_ip = get_client_ip(request)
+        client_ip = get_client_ip(request, self._trusted_proxies)
         if not self.limiter.check(client_ip, path):
             logger.warning(f"[rate_limit] middleware blocked {client_ip} {request.method} {path}")
             return JSONResponse(
