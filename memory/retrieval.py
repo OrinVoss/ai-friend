@@ -40,9 +40,9 @@ class MemoryRetriever:
     def retrieve_for_query(self, query: str) -> MemoryContext:
         """Layer 1 + Layer 2: build context for a user message.
 
-        The whole operation runs under ``self._lock`` so that SQLite queries
-        issued through the sync wrappers are serialized. Do not wrap this
-        method in ``asyncio.gather`` or other concurrent primitives.
+        SQLite 访问部分在 ``self._lock`` 下串行化；#348 起 LLM rerank
+        移出锁外——持锁做阻塞 LLM 调用会让所有其他检索全局排队。
+        Do not wrap this method in ``asyncio.gather`` or other concurrent primitives.
         """
         with self._lock:
             logger.info(f"[retrieval] query_len={len(query)}")
@@ -71,18 +71,6 @@ class MemoryRetriever:
                 candidates = self._score_facts(hot_facts, keywords, query)
             candidates = candidates[:30]
 
-            # LLM reranking if > 15 candidates
-            if len(candidates) > 15 and self.llm_rerank_fn and query.strip():
-                selected_indices = self._llm_rerank(query, candidates)
-                if selected_indices is not None:
-                    candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
-
-            # Truncate to 15 if no rerank was applied (or rerank failed)
-            if len(candidates) > 15:
-                candidates = candidates[:15]
-
-            selected_facts = candidates[:10]
-
             # Search experiences (semantic if available)
             if embed_ok:
                 keyword_experiences = self._search_experiences_semantic(
@@ -94,12 +82,24 @@ class MemoryRetriever:
                 keyword_experiences, recent_experiences
             )[:5]
 
-            return MemoryContext(
-                facts=selected_facts,
-                experiences=all_experiences,
-                reflections=reflections[:3],
-                relationship=relationship,
-            )
+        # #348: LLM rerank 在锁外执行——纯 LLM 调用，只消费已取出的 candidates
+        if len(candidates) > 15 and self.llm_rerank_fn and query.strip():
+            selected_indices = self._llm_rerank(query, candidates)
+            if selected_indices is not None:
+                candidates = [candidates[i] for i in selected_indices if i < len(candidates)]
+
+        # Truncate to 15 if no rerank was applied (or rerank failed)
+        if len(candidates) > 15:
+            candidates = candidates[:15]
+
+        selected_facts = candidates[:10]
+
+        return MemoryContext(
+            facts=selected_facts,
+            experiences=all_experiences,
+            reflections=reflections[:3],
+            relationship=relationship,
+        )
 
     def retrieve_by_recall_tag(self, text: str) -> Optional[str]:
         """Layer 3: check for [回忆: xxx] tag and return memory snippet."""
