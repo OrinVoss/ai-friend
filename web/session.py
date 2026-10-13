@@ -405,12 +405,17 @@ class SessionManager:
         return self._active_ws.get(session_id)
 
     def cleanup_old(self, max_sessions: int = 50, ttl_seconds: int = 86400) -> None:
-        """Remove idle sessions beyond max or TTL. (#148: 24h TTL; SN-016 wire-up)"""
+        """Remove idle sessions beyond max or TTL. (#148: 24h TTL; SN-016 wire-up)
+
+        #362: 有活跃 WebSocket 连接的 session 不按 TTL 驱逐——proactive
+        driver 还在跑、用户可能正看着页面，只是长时间没发消息。
+        """
         now = time.time()
         with self._lock:
             expired = [
                 sid for sid, agent in self._sessions.items()
                 if now - agent.last_activity > ttl_seconds
+                and sid not in self._active_ws
             ]
             for sid in expired:
                 agent = self._sessions.pop(sid, None)
@@ -425,7 +430,11 @@ class SessionManager:
                 self._active_ws.pop(sid, None)
                 logger.info(f"Session expired (TTL): {sid}")
             while len(self._sessions) > max_sessions:
-                oldest = next(iter(self._sessions))
+                # #362: 超出上限时同样跳过有活跃连接的 session
+                candidates = [s for s in self._sessions if s not in self._active_ws]
+                if not candidates:
+                    break
+                oldest = candidates[0]
                 agent = self._sessions.pop(oldest, None)
                 if agent is not None:
                     try:
