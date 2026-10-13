@@ -637,9 +637,12 @@ class Database:
             backup_path = os.path.join(backups_dir, f"{stem}.{ts}-{n}.db")
             n += 1
         try:
-            await self.commit()  # flush pending writes before the snapshot
-            escaped = backup_path.replace("'", "''")
+            # #353: commit 移入 cursor 锁内——锁外 commit 可能把另一线程
+            # 正在进行（已持锁、未完成）的事务提交成半状态。锁内无他人
+            # 在写，此时 commit 只 flush 自己的 pending writes。
             async with self.cursor() as c:
+                await self.commit()  # flush pending writes before the snapshot
+                escaped = backup_path.replace("'", "''")
                 await c.execute(f"VACUUM INTO '{escaped}'")
             size_kb = os.path.getsize(backup_path) // 1024
             logger.info(f"[db] backup created: {backup_path} ({size_kb} KB)")
