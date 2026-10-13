@@ -44,6 +44,10 @@ class ConsoleInterface:
         self._history_file = history_file
         self.display: "DisplayEngine | None" = None
         self.session: "PromptSession | None" = None
+        # #344: 常驻单线程 executor——此前每次 read_input 新建/销毁
+        # ThreadPoolExecutor，每轮对话白白创建一个线程。
+        self._prompt_executor: ThreadPoolExecutor | None = None
+        self._prompt_executor_lock = threading.Lock()
 
     def start(self) -> None:
         import sys
@@ -102,8 +106,11 @@ class ConsoleInterface:
         except RuntimeError:
             with _patch_stdout():
                 return self.session.prompt(prompt_text)
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(self._prompt_blocking, prompt_text).result()
+        with self._prompt_executor_lock:
+            if self._prompt_executor is None:
+                self._prompt_executor = ThreadPoolExecutor(max_workers=1)
+            pool = self._prompt_executor
+        return pool.submit(self._prompt_blocking, prompt_text).result()
 
     def _prompt_blocking(self, prompt_text) -> str:
         """在无事件循环的 worker 线程里执行同步 prompt（read_input 的桥）。"""
