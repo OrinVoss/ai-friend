@@ -135,7 +135,11 @@ class GlobTool(Tool):
 
         results = []
         file_count = 0  # SR-003: guard against unbounded os.walk
-        for dirpath, _, fnames in os.walk(root):
+        for dirpath, dirnames, fnames in os.walk(root):
+            # #334: 与 grep 一致跳过 .git/node_modules/.venv 等大目录——
+            # 否则 10k 文件上限被无关文件吃光，真实结果被截断且缓存 60s。
+            # 原地改 dirnames 可阻止 os.walk 下钻。
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_COMPONENTS]
             rel_dir = os.path.relpath(dirpath, root)
             for fname in fnames:
                 file_count += 1
