@@ -97,10 +97,16 @@ class EmbeddingEngine:
                         vecs.append((idx, np.zeros(self._dim, dtype=np.float32)))
                     logger.debug(f"[embed] all empty, {len(idxs)} zero vectors in {elapsed:.0f}ms")
         except Exception as e:
-            # P0: API failed — skip uncached texts, use only cached results
-            logger.warning(f"[embed] API failed: {e}, using {len(vecs)}/{len(texts)} cached")
+            # P0: API failed — fall back to cached results where possible.
+            # #323: 必须为未编码成功的文本补零向量，保证输出与输入等长、
+            # 索引对齐，否则下游（如 FactChecker 的 best_idx）会错位到错误事实。
+            logger.warning(f"[embed] API failed: {e}, zero-filling {len(texts) - len(vecs)}/{len(texts)} texts")
             if not vecs:
-                raise  # nothing cached, must fail
+                raise  # nothing cached at all — fail loudly (self-check relies on this)
+            present = {i for i, _ in vecs}
+            for i in range(len(texts)):
+                if i not in present:
+                    vecs.append((i, np.zeros(self._dim, dtype=np.float32)))
 
         if not vecs:
             return np.empty((0, self._dim), dtype=np.float32)
