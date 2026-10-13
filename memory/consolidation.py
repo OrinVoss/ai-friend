@@ -426,12 +426,25 @@ class MemoryConsolidator:
         # 保持在写入前逐条检测：get_similar_facts 读 facts_v2，此时新事实
         # 尚未落库，检测语义与旧流程（先检测后批量写）一致。
         # Bug 3（2026-07-20）：embedding 候选矛盾先过 LLM 复核，复述/近义不 decay
+        # #367: 每批 LLM 复核调用封顶——一批 N 条事实最坏 N 次 60s 超时的
+        # 复核调用会把 consolidation 拖得很长。超限后保留 embedding 原判。
+        max_verify_calls = 3
+        verify_calls = 0
         if self._fact_checker and new_facts:
             for cat, key, val, conf, _imp in new_facts:
                 similar = self.ltm.get_similar_facts(cat, key, limit=5)
                 new_f = UserFact(category=cat, fact_key=key, fact_value=val, confidence=conf)
+
+                def _capped_verify(nf, of):
+                    nonlocal verify_calls
+                    if verify_calls >= max_verify_calls:
+                        logger.info("[fact_check] batch verify cap reached, keep embedding verdict")
+                        return True
+                    verify_calls += 1
+                    return self._verify_contradiction_llm(nf, of)
+
                 old_f = self._fact_checker.detect_contradiction(
-                    new_f, similar, verify_fn=self._verify_contradiction_llm)
+                    new_f, similar, verify_fn=_capped_verify)
                 if old_f:
                     self._fact_checker.resolve(new_f, old_f, self.ltm)  # #207: pass ltm for sync wrappers
 
